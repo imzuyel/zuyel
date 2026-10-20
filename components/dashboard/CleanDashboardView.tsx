@@ -55,6 +55,7 @@ import { ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicStructure";
 import { BorderGlowCard, AnimatedCounter, GlowButton } from "@/components/ui/animation-effects";
 import { ServerDatabaseConsoleSVG, InstitutionTechnicalSealSVG } from "@/components/ui/animated-svgs";
 import QuickQuizModal from "@/components/quiz/QuickQuizModal";
+import { safeFetchJson } from "@/lib/safeFetch";
 
 interface CleanDashboardViewProps {
   onNavigate: (tab: string, extra?: any) => void;
@@ -164,50 +165,52 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
     totalClasses: 7,
     activeSession: "2026",
     activeQuizzesCount: 3,
-    totalFaculty: 32,
+    totalFaculty: 48,
   });
+
+  const [activityLog, setActivityLog] = useState(INITIAL_ACTIVITY_LOG);
 
   useEffect(() => {
     setIsMounted(true);
 
-    // Fetch live student count from DB
-    fetch("/api/students")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.total) {
-          const total = data.total;
-          const present = Math.round(total * 0.952);
-          const absent = Math.round(total * 0.038);
-          const late = total - present - absent;
-          setStats((prev) => ({
-            ...prev,
-            totalStudents: total,
-            todayAttendance: {
-              total,
-              present,
-              absent,
-              late,
-              percentage: Number(((present / total) * 100).toFixed(1)),
-            },
-          }));
-        }
-      })
-      .catch(() => {});
-
-    // Fetch live active quiz sessions
-    fetch("/api/live-quizzes/sessions")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.sessions)) {
-          const active = data.sessions.filter(
-            (s: any) => s.status === "live" || s.status === "lobby"
-          ).length;
-          if (active > 0) {
-            setStats((prev) => ({ ...prev, activeQuizzesCount: active }));
+    // Single aggregated call to /api/dashboard/summary eliminates scattered waterfall requests
+    safeFetchJson<any>("/api/dashboard/summary")
+      .then((res) => {
+        if (res.data) {
+          const kpi = res.data.kpi;
+          if (kpi) {
+            setStats({
+              totalStudents: kpi.totalStudents || 1240,
+              todayAttendance: {
+                total: kpi.totalStudents || 1240,
+                present: kpi.presentStudentsCount || 1180,
+                absent: kpi.absentStudentsCount || 60,
+                late: 14,
+                percentage: kpi.todayAttendancePercent || 95.2,
+              },
+              totalClasses: 7,
+              activeSession: "2026",
+              activeQuizzesCount: kpi.activeLiveQuizzesCount || 1,
+              totalFaculty: kpi.totalFaculty || 48,
+            });
+          }
+          if (Array.isArray(res.data.recentAuditLogs) && res.data.recentAuditLogs.length > 0) {
+            setActivityLog(
+              res.data.recentAuditLogs.map((log: any, idx: number) => ({
+                id: `log-${log.id || idx}`,
+                title: log.detailsBangla || log.details || "নিরাপত্তা ইভেন্ট",
+                desc: `${log.actorName || "সিস্টেম"} • ${log.routePath || "/admin"}`,
+                time: log.timestamp ? new Date(log.timestamp).toLocaleTimeString("bn-BD") : "কিছুক্ষণ আগে",
+                type: log.status === "DENIED" ? "security" : "attendance",
+                icon: log.status === "DENIED" ? ShieldAlert : ShieldCheck,
+                color: log.status === "DENIED" ? "text-rose-400 bg-rose-500/10 border-rose-500/20" : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                badge: log.status || "অডিট",
+              }))
+            );
           }
         }
       })
-      .catch(() => {});
+      .catch((err) => console.warn("Dashboard summary fetch failed gracefully:", err));
   }, []);
 
   return (
@@ -793,7 +796,7 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
           </div>
 
           <div className="space-y-3">
-            {INITIAL_ACTIVITY_LOG.map((item) => {
+            {activityLog.map((item: any) => {
               const IconComp = item.icon;
               return (
                 <div

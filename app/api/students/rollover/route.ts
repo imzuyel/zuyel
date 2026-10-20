@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { LifecycleEngine } from "@/lib/lifecycleEngine";
 import { institutionalDb } from "@/lib/database";
+import { requireAdmin } from "@/lib/serverAuthGuard";
 
 export async function POST(req: Request) {
+  const auth = requireAdmin(req, "/api/students/rollover");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const { action, sourceYear, targetYear, studentIds, classMappings, performedBy, options } = body;

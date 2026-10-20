@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { institutionalDb } from "@/lib/database";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 export async function GET(req: NextRequest) {
   try {
@@ -280,29 +281,29 @@ export async function GET(req: NextRequest) {
       return true;
     });
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        overallAverageScore: 73,
-        totalQuizzesEvaluated: 564 + allDbAttempts.length,
-        totalStudentsEnrolled,
-        totalStudentsParticipated,
-        overallParticipationRatePercentage,
-        overallLessonCompletionRatePercentage,
-        totalWeakTopicsTracked: frequentlyMissedConcepts.length + 9,
-        activeRemedialLessonsCount: 6,
-        classesBreakdown: filteredClasses,
-        lessonCompletions: filteredLessons,
-        frequentlyMissedConcepts,
-        commonMistakes,
-        timestamp: new Date().toISOString(),
+    const resultData = {
+      overallAverageScore: 73,
+      totalQuizzesEvaluated: 564 + allDbAttempts.length,
+      totalStudentsEnrolled,
+      totalStudentsParticipated,
+      overallParticipationRatePercentage,
+      overallLessonCompletionRatePercentage,
+      totalWeakTopicsTracked: frequentlyMissedConcepts.length + 9,
+      activeRemedialLessonsCount: 6,
+      classesBreakdown: filteredClasses,
+      lessonCompletions: filteredLessons,
+      frequentlyMissedConcepts,
+      commonMistakes,
+      timestamp: new Date().toISOString(),
+    };
+
+    return apiSuccess(resultData, {
+      extraKeys: {
+        data: resultData,
       },
     });
   } catch (error: any) {
     console.error("Error in teacher analytics API:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch teacher analytics" },
-      { status: 500 }
-    );
+    return apiError(error, { fallbackMessage: "শিক্ষক অ্যানালিটিক্স লোড করতে সমস্যা হয়েছে" });
   }
 }

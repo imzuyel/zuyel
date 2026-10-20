@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { examinationEngine } from "@/lib/examinationEngine";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { verifyBackendAuthorization, requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: Request) {
+  const auth = requireTeacherOrAdmin(req, "/api/examination/marks");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const examId = Number(searchParams.get("examId"));

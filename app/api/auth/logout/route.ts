@@ -6,6 +6,14 @@ export async function POST(request: NextRequest) {
     message: "সফলভাবে লগআউট করা হয়েছে।",
   });
 
+  // Clear authentication token
+  response.cookies.set("pgtsc_auth_token", "", {
+    path: "/",
+    maxAge: 0,
+    sameSite: "lax",
+    httpOnly: true,
+  });
+
   // Reset cookies to student guest mode
   response.cookies.set("pgtsc_user_role", "student", {
     path: "/",

@@ -75,6 +75,18 @@ export function normalizeRole(roleRaw?: string | null): Role {
   return "student";
 }
 
+export const STUDENT_ROLES: Role[] = ["student"];
+export const PUBLIC_ROLES: Role[] = ["parent", "guardian"];
+export const AUTHORIZED_STAFF_ROLES = new Set<string>([
+  "super_admin",
+  "principal",
+  "vice_principal",
+  "admin",
+  "teacher",
+  "accountant",
+  "staff",
+]);
+
 /**
  * Checks if a role is an absolute supreme administrator
  */
@@ -96,6 +108,37 @@ export function isAdministrator(role: Role | string): boolean {
  */
 export function isStudent(role: Role | string): boolean {
   return normalizeRole(role) === "student";
+}
+
+/**
+ * Checks if a role is a teacher or academic faculty
+ */
+export function isTeacher(role: Role | string): boolean {
+  return normalizeRole(role) === "teacher";
+}
+
+/**
+ * Checks if a role is an accountant or staff member
+ */
+export function isStaff(role: Role | string): boolean {
+  const norm = normalizeRole(role);
+  return STAFF_ROLES.includes(norm);
+}
+
+/**
+ * Checks if a role is any authorized faculty, admin, or staff persona
+ */
+export function isAuthorizedStaff(role: Role | string): boolean {
+  const norm = normalizeRole(role);
+  return AUTHORIZED_STAFF_ROLES.has(norm);
+}
+
+/**
+ * Checks if a role is student, parent, or guardian (non-staff public)
+ */
+export function isStudentOrPublic(role: Role | string): boolean {
+  const norm = normalizeRole(role);
+  return norm === "student" || norm === "parent" || norm === "guardian";
 }
 
 // -------------------------------------------------------------

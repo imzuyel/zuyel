@@ -151,3 +151,103 @@ export function toBengaliNumerals(num: number | string): string {
   const bnDigits = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
   return String(num).replace(/[0-9]/g, (digit) => bnDigits[parseInt(digit, 10)]);
 }
+
+/**
+ * Sanitizes raw error objects/strings to prevent database passwords, connection
+ * URLs, Prisma internal engine errors, and server absolute paths from leaking to clients.
+ */
+export function sanitizeErrorMessage(
+  error: unknown,
+  fallbackMessage: string = "An unexpected error occurred. Please try again."
+): string {
+  if (!error) return fallbackMessage;
+
+  let raw = "";
+  if (typeof error === "string") {
+    raw = error;
+  } else if (error instanceof Error) {
+    raw = error.message;
+  } else if (typeof error === "object" && error !== null && "message" in error) {
+    raw = String((error as any).message);
+  } else {
+    raw = String(error);
+  }
+
+  // Mask sensitive database connection strings (mysql://, postgresql://, mongodb://, etc.)
+  raw = raw.replace(
+    /(?:mysql|postgresql|postgres|mongodb|sqlite|redis):\/\/[^\s@]+@[^\s/]+/gi,
+    "[REDACTED_DATABASE_URL]"
+  );
+
+  // Mask absolute filesystem paths
+  raw = raw.replace(/[a-zA-Z]:\\[^:\n\r]+(?=:\d+|\s|$)/g, "[REDACTED_PATH]");
+  raw = raw.replace(/\/(?:home|var|usr|etc|Users|tmp)\/[^\s:]+/g, "[REDACTED_PATH]");
+
+  // Known Prisma / database operational errors
+  if (
+    raw.includes("Can't reach database server") ||
+    raw.includes("Timed out fetching a new connection") ||
+    raw.includes("ECONNREFUSED") ||
+    raw.includes("ETIMEDOUT") ||
+    raw.includes("P1001") ||
+    raw.includes("P1002")
+  ) {
+    return "Database service is temporarily unreachable. Please try again shortly.";
+  }
+
+  if (raw.includes("P2002") || raw.includes("Unique constraint failed")) {
+    return "A record with this identifier or unique value already exists.";
+  }
+
+  if (
+    raw.includes("P2025") ||
+    raw.includes("Record to update not found") ||
+    raw.includes("Record to delete does not exist")
+  ) {
+    return "The requested record was not found.";
+  }
+
+  if (raw.includes("P2003") || raw.includes("Foreign key constraint failed")) {
+    return "The operation references a related record that does not exist or is currently restricted.";
+  }
+
+  // If the error message still contains Prisma internal stack keywords, do not leak to client
+  if (
+    raw.includes("PrismaClient") ||
+    raw.includes("prisma.") ||
+    raw.includes("Query engine") ||
+    raw.includes("Invalid `prisma.")
+  ) {
+    return "A database operation error occurred. The system recorded this event.";
+  }
+
+  // Limit error length to prevent payload bloat
+  if (raw.length > 250) {
+    return raw.slice(0, 247) + "...";
+  }
+
+  return raw || fallbackMessage;
+}
+
+export interface ApiErrorPayload {
+  success: false;
+  error: string;
+  code?: string;
+  timestamp: string;
+}
+
+/**
+ * Creates a standardized sanitized API error payload object.
+ */
+export function formatApiErrorPayload(
+  error: unknown,
+  fallbackMessage: string = "An unexpected server error occurred",
+  code?: string
+): ApiErrorPayload {
+  return {
+    success: false,
+    error: sanitizeErrorMessage(error, fallbackMessage),
+    ...(code ? { code } : {}),
+    timestamp: new Date().toISOString(),
+  };
+}

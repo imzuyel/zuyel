@@ -4,6 +4,7 @@ import { LanguageProvider } from "@/context/LanguageContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { LoadingProvider } from "@/context/LoadingContext";
+import { ToastProvider } from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
   title: "Panchagarh Government Technical School & College ERP",
@@ -44,7 +45,9 @@ export default function RootLayout({
         <LoadingProvider>
           <AuthProvider>
             <ThemeProvider>
-              <LanguageProvider>{children}</LanguageProvider>
+              <LanguageProvider>
+                <ToastProvider>{children}</ToastProvider>
+              </LanguageProvider>
             </ThemeProvider>
           </AuthProvider>
         </LoadingProvider>

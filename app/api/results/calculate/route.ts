@@ -1,10 +1,30 @@
 import { NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { ResultEngine } from "@/lib/resultEngine";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
+import { isAdministrator, isSupremeAdmin } from "@/lib/rbac";
 
 export async function POST(req: Request) {
+  const auth = requireTeacherOrAdmin(req, "/api/results/calculate");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { examId, classId, section, tradeId, academicYear, action } = await req.json();
+
+    // Sensitive state mutations require Admin authorization
+    if (["publish", "lock", "correct"].includes(action)) {
+      if (!isAdministrator(auth.identity.userRole) && !isSupremeAdmin(auth.identity.userRole)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "অননুমোদিত: কেবলমাত্র অ্যাডমিন বা অধ্যক্ষ ফলাফল প্রকাশ, লক বা সংশোধন করতে পারেন।",
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     if (action === "validate") {
       const validation = ResultEngine.validateExamData(Number(examId), Number(classId));

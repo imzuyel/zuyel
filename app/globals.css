@@ -2,18 +2,103 @@
 
 @custom-variant dark (&:where(.dark, .dark *, [data-mode="dark"], [data-mode="dark"] *));
 
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --font-sans: 'Inter', 'Hind Siliguri', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-bangla: 'Hind Siliguri', 'SolaimanLipi', 'Noto Sans Bengali', 'Nikosh', 'Kalpurush', system-ui, sans-serif;
+  
+  /* Surface Tokens (Light Mode) */
+  --surface-canvas: #f8fafc;
+  --surface-card: #ffffff;
+  --surface-card-muted: #f1f5f9;
+  --surface-border: rgba(226, 232, 240, 0.85);
+  --surface-border-subtle: rgba(241, 245, 249, 0.9);
+  --ring-focus: rgba(16, 185, 129, 0.25);
+  --border-focus: #059669;
+}
+
+.dark, [data-mode="dark"] {
+  /* Surface Tokens (Dark Mode) */
+  --surface-canvas: #020617;
+  --surface-card: #0f172a;
+  --surface-card-muted: #1e293b;
+  --surface-border: rgba(51, 65, 85, 0.7);
+  --surface-border-subtle: rgba(30, 41, 59, 0.8);
+  --ring-focus: rgba(16, 185, 129, 0.35);
+  --border-focus: #10b981;
+}
+
 /* Strict Viewport & Anti-Horizontal Scroll Rules */
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
   box-sizing: border-box;
+  font-family: var(--font-sans);
+  line-height: 1.6;
+}
+
+[lang="bn"],
+.font-bangla,
+.bangla-text {
+  font-family: var(--font-bangla);
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+}
+
+/* Prevent Matra & Fala clipping */
+button, .btn, .badge, th, td {
+  overflow: visible;
+}
+
+/* Surface Hierarchy Utilities */
+.surface-canvas {
+  background-color: var(--surface-canvas);
+}
+
+.surface-card {
+  background-color: var(--surface-card);
+  border: 1px solid var(--surface-border);
+}
+
+.surface-card-muted {
+  background-color: var(--surface-card-muted);
+  border: 1px solid var(--surface-border-subtle);
+}
+
+/* Hairline 1px border utility */
+.border-hairline {
+  border-width: 1px;
+  border-color: var(--surface-border);
+}
+
+/* Accessible focus ring */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--ring-focus);
 }
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* Reduced Motion Mode Support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Custom Animation Keyframes & Visual Effects System */

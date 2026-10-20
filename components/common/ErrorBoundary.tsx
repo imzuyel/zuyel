@@ -1,7 +1,9 @@
 "use client";
 
 import React, { Component, ErrorInfo, ReactNode } from "react";
-import { AlertTriangle, RotateCcw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface Props {
   children?: ReactNode;
@@ -21,7 +23,6 @@ export default class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    // Update state so the next render will show the fallback UI.
     return { hasError: true, error };
   }
 
@@ -69,31 +70,33 @@ export default class ErrorBoundary extends Component<Props, State> {
         this.state.error?.message?.toLowerCase().includes("chunkloaderror");
 
       return (
-        <div className="p-6 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-2xl space-y-4 text-center">
-          <div className="flex items-center justify-center gap-2 text-rose-600 dark:text-rose-400">
-            <AlertTriangle className="w-8 h-8 animate-bounce" />
-            <span className="text-sm font-black uppercase tracking-wider">
-              {isChunkError ? "আপডেট লোডিং বাফার (New Build Loaded)" : "রেন্ডারিং ত্রুটি (Rendering Error)"}
-            </span>
-          </div>
-          <div className="space-y-1">
-            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-              {isChunkError
-                ? "অ্যাপ্লিকেশনের নতুন সংস্করণ প্রস্তুত হয়েছে। পেজটি রিফ্রেশ করুন।"
-                : `${this.props.name || "কম্পোনেন্টটি"} লোড করতে সাময়িক ত্রুটি হয়েছে।`}
-            </h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto line-clamp-2 font-mono">
-              {this.state.error?.message || "অজানা ত্রুটি (Unknown internal error)"}
-            </p>
-          </div>
-          <button
-            onClick={this.handleReset}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs transition-all shadow-md shadow-rose-600/20 cursor-pointer"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>{isChunkError ? "পেজ রিফ্রেশ করুন" : "পুনরায় রিলোড করুন"}</span>
-          </button>
-        </div>
+        <Card className="border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 my-4">
+          <CardContent className="p-6 flex flex-col items-center justify-center text-center space-y-4 pt-6">
+            <div className="w-12 h-12 rounded-full bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="w-6 h-6 animate-pulse" />
+            </div>
+
+            <div className="space-y-1">
+              <h4 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                {isChunkError
+                  ? "নতুন সংস্করণ প্রস্তুত হয়েছে (New Version Available)"
+                  : `${this.props.name || "কম্পোনেন্টটি"} লোড করতে সাময়িক ত্রুটি হয়েছে`}
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto line-clamp-2 font-mono">
+                {this.state.error?.message || "অজানা অভ্যন্তরীণ সমস্যা (Unknown render exception)"}
+              </p>
+            </div>
+
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={this.handleReset}
+              leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+            >
+              {isChunkError ? "পেজ রিফ্রেশ করুন (Reload)" : "পুনরায় চেষ্টা করুন (Try Again)"}
+            </Button>
+          </CardContent>
+        </Card>
       );
     }
 

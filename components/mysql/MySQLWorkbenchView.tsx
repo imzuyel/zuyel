@@ -7,31 +7,31 @@ import {
   Play,
   Download,
   Server,
-  CheckCircle2,
-  AlertCircle,
+  ShieldAlert,
   Table as TableIcon,
   RefreshCw,
   ExternalLink,
-  Code,
-  Layers,
   FileCode,
   ShieldCheck,
-  Cpu,
+  Lock,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { isAdministrator, isSupremeAdmin } from "@/lib/rbac";
 
 export default function MySQLWorkbenchView() {
-  const { showToast } = useAuth();
+  const { currentUser, showToast } = useAuth();
+  const role = currentUser?.role || "student";
   const [statusData, setStatusData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedTable, setSelectedTable] = useState<string>("students");
   const [tableRows, setTableRows] = useState<any[]>([]);
   const [loadingTable, setLoadingTable] = useState(false);
 
-  // SQL Console
+  // SQL Console (Read-Only)
   const [sqlQuery, setSqlQuery] = useState("SELECT * FROM students LIMIT 10;");
   const [queryResult, setQueryResult] = useState<any>(null);
   const [runningQuery, setRunningQuery] = useState(false);
+  const [securityWarning, setSecurityWarning] = useState<string | null>(null);
 
   // Active view mode
   const [activeMode, setActiveMode] = useState<"tables" | "query" | "config" | "guide">("tables");
@@ -45,7 +45,14 @@ export default function MySQLWorkbenchView() {
     phpMyAdminUrl: "http://localhost:8080/phpmyadmin",
   });
 
+  const isAdmin = isAdministrator(role) || isSupremeAdmin(role);
+
   useEffect(() => {
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
+
     let ignore = false;
     fetch("/api/mysql-workbench?action=status")
       .then((res) => res.json())
@@ -74,11 +81,12 @@ export default function MySQLWorkbenchView() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
-    if (!selectedTable) return;
+    if (!isAdmin || !selectedTable) return;
     let ignore = false;
+    setLoadingTable(true);
     fetch(`/api/mysql-workbench?action=table_data&table=${selectedTable}`)
       .then((res) => res.json())
       .then((json) => {
@@ -99,7 +107,7 @@ export default function MySQLWorkbenchView() {
     return () => {
       ignore = true;
     };
-  }, [selectedTable]);
+  }, [selectedTable, isAdmin]);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -140,8 +148,29 @@ export default function MySQLWorkbenchView() {
     }
   };
 
+  const handleQueryChange = (text: string) => {
+    setSqlQuery(text);
+    const lower = text.toLowerCase();
+    const destructive = ["drop", "delete", "alter", "truncate", "insert", "update", "create", "grant", "revoke"];
+    const found = destructive.find((k) => new RegExp(`\\b${k}\\b`, "i").test(lower));
+    if (found) {
+      setSecurityWarning(`সতর্কতা: '${found.toUpperCase()}' এর মতো পরিবর্তনশীল বা ক্ষতিকর কমান্ড চালানো সম্পূর্ণ নিষিদ্ধ।`);
+    } else {
+      setSecurityWarning(null);
+    }
+  };
+
   const handleRunQuery = async () => {
     if (!sqlQuery.trim()) return;
+
+    const lower = sqlQuery.toLowerCase();
+    const destructive = ["drop", "delete", "alter", "truncate", "insert", "update", "create", "grant", "revoke"];
+    const found = destructive.find((k) => new RegExp(`\\b${k}\\b`, "i").test(lower));
+    if (found) {
+      showToast(`নিরাপত্তা ত্রুটি: '${found.toUpperCase()}' কমান্ড নিষিদ্ধ। শুধুমাত্র SELECT অনুমোদিত।`, "error");
+      return;
+    }
+
     setRunningQuery(true);
     try {
       const res = await fetch("/api/mysql-workbench", {
@@ -157,7 +186,7 @@ export default function MySQLWorkbenchView() {
       if (json.success) {
         showToast(`SQL কোয়েরি সফল (${json.executionTimeMs} ms)`, "success");
       } else {
-        showToast(json.message || "Query Error", "error");
+        showToast(json.error || json.message || "Query Error", "error");
       }
     } catch (err: any) {
       showToast("SQL কোয়েরি চালাতে ত্রুটি হয়েছে", "error");
@@ -168,6 +197,10 @@ export default function MySQLWorkbenchView() {
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isSupremeAdmin(role)) {
+      showToast("কেবলমাত্র সুপার অ্যাডমিন কনফিগারেশন পরিবর্তন করতে পারেন", "error");
+      return;
+    }
     try {
       const res = await fetch("/api/mysql-workbench", {
         method: "POST",
@@ -181,18 +214,34 @@ export default function MySQLWorkbenchView() {
       if (json.success) {
         showToast("MySQL সংযোগ কনফিগারেশন সংরক্ষিত হয়েছে!", "success");
         fetchStatus();
+      } else {
+        showToast(json.error || "কনফিগারেশন সংরক্ষণ ব্যর্থ", "error");
       }
     } catch (err) {
       showToast("কনফিগারেশন সংরক্ষণ ব্যর্থ", "error");
     }
   };
 
+  if (!isAdmin) {
+    return (
+      <div className="p-8 bg-white dark:bg-slate-900 rounded-3xl border border-rose-200 dark:border-rose-900/40 text-center space-y-4">
+        <div className="w-16 h-16 mx-auto bg-rose-100 dark:bg-rose-950/60 rounded-2xl flex items-center justify-center text-rose-600">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-black text-slate-900 dark:text-white">অননুমোদিত প্রবেশাধিকার (Access Restricted)</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto">
+          ডাটাবেস ও সিস্টেম স্ট্যাটাস ওয়ার্কবেঞ্চ কেবলমাত্র প্রাতিষ্ঠানিক অ্যাডমিনিস্ট্রেটরদের জন্য সংরক্ষিত (Zero-Trust Security Policy)।
+        </p>
+      </div>
+    );
+  }
+
   const sampleQueries = [
-    { label: "সকল শিক্ষার্থী", sql: "SELECT * FROM students;" },
-    { label: "কর্মকর্তা ও শিক্ষকমণ্ডলী", sql: "SELECT * FROM faculty_staff;" },
-    { label: "কারিগরি ট্রেডসমূহ", sql: "SELECT * FROM technical_trades;" },
-    { label: "ক্লাস ও ল্যাব রুটিন", sql: "SELECT * FROM class_routines;" },
-    { label: "সকল টেবিল তালিকা", sql: "SHOW TABLES;" },
+    { label: "সকল শিক্ষার্থী", sql: "SELECT * FROM students LIMIT 10;" },
+    { label: "কর্মকর্তা ও শিক্ষক", sql: "SELECT * FROM faculty_staff LIMIT 10;" },
+    { label: "কারিগরি ট্রেড", sql: "SELECT * FROM technical_trades;" },
+    { label: "ক্লাস রুটিন", sql: "SELECT * FROM class_routines LIMIT 10;" },
+    { label: "টেবিল তালিকা", sql: "SHOW TABLES;" },
   ];
 
   return (
@@ -200,15 +249,15 @@ export default function MySQLWorkbenchView() {
       {/* MySQL & phpMyAdmin Studio Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 p-6 sm:p-8 rounded-3xl text-white shadow-xl border border-indigo-900/50 flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative overflow-hidden">
         <div className="relative z-10 space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-amber-300 text-xs font-bold backdrop-blur-xs border border-white/20">
-            <Database className="w-3.5 h-3.5 text-amber-400" />
-            <span>MySQL 8.0 & phpMyAdmin 5.2 Studio</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-emerald-300 text-xs font-bold backdrop-blur-xs border border-white/20">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>নিরাপদ সিস্টেম ও ডাটাবেস হেলথ মনিটর (Read-Only Mode)</span>
           </div>
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white">
-            MySQL / phpMyAdmin ডাটাবেস ওয়ার্কবেঞ্চ
+            ডাটাবেস হেলথ ও সিস্টেম স্ট্যাটাস ওয়ার্কবেঞ্চ
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-            ডাটাবেস টেবিল ব্রাউজার, লাইভ SQL কোয়েরি এডিটর এবং সরাসরি phpMyAdmin-এ ইমপোর্টযোগ্য .sql ডাম্প এক্সপোর্ট সুবিধা
+            ডাটাবেস টেবিল ব্রাউজার, মেমোরি হেলথ ও রিড-অনলি কুয়েরি পরিদর্শক। উৎপাদনশীল পরিবেশের নিরাপত্তায় ক্ষতিকর SQL পরিবর্তন স্থায়ীভাবে লকড করা হয়েছে।
           </p>
         </div>
 
@@ -220,7 +269,7 @@ export default function MySQLWorkbenchView() {
             className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 flex items-center gap-2 transition-all transform hover:scale-105"
           >
             <Download className="w-4 h-4" />
-            <span>phpMyAdmin .SQL ডাম্প ডাউনলোড</span>
+            <span>.SQL ডাম্প এক্সপোর্ট</span>
           </a>
         </div>
       </div>
@@ -228,10 +277,10 @@ export default function MySQLWorkbenchView() {
       {/* Connection & Status Metric Pills */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-xs border border-slate-200 dark:border-slate-800 space-y-1">
-          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase">ডাটাবেস স্ট্যাটাস</span>
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase">ডাটাবেস সিকিউরিটি</span>
           <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Active & Synced</span>
+            <Lock className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Locked (Read-Only)</span>
           </div>
           <span className="text-[11px] font-mono text-slate-400 block">{configForm.database}</span>
         </div>
@@ -263,7 +312,7 @@ export default function MySQLWorkbenchView() {
             <span>{configForm.phpMyAdminUrl}</span>
             <ExternalLink className="w-3 h-3 shrink-0" />
           </a>
-          <span className="text-[10px] text-slate-400">Web UI Access</span>
+          <span className="text-[10px] text-slate-400">Admin Control Panel</span>
         </div>
       </div>
 
@@ -278,7 +327,7 @@ export default function MySQLWorkbenchView() {
           }`}
         >
           <TableIcon className="w-4 h-4" />
-          <span>টেবিল ব্রাউজার (Table Inspector)</span>
+          <span>টেবিল পরিদর্শক (Table Inspector)</span>
         </button>
 
         <button
@@ -290,7 +339,7 @@ export default function MySQLWorkbenchView() {
           }`}
         >
           <Terminal className="w-4 h-4" />
-          <span>SQL কনসোল (Query Runner)</span>
+          <span>নিরাপদ কোয়েরি পরিদর্শক (Read-Only Queries)</span>
         </button>
 
         <button
@@ -302,7 +351,7 @@ export default function MySQLWorkbenchView() {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>MySQL সংযোগ কনফিগারেশন</span>
+          <span>MySQL সংযোগ সেটিংস</span>
         </button>
 
         <button
@@ -314,7 +363,7 @@ export default function MySQLWorkbenchView() {
           }`}
         >
           <FileCode className="w-4 h-4" />
-          <span>phpMyAdmin ইমপোর্ট সহায়িকা</span>
+          <span>phpMyAdmin নির্দেশিকা</span>
         </button>
       </div>
 
@@ -337,7 +386,7 @@ export default function MySQLWorkbenchView() {
                     className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all ${
                       isSelected
                         ? "bg-indigo-50 dark:bg-slate-800 border-indigo-500 text-indigo-950 dark:text-cyan-300 font-bold shadow-xs"
-                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300"
+                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300"
                     }`}
                   >
                     <div className="flex items-center gap-2 truncate">
@@ -389,7 +438,7 @@ export default function MySQLWorkbenchView() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {tableRows.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 dark:hover:bg-slate-800/40">
+                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
                         {Object.keys(tableRows[0] || {}).slice(0, 7).map((col) => (
                           <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200">
                             {typeof row[col] === "object" ? JSON.stringify(row[col]) : String(row[col] ?? "")}
@@ -405,22 +454,22 @@ export default function MySQLWorkbenchView() {
         </div>
       )}
 
-      {/* MODE 2: SQL CONSOLE */}
+      {/* MODE 2: READ-ONLY QUERY INSPECTOR */}
       {activeMode === "query" && (
         <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-4 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
               <Terminal className="w-4 h-4 text-indigo-600 dark:text-cyan-400" />
-              <span>SQL কোয়েরি কনসোল (Interactive SQL Runner)</span>
+              <span>নিরাপদ কোয়েরি পরিদর্শক (Read-Only Query Inspector)</span>
             </h3>
 
             {/* Quick Sample Queries */}
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold mr-1">নমুনা কোয়েরি:</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold mr-1">অনুমোদিত কোয়েরি:</span>
               {sampleQueries.map((sq, i) => (
                 <button
                   key={i}
-                  onClick={() => setSqlQuery(sq.sql)}
+                  onClick={() => handleQueryChange(sq.sql)}
                   className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono text-[10px] transition-colors"
                 >
                   {sq.label}
@@ -429,26 +478,35 @@ export default function MySQLWorkbenchView() {
             </div>
           </div>
 
-          {/* SQL Editor Area with Neon Glow */}
+          {/* Security alert if destructive keyword found */}
+          {securityWarning && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 rounded-xl flex items-center gap-2 text-rose-700 dark:text-rose-300 text-xs font-semibold">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{securityWarning}</span>
+            </div>
+          )}
+
+          {/* SQL Editor Area */}
           <div className="space-y-2">
             <textarea
               rows={4}
               value={sqlQuery}
-              onChange={(e) => setSqlQuery(e.target.value)}
-              placeholder="SELECT * FROM students WHERE class_name = 'Class 9';"
+              onChange={(e) => handleQueryChange(e.target.value)}
+              placeholder="SELECT * FROM students LIMIT 10;"
               className="w-full p-3.5 bg-slate-950 text-cyan-300 font-mono text-xs rounded-2xl border border-cyan-500/30 focus:outline-none focus:border-cyan-400 focus:shadow-[0_0_20px_rgba(6,182,212,0.35)] shadow-inner"
             />
-            <div className="flex justify-between items-center">
-              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                MySQL Syntax • Supported: SELECT, SHOW TABLES, DESCRIBE, UPDATE, INSERT
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1">
+                <Lock className="w-3 h-3 text-emerald-500" />
+                <span>নিরাপত্তা লকডাউন: শুধুমাত্র SELECT ও SHOW কোয়েরি অনুমোদিত (No Write Operations)</span>
               </span>
               <button
                 onClick={handleRunQuery}
-                disabled={runningQuery}
+                disabled={runningQuery || Boolean(securityWarning)}
                 className="px-5 py-2.5 bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white rounded-xl font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.45)] disabled:opacity-50 transition-all transform hover:scale-105"
               >
                 <Play className="w-4 h-4 fill-white" />
-                <span>{runningQuery ? "রান হচ্ছে..." : "কোয়েরি চালান (Execute SQL)"}</span>
+                <span>{runningQuery ? "রান হচ্ছে..." : "কোয়েরি পরিদর্শন (Run Read-Only)"}</span>
               </button>
             </div>
           </div>
@@ -457,18 +515,20 @@ export default function MySQLWorkbenchView() {
           {queryResult && (
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">
-                  {queryResult.message}
+                <span className={`font-mono text-xs font-bold ${queryResult.success ? "text-slate-900 dark:text-white" : "text-rose-600 dark:text-rose-400"}`}>
+                  {queryResult.error || queryResult.message}
                 </span>
-                <span className="font-mono text-[10px] text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950 px-2 py-0.5 rounded">
-                  সময়: {queryResult.executionTimeMs} ms
-                </span>
+                {queryResult.executionTimeMs !== undefined && (
+                  <span className="font-mono text-[10px] text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950 px-2 py-0.5 rounded">
+                    সময়: {queryResult.executionTimeMs} ms
+                  </span>
+                )}
               </div>
 
               {queryResult.data && Array.isArray(queryResult.data) && queryResult.data.length > 0 && (
                 <div className="overflow-x-auto max-h-64">
                   <table className="w-full text-left font-mono text-[11px] border-collapse">
-                    <thead className="bg-slate-100 dark:bg-slate-750 font-bold border-b border-slate-200 dark:border-slate-600">
+                    <thead className="bg-slate-100 dark:bg-slate-700 font-bold border-b border-slate-200 dark:border-slate-600">
                       <tr>
                         {Object.keys(queryResult.data[0] || {}).map((col) => (
                           <th key={col} className="p-2 whitespace-nowrap">
@@ -502,9 +562,14 @@ export default function MySQLWorkbenchView() {
           onSubmit={handleSaveConfig}
           className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-4 text-xs"
         >
-          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
-            MySQL / phpMyAdmin ডাটাবেস সংযোগ সেটিংস
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+              MySQL / phpMyAdmin ডাটাবেস সংযোগ সেটিংস
+            </h3>
+            <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 rounded-full border border-amber-200 dark:border-amber-900">
+              সুপার অ্যাডমিন অনুমতি আবশ্যক
+            </span>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -571,7 +636,7 @@ export default function MySQLWorkbenchView() {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs"
+              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs transition-colors"
             >
               কনফিগারেশন সংরক্ষণ করুন
             </button>
@@ -592,7 +657,7 @@ export default function MySQLWorkbenchView() {
                 ধাপ ১: ডাম্প ফাইল ডাউনলোড
               </span>
               <p>
-                উপরে ডানদিকের <strong className="text-amber-600">&quot;phpMyAdmin .SQL ডাম্প ডাউনলোড&quot;</strong> বাটনে ক্লিক করে প্রস্তুতকৃত <code className="font-mono bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">pgtsc_erp_mysql_dump.sql</code> ফাইলটি ডাউনলোড করুন।
+                উপরে ডানদিকের <strong className="text-amber-600">&quot;.SQL ডাম্প এক্সপোর্ট&quot;</strong> বাটনে ক্লিক করে প্রস্তুতকৃত <code className="font-mono bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">pgtsc_erp_mysql_dump.sql</code> ফাইলটি ডাউনলোড করুন।
               </p>
             </div>
 

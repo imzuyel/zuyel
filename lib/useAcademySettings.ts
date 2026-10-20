@@ -12,29 +12,60 @@ import {
   getTradeLabelBangla,
   getClassTradeMapping,
 } from "./academySettingsStore";
+import { safeFetchJson } from "./safeFetch";
+
+// Module-level cache to eliminate redundant network requests across component mounts
+let cachedMappings: AcademyClassTradeMapping[] | null = null;
+let inFlightFetch: Promise<AcademyClassTradeMapping[] | null> | null = null;
 
 export function useAcademySettings() {
-  const [mappings, setMappings] = useState<AcademyClassTradeMapping[]>(DEFAULT_ACADEMY_CLASS_TRADE_MAPPINGS);
-  const [loading, setLoading] = useState(false);
+  const [mappings, setMappings] = useState<AcademyClassTradeMapping[]>(
+    cachedMappings || DEFAULT_ACADEMY_CLASS_TRADE_MAPPINGS
+  );
+  const [loading, setLoading] = useState<boolean>(!cachedMappings);
 
   useEffect(() => {
     let active = true;
-    async function loadSettings() {
-      try {
-        setLoading(true);
-        const res = await fetch("/api/academic/academy-settings");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (active && data.success && Array.isArray(data.mappings) && data.mappings.length > 0) {
-          setMappings(data.mappings);
-        }
-      } catch (err) {
-        // Resilient fallback keeps static defaults
-      } finally {
-        if (active) setLoading(false);
-      }
+
+    // If cache already exists, initialize immediately and skip fetch
+    if (cachedMappings) {
+      setMappings(cachedMappings);
+      setLoading(false);
+      return;
     }
-    loadSettings();
+
+    // Reuse in-flight request if another component triggered it simultaneously
+    if (!inFlightFetch) {
+      inFlightFetch = safeFetchJson<{ mappings: AcademyClassTradeMapping[] }>(
+        "/api/academic/academy-settings",
+        { timeoutMs: 8000 }
+      )
+        .then((res) => {
+          if (res.ok && res.data?.mappings && Array.isArray(res.data.mappings)) {
+            cachedMappings = res.data.mappings;
+            return cachedMappings;
+          } else if (res.ok && Array.isArray((res as any).mappings)) {
+            cachedMappings = (res as any).mappings;
+            return cachedMappings;
+          }
+          return null;
+        })
+        .catch(() => null)
+        .finally(() => {
+          inFlightFetch = null;
+        });
+    }
+
+    setLoading(true);
+    inFlightFetch.then((data) => {
+      if (active) {
+        if (data && data.length > 0) {
+          setMappings(data);
+        }
+        setLoading(false);
+      }
+    });
+
     return () => {
       active = false;
     };

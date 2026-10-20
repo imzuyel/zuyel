@@ -66,9 +66,11 @@ export default function PublicFooter() {
                 { href: "/academic", label: "একাডেমিক কাঠামো ও ট্রেডসমূহ" },
                 { href: "/notices", label: "সর্বশেষ নোটিশ ও সার্কুলার" },
                 { href: "/results", label: "অনলাইন পরীক্ষার ফলাফল" },
+                { href: "/verify", label: "ডিজিটাল সনদ ও প্রত্যয়নপত্র যাচাই" },
                 { href: "/faculty", label: "শিক্ষক ও কর্মকর্তা পরিষদ" },
                 { href: "/gallery", label: "ফটোগ্যালারি ও ক্যাম্পাস" },
                 { href: "/downloads", label: "সিলেবাস ও ফরম ডাউনলোড" },
+                { href: "/admin", label: "প্রাতিষ্ঠানিক ERP লগইন" },
               ].map((link) => (
                 <li key={link.href}>
                   <Link

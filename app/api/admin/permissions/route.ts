@@ -20,7 +20,7 @@ import {
   granularToLegacy,
   type GranularPermission,
 } from "@/lib/rbac-db";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { verifyBackendAuthorization, requireAdmin } from "@/lib/serverAuthGuard";
 import { institutionalDb } from "@/lib/database";
 
 // =====================================================
@@ -28,17 +28,9 @@ import { institutionalDb } from "@/lib/database";
 // Returns: users list + full permissions catalog
 // =====================================================
 export async function GET(req: NextRequest) {
-  const auth = verifyBackendAuthorization(req, {
-    endpointName: "/api/admin/permissions",
-    requiredPermission: "view_audit_logs",
-  });
-
-  // Allow admin/principal even without explicit view_audit_logs check
-  const identity = auth.identity;
-  if (!isAdministrator(identity.userRole)) {
-    if (!auth.authorized) {
-      return auth.errorResponse!;
-    }
+  const auth = requireAdmin(req, "/api/admin/permissions");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
   }
 
   try {
@@ -158,13 +150,9 @@ export async function GET(req: NextRequest) {
 // Actions: grant | revoke | set_permissions | set_granular
 // =====================================================
 export async function POST(req: NextRequest) {
-  const auth = verifyBackendAuthorization(req, {
-    endpointName: "/api/admin/permissions",
-  });
-
-  // Must be at least admin level
-  if (!isAdministrator(auth.identity.userRole)) {
-    if (!auth.authorized) return auth.errorResponse!;
+  const auth = requireAdmin(req, "/api/admin/permissions");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
   }
 
   try {

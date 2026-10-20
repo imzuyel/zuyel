@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAISettings, saveAISettings, AISettings } from "@/lib/aiConfigStore";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { requireAdmin } from "@/lib/serverAuthGuard";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = requireAdmin(req, "/api/admin/ai-settings");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const settings = getAISettings();
     // Mask API keys for security before sending to client
@@ -21,9 +26,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = verifyBackendAuthorization(req, {
-    endpointName: "/api/admin/ai-settings",
-  });
+  const auth = requireAdmin(req, "/api/admin/ai-settings");
   if (!auth.authorized) {
     return auth.errorResponse!;
   }

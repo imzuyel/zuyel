@@ -643,7 +643,7 @@ export default function LiveQuizPortal({
     setGameState("lobby");
 
     try {
-      let res = await fetch("/api/live-quizzes/sessions", {
+      const res = await fetch("/api/live-quizzes/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -653,19 +653,6 @@ export default function LiveQuizPortal({
           motivationInterval
         })
       }).catch(() => null);
-
-      if (!res || !res.ok) {
-        res = await fetch("/api/live-quiz/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            quizId: quiz.id,
-            hostUserId: 3,
-            motivationEnabled,
-            motivationInterval
-          })
-        }).catch(() => null);
-      }
 
       let data: any = null;
       if (res && res.ok) {

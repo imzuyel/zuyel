@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { ACADEMIC_CLASSES, ALL_TRADES, getApplicableTradesForClass, getSubjectsForClass, parseClassNumeric } from "@/lib/academicStructure";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,19 +13,29 @@ export async function GET(req: NextRequest) {
     const applicableTrades = numericClass > 0 ? getApplicableTradesForClass(numericClass) : ALL_TRADES;
     const applicableSubjects = numericClass > 0 ? getSubjectsForClass(numericClass, tradeVal) : [];
 
-    return NextResponse.json({
-      success: true,
-      context: {
-        academicYear,
-        selectedClass: numericClass || null,
-        hasTrade: numericClass >= 9 && numericClass <= 12,
-        classes: ACADEMIC_CLASSES,
-        allTrades: ALL_TRADES,
-        applicableTrades,
-        applicableSubjects,
+    return apiSuccess({
+      academicYear,
+      selectedClass: numericClass || null,
+      hasTrade: numericClass >= 9 && numericClass <= 12,
+      classes: ACADEMIC_CLASSES,
+      allTrades: ALL_TRADES,
+      applicableTrades,
+      applicableSubjects,
+    }, {
+      message: "Academic context loaded successfully",
+      extraKeys: {
+        context: {
+          academicYear,
+          selectedClass: numericClass || null,
+          hasTrade: numericClass >= 9 && numericClass <= 12,
+          classes: ACADEMIC_CLASSES,
+          allTrades: ALL_TRADES,
+          applicableTrades,
+          applicableSubjects,
+        },
       },
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error, { fallbackMessage: "একাডেমিক কনটেক্সট লোড করতে ব্যর্থ হয়েছে" });
   }
 }

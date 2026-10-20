@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { sendSmsGateway, globalSmsLogs, formatSmsTemplate } from "@/lib/smsGatewayEngine";
+import { requireAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
+  const auth = requireAdmin(req, "/api/communication/sms/send");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     return NextResponse.json({
       success: true,
@@ -17,6 +23,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = requireAdmin(req, "/api/communication/sms/send");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const {

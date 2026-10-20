@@ -173,10 +173,7 @@ export default function FeeCollectionStudio() {
   const fetchInvoices = async () => {
     setIsLoading(true);
     try {
-      let res = await fetch("/api/accounts/fees").catch(() => null);
-      if (!res || !res.ok) {
-        res = await fetch("/api/fees").catch(() => null);
-      }
+      const res = await fetch("/api/accounts/fees").catch(() => null);
 
       if (res && res.ok) {
         const contentType = res.headers.get("content-type");
@@ -292,19 +289,11 @@ export default function FeeCollectionStudio() {
         collectedBy: "প্রধান হিসাবরক্ষক (PTSC Accounts)"
       };
 
-      let res = await fetch("/api/accounts/fees", {
+      const res = await fetch("/api/accounts/fees", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(invoicePayload)
       }).catch(() => null);
-
-      if (!res || !res.ok) {
-        res = await fetch("/api/fees", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(invoicePayload)
-        }).catch(() => null);
-      }
 
       let data: any = null;
       if (res && res.headers.get("content-type")?.includes("application/json")) {

@@ -19,6 +19,7 @@ import {
   AcademicSubjectMapping,
 } from "@/lib/subjectEngine";
 import { parseClassNumeric, doesClassHaveTrade, getApplicableTradesForClass, ALL_TRADES } from "@/lib/academicStructure";
+import { requireAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
   try {
@@ -129,6 +130,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = requireAdmin(req, "academic-settings:manage");
+    if (!auth.authorized) {
+      return auth.errorResponse!;
+    }
+
     const body = await req.json();
     const { action } = body;
 

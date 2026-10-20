@@ -12,6 +12,11 @@ declare global {
   var prismaGlobalInstance: any | undefined;
 }
 
+const globalForPrisma = globalThis as unknown as {
+  prisma: any | undefined;
+  prismaOperational?: boolean;
+};
+
 const rawDbUrl = process.env.DATABASE_URL;
 
 export const hasDatabaseUrl = Boolean(
@@ -24,25 +29,33 @@ export const hasDatabaseUrl = Boolean(
 let prismaClientInstance: any = null;
 let prismaOperational = false;
 
-if (hasDatabaseUrl) {
+// Check existing singleton from previous HMR cycle
+if (globalForPrisma.prisma) {
+  prismaClientInstance = globalForPrisma.prisma;
+  prismaOperational = globalForPrisma.prismaOperational ?? true;
+} else if (hasDatabaseUrl) {
   try {
     // Dynamically require @prisma/client if available in node_modules
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { PrismaClient } = require("@prisma/client");
 
-    if (!globalThis.prismaGlobalInstance) {
-      globalThis.prismaGlobalInstance = new PrismaClient({
-        datasources: {
-          db: {
-            url: process.env.DATABASE_URL,
-          },
+    prismaClientInstance = new PrismaClient({
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL,
         },
-        log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-      });
-    }
+      },
+      log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    });
 
-    prismaClientInstance = globalThis.prismaGlobalInstance;
     prismaOperational = true;
+
+    // Cache on global in non-production to avoid connection pool exhaustion
+    if (process.env.NODE_ENV !== "production") {
+      globalForPrisma.prisma = prismaClientInstance;
+      globalForPrisma.prismaOperational = true;
+      globalThis.prismaGlobalInstance = prismaClientInstance;
+    }
   } catch (error: any) {
     // Preview Mode Graceful Fallback:
     // If Prisma client is not generated or MySQL host is unreachable in preview,
@@ -56,24 +69,61 @@ if (hasDatabaseUrl) {
   }
 }
 
-// Mock Prisma client for preview / in-memory mode
-const noOp = {
+// Complete mock model delegate for preview / in-memory mode
+const modelDelegate = {
   findMany: async () => [],
   findFirst: async () => null,
   findUnique: async () => null,
+  findFirstOrThrow: async () => null,
+  findUniqueOrThrow: async () => null,
   create: async (d: any) => d?.data ?? {},
+  createMany: async () => ({ count: 0 }),
   update: async (d: any) => d?.data ?? {},
+  updateMany: async () => ({ count: 0 }),
   delete: async () => ({}),
+  deleteMany: async () => ({ count: 0 }),
   count: async () => 0,
   aggregate: async () => ({}),
   groupBy: async () => [],
   upsert: async (d: any) => d?.create ?? {},
 };
 
-const mockPrisma = new Proxy({}, {
-  get: () => new Proxy(noOp, {
-    get: (target: any, prop: any) => target[prop] || (async () => [])
-  })
+// Root methods on Prisma client
+const rootDelegates: Record<string, any> = {
+  $transaction: async (arg: any) => {
+    if (typeof arg === "function") {
+      return await arg(mockPrisma);
+    }
+    if (Array.isArray(arg)) {
+      return await Promise.all(arg);
+    }
+    return [];
+  },
+  $queryRaw: async () => [],
+  $queryRawUnsafe: async () => [],
+  $executeRaw: async () => 0,
+  $executeRawUnsafe: async () => 0,
+  $connect: async () => {},
+  $disconnect: async () => {},
+  $use: () => {},
+  $on: () => {},
+  $extends: () => mockPrisma,
+};
+
+export const mockPrisma: any = new Proxy(rootDelegates, {
+  get: (target: any, prop: any) => {
+    if (typeof prop === "string" && prop in target) {
+      return target[prop];
+    }
+    return new Proxy(modelDelegate, {
+      get: (modelTarget: any, modelProp: any) => {
+        if (modelProp in modelTarget) {
+          return modelTarget[modelProp];
+        }
+        return async () => [];
+      },
+    });
+  },
 });
 
 /**
@@ -87,5 +137,25 @@ export function isPrismaAvailable(): boolean {
  * Singleton Prisma instance (or mock proxy in preview fallback mode)
  */
 export const prisma = prismaClientInstance || mockPrisma;
+
+/**
+ * Safely executes a query on Prisma with automatic fallback if Prisma is
+ * unavailable or if the query throws (e.g. database connection lost, timeout).
+ */
+export async function safePrismaQuery<T>(
+  queryFn: (client: any) => Promise<T>,
+  fallbackValue: T
+): Promise<T> {
+  if (!isPrismaAvailable()) {
+    return fallbackValue;
+  }
+  try {
+    return await queryFn(prisma);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[Prisma SafeQuery] Query failed gracefully:", msg);
+    return fallbackValue;
+  }
+}
 
 export default prisma;

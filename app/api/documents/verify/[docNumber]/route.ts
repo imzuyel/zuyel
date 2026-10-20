@@ -7,7 +7,21 @@ export async function GET(
 ) {
   try {
     const { docNumber } = await params;
-    const decodedMemo = decodeURIComponent(docNumber).trim();
+    const rawMemo = decodeURIComponent(docNumber || "").trim();
+
+    if (!rawMemo || rawMemo.length > 100) {
+      return NextResponse.json(
+        {
+          success: false,
+          verified: false,
+          message: "স্মারক নম্বরটি সঠিক নয় বা অতিরিক্ত দীর্ঘ।",
+          queriedMemo: rawMemo ? rawMemo.slice(0, 50) : "",
+        },
+        { status: 400 }
+      );
+    }
+
+    const decodedMemo = rawMemo.replace(/[^a-zA-Z0-9\-_/.\s]/g, "").trim();
 
     const doc = institutionalDb.documents.find(
       (d) =>

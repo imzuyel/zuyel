@@ -25,6 +25,7 @@ import {
   BookOpen,
   Sliders,
   MoreHorizontal,
+  ShieldCheck,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
@@ -256,13 +257,32 @@ export default function PublicHeader() {
               </button>
             )}
 
+            {/* Document Verification CTA */}
+            <Link
+              href="/verify"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200/80 dark:border-slate-700 transition"
+              title="ডিজিটাল সনদ ও প্রত্যয়নপত্র যাচাই"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+              <span>সনদ যাচাই</span>
+            </Link>
+
             {/* Live Quiz CTA */}
             <Link
               href="/quiz/join"
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all duration-300 transform hover:scale-[1.03] active:scale-95 border border-emerald-400/20 shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-sm transition-all duration-300 transform hover:scale-[1.03] active:scale-95 border border-emerald-400/20 shrink-0"
             >
               <Award className="w-4 h-4" />
               <span>লাইভ কুইজ</span>
+            </Link>
+
+            {/* ERP Login Button */}
+            <Link
+              href={isLoggedIn && currentUser?.role !== "student" ? "/admin" : "/admin/login"}
+              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-sm shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-95 shrink-0"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>{isLoggedIn && currentUser?.role !== "student" ? "ERP প্যানেল" : "ERP লগইন"}</span>
             </Link>
           </div>
 

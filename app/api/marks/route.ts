@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { institutionalDb, ExamMark, ExamMarkAuditEntry } from "@/lib/database";
 import { calculateContinuousAssessment, calculateGradeAndGP, isTradeApplicable } from "@/lib/utils";
 import { calculateBtebContinuousBreakdown, calculateSubjectTotalAndGrade } from "@/lib/resultCalculation";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: Request) {
   try {
@@ -45,6 +46,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = requireTeacherOrAdmin(req, "/api/marks");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
 
@@ -329,6 +335,11 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const auth = requireTeacherOrAdmin(req, "/api/marks");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const { markId, theoryMarks, practicalMarks, continuousAssessment, reason, changedBy = "Admin" } = body;

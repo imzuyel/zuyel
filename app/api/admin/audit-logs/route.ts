@@ -4,7 +4,8 @@ import {
   recordSecurityAuditLog,
   SecurityAuditLog,
 } from "@/lib/rbac";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { verifyBackendAuthorization, requireAdmin } from "@/lib/serverAuthGuard";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 export async function GET(req: NextRequest) {
   // Guard check: Must be administrative personnel or have view_audit_logs permission
@@ -30,21 +31,24 @@ export async function GET(req: NextRequest) {
       limit,
     });
 
-    return NextResponse.json({
-      success: true,
-      logs,
-      totalCount: logs.length,
-      timestamp: new Date().toISOString(),
+    return apiSuccess(logs, {
+      extraKeys: {
+        logs,
+        totalCount: logs.length,
+        timestamp: new Date().toISOString(),
+      },
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch audit logs" },
-      { status: 500 }
-    );
+    return apiError(error, { fallbackMessage: "অডিট লগ লোড করতে ব্যর্থ হয়েছে" });
   }
 }
 
 export async function POST(req: NextRequest) {
+  const auth = requireAdmin(req, "/api/admin/audit-logs");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const {
@@ -75,14 +79,13 @@ export async function POST(req: NextRequest) {
       detailsBangla: detailsBangla || "নিরাপত্তা ইভেন্ট রেকর্ড করা হয়েছে।",
     });
 
-    return NextResponse.json({
-      success: true,
-      log: newLog,
+    return apiSuccess(newLog, {
+      message: "নিরাপত্তা অডিট লগ সফলভাবে সংরক্ষিত হয়েছে।",
+      extraKeys: {
+        log: newLog,
+      },
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to record audit log" },
-      { status: 500 }
-    );
+    return apiError(error, { fallbackMessage: "অডিট লগ সংরক্ষণ করতে ব্যর্থ হয়েছে" });
   }
 }

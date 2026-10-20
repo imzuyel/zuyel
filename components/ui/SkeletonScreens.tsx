@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
 import { Loader2, Sparkles, FileText, Award, Calendar, ChevronRight, Download } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /**
  * Base Shimmer Box with animated gradient sweep
@@ -233,6 +233,43 @@ export function AsyncLoadingModal({
           <div className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 rounded-full w-2/3 animate-[shimmerSlide_1.5s_infinite]" />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * TableSkeleton for tabular data loading states
+ */
+export function TableSkeleton({
+  rows = 5,
+  cols = 5,
+}: {
+  rows?: number;
+  cols?: number;
+}) {
+  return (
+    <div className="w-full space-y-3">
+      {/* Table Header Skeleton */}
+      <div className="flex items-center gap-4 py-2 border-b border-slate-200/80 dark:border-slate-800">
+        {Array.from({ length: cols }).map((_, c) => (
+          <SkeletonBox key={c} className="h-4 flex-1" rounded="rounded-md" />
+        ))}
+      </div>
+      {/* Table Rows Skeleton */}
+      {Array.from({ length: rows }).map((_, r) => (
+        <div
+          key={r}
+          className="flex items-center gap-4 py-3 border-b border-slate-100 dark:border-slate-800/60"
+        >
+          {Array.from({ length: cols }).map((_, c) => (
+            <SkeletonBox
+              key={c}
+              className={cn("h-4 flex-1", c === 0 && "max-w-[80px]", c === cols - 1 && "max-w-[100px]")}
+              rounded="rounded-md"
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

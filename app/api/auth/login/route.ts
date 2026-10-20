@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PRESET_USERS, UserProfile } from "@/context/AuthContext";
 import { normalizeRole, recordSecurityAuditLog } from "@/lib/rbac";
+import { signSessionToken } from "@/lib/tokenService";
 
 const AUTHORIZED_STAFF_ROLES = new Set([
   "super_admin",
@@ -153,15 +154,33 @@ export async function POST(request: NextRequest) {
       detailsBangla: `${user.nameBangla || user.fullName} (${user.designation}) ব্যাকএন্ডে সফলভাবে লগইন করেছেন।`,
     });
 
-    // 5. Generate secure cookie headers
+    // 5. Generate secure cryptographically signed session token & cookie headers
     const maxAge = rememberMe ? 30 * 24 * 60 * 60 : 24 * 60 * 60; // 30 days or 1 day
+    const authToken = signSessionToken(
+      {
+        userId: user.id,
+        userRole: normalizedUserRole,
+        userName: user.fullName,
+        userEmail: user.email,
+      },
+      maxAge
+    );
 
     const response = NextResponse.json({
       success: true,
       message: `স্বাগতম, ${user.nameBangla || user.fullName}! ব্যাকএন্ড অ্যাক্সেস অনুমোদিত হয়েছে।`,
       user,
       role: normalizedUserRole,
+      token: authToken,
       redirectUrl: "/admin",
+    });
+
+    // Cryptographically signed session cookie (Protected with HttpOnly)
+    response.cookies.set("pgtsc_auth_token", authToken, {
+      path: "/",
+      maxAge,
+      sameSite: "lax",
+      httpOnly: true,
     });
 
     response.cookies.set("pgtsc_user_role", normalizedUserRole, {

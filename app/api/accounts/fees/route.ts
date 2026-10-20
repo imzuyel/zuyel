@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FeeAccountsManager } from "@/lib/feeAccountsEngine";
 import { hasDatabaseUrl, prisma } from "@/lib/prisma";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { verifyBackendAuthorization, requireStaffOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
+  const auth = requireStaffOrAdmin(req, "/api/accounts/fees");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     let invoices = FeeAccountsManager.getInvoices();
 

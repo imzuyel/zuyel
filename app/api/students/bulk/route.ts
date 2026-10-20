@@ -5,8 +5,14 @@ import {
   isTradeValidForClass,
   parseClassNumeric,
 } from "@/lib/academicStructure";
+import { requireAdmin } from "@/lib/serverAuthGuard";
 
 export async function POST(req: Request) {
+  const auth = requireAdmin(req, "/api/students/bulk");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const { action, studentIds, updates, filterContext, performedBy = "Admin" } = body;

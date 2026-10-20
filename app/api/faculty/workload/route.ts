@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { institutionalDb, FacultyMember, RoutineItem } from "@/lib/database";
 import { calculateTeacherWorkload, WEEK_DAYS } from "@/lib/routineEngine";
+import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
       const tId = Number(teacherId);
       const teacher = institutionalDb.faculty.find((f) => f.id === tId);
       if (!teacher) {
-        return NextResponse.json({ success: false, error: "Teacher not found." }, { status: 404 });
+        return apiError("শিক্ষক পাওয়া যায়নি (Teacher not found)", { status: 404 });
       }
 
       // Find all routines assigned to this teacher
@@ -104,30 +105,53 @@ export async function GET(req: NextRequest) {
         statusBangla = "হালকা কাজের চাপ (<১২ পিরিয়ড)";
       }
 
-      return NextResponse.json({
-        success: true,
-        workload: {
-          teacherId: tId,
-          name: teacher.name,
-          nameBangla: teacher.nameBangla,
-          designation: teacher.designation,
-          department: teacher.department,
-          tradeCode: teacher.tradeCode,
-          weeklyClassesCount,
-          monthlyWorkloadEstimated,
-          totalTeachingHours,
-          totalTeachingMinutes,
-          theoryPeriods: theoryCount,
-          practicalPeriods: practicalCount,
-          assignedSubjects: Array.from(assignedSubjectsMap.values()),
-          assignedSubjectsCount: assignedSubjectsMap.size,
-          dailyBreakdown,
-          freePeriodsDaily,
-          totalFreePeriodsWeekly: 35 - weeklyClassesCount,
-          maxWeeklyCapacity,
-          workloadPercentage,
-          status: workloadStatus,
-          statusBangla,
+      return apiSuccess({
+        teacherId: tId,
+        name: teacher.name,
+        nameBangla: teacher.nameBangla,
+        designation: teacher.designation,
+        department: teacher.department,
+        tradeCode: teacher.tradeCode,
+        weeklyClassesCount,
+        monthlyWorkloadEstimated,
+        totalTeachingHours,
+        totalTeachingMinutes,
+        theoryPeriods: theoryCount,
+        practicalPeriods: practicalCount,
+        assignedSubjects: Array.from(assignedSubjectsMap.values()),
+        assignedSubjectsCount: assignedSubjectsMap.size,
+        dailyBreakdown,
+        freePeriodsDaily,
+        totalFreePeriodsWeekly: 35 - weeklyClassesCount,
+        maxWeeklyCapacity,
+        workloadPercentage,
+        status: workloadStatus,
+        statusBangla,
+      }, {
+        extraKeys: {
+          workload: {
+            teacherId: tId,
+            name: teacher.name,
+            nameBangla: teacher.nameBangla,
+            designation: teacher.designation,
+            department: teacher.department,
+            tradeCode: teacher.tradeCode,
+            weeklyClassesCount,
+            monthlyWorkloadEstimated,
+            totalTeachingHours,
+            totalTeachingMinutes,
+            theoryPeriods: theoryCount,
+            practicalPeriods: practicalCount,
+            assignedSubjects: Array.from(assignedSubjectsMap.values()),
+            assignedSubjectsCount: assignedSubjectsMap.size,
+            dailyBreakdown,
+            freePeriodsDaily,
+            totalFreePeriodsWeekly: 35 - weeklyClassesCount,
+            maxWeeklyCapacity,
+            workloadPercentage,
+            status: workloadStatus,
+            statusBangla,
+          },
         },
       });
     }
@@ -138,19 +162,27 @@ export async function GET(req: NextRequest) {
       teachers = teachers.filter((t: any) => t.department === department);
     }
 
-    return NextResponse.json({
-      success: true,
+    const processedTeachers = teachers.map((t: any) => ({
+      ...t,
+      monthlyWorkloadEstimated: Math.round(t.totalWeeklyPeriods * 4.2),
+      totalTeachingHours: Number((t.totalMinutes / 60).toFixed(1)),
+      freePeriodsCount: Math.max(0, 35 - t.totalWeeklyPeriods),
+    }));
+
+    return apiSuccess({
       institutionalAverage: workloadData.institutionalAverage || 18,
       recommendations: workloadData.recommendations || [],
-      teachers: teachers.map((t: any) => ({
-        ...t,
-        monthlyWorkloadEstimated: Math.round(t.totalWeeklyPeriods * 4.2),
-        totalTeachingHours: Number((t.totalMinutes / 60).toFixed(1)),
-        freePeriodsCount: Math.max(0, 35 - t.totalWeeklyPeriods),
-      })),
+      teachers: processedTeachers,
       totalFacultyEvaluated: teachers.length,
+    }, {
+      extraKeys: {
+        institutionalAverage: workloadData.institutionalAverage || 18,
+        recommendations: workloadData.recommendations || [],
+        teachers: processedTeachers,
+        totalFacultyEvaluated: teachers.length,
+      },
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error, { fallbackMessage: "শিক্ষক কর্মভার হিসাব করতে ব্যর্থ হয়েছে" });
   }
 }

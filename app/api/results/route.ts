@@ -9,21 +9,27 @@ import {
   parseClassNumeric,
   doesStudentMatchTrade,
 } from "@/lib/academicStructure";
+import { requireTeacherOrAdmin, requireAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const query = (searchParams.get("query") || "").trim().toUpperCase();
+    const rawQuery = (searchParams.get("query") || "").trim().slice(0, 60);
+    const query = rawQuery.replace(/[^a-zA-Z0-9\-_.\s\u0980-\u09FF]/g, "").toUpperCase();
+
     const classIdParam = searchParams.get("classId");
     const rawTradeIdParam = searchParams.get("tradeId");
-    const section = searchParams.get("section");
-    const roll = searchParams.get("roll");
-    const examName = searchParams.get("examName") || "অর্ধবার্ষিক মূল্যায়ন ২০২৬";
-    const academicYear = Number(searchParams.get("academicYear") || 2026);
+    const section = searchParams.get("section")?.trim().slice(0, 10);
+    const rawRoll = searchParams.get("roll");
+    const roll = rawRoll && /^\d+$/.test(rawRoll.trim()) ? Number(rawRoll.trim()) : null;
+
+    const examName = (searchParams.get("examName") || "অর্ধবার্ষিক মূল্যায়ন ২০২৬").trim().slice(0, 100);
+    const rawYear = Number(searchParams.get("academicYear") || 2026);
+    const academicYear = rawYear >= 2000 && rawYear <= 2099 ? rawYear : 2026;
     const type = searchParams.get("type"); // "class-sheet" or student query
 
     // CASE 1: Searching for a specific student's result or marksheet
-    if (query || (classIdParam && roll)) {
+    if (query || (classIdParam && roll !== null)) {
       let matchedStudent = institutionalDb.students.find((s) => {
         if (query) {
           const matchCode = s.studentId && s.studentId.toUpperCase() === query;
@@ -251,6 +257,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = requireTeacherOrAdmin(req, "/api/results");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const newPdf: ResultPdf = {
@@ -281,6 +292,11 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const auth = requireTeacherOrAdmin(req, "/api/results");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const idx = institutionalDb.resultPdfs.findIndex((r) => r.id === Number(body.id));
@@ -311,6 +327,11 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const auth = requireAdmin(req, "/api/results");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
