@@ -1,0 +1,6 @@
+{
+  "name": "Panchagarh Government Technical School & College ERP",
+  "description": "Comprehensive institutional ERP and smart campus portal for Panchagarh Government Technical School and College (PTSC), Directorate of Technical Education, Bangladesh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

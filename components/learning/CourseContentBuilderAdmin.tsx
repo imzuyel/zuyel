@@ -1,0 +1,2483 @@
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import confetti from "canvas-confetti";
+import {
+  Layers,
+  BookOpen,
+  Plus,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  Edit3,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Award,
+  Lock,
+  Unlock,
+  Eye,
+  EyeOff,
+  Sparkles,
+  FileText,
+  HelpCircle,
+  Save,
+  X,
+  ChevronDown,
+  ChevronRight,
+  RotateCcw,
+  ShieldAlert,
+  Loader2,
+  ExternalLink,
+  Flame,
+  Check,
+  XCircle,
+  Printer,
+  Copy,
+  Upload,
+  ArrowLeft,
+  ArrowRight,
+  Play,
+  Compass,
+  BookMarked,
+  GraduationCap,
+  Zap,
+  CheckSquare,
+  AlertTriangle,
+  Lightbulb,
+} from "lucide-react";
+import { toast } from "sonner";
+import { InternationalStoryLessonRenderer } from "@/components/learning/InternationalStoryLessonRenderer";
+import {
+  CourseItem,
+  CourseChapterItem,
+  ChapterContentItemData,
+  QuizQuestionItem,
+  ContentItemType,
+} from "@/lib/chapterLearningEngine";
+import {
+  ACADEMIC_CLASSES,
+  ALL_TRADES,
+  MANDATORY_FOUR_TRADES,
+  BTEB_ACADEMIC_TRADES,
+  doesClassHaveTrade,
+  getApplicableTradesForClass,
+  parseClassNumeric,
+} from "@/lib/academicStructure";
+import { useAcademySettings } from "@/lib/useAcademySettings";
+import { saveCustomLessonQuiz, StudentQuizQuestion } from "@/lib/studentIntelligenceStore";
+
+interface CourseContentBuilderAdminProps {
+  initialSubTab?: "builder" | "ai_prep" | "preview";
+}
+
+interface GeneratedClassPackage {
+  lessonSummary: {
+    briefOverview: string;
+    objectives: string[];
+    keyConcepts: string[];
+    labPracticalGuidance: string[];
+    safetyTips: string[];
+  };
+  blogPost: {
+    title: string;
+    estimatedReadMinutes: number;
+    markdownContent: string;
+  };
+  quizSet: StudentQuizQuestion[];
+}
+
+const AVAILABLE_PRESENTATIONS = [
+  {
+    id: "pres-1",
+    title: "বেসিক ইলেকট্রিক্যাল সার্কিট ও ওহমের সূত্রের প্রয়োগ",
+    subject: "ইলেকট্রিক্যাল ওয়ার্কস-১",
+    trade: "Electrical",
+    classLevel: "class-9",
+    totalSlides: 28,
+    author: "প্রকৌ: মো: রফিকুল ইসলাম",
+  },
+  {
+    id: "pres-2",
+    title: "কম্পিউটার মাদারবোর্ড আর্কিটেকচার ও ট্রাবলশুটিং গাইড",
+    subject: "কম্পিউটার অ্যাপ্লিকেশন",
+    trade: "Computer",
+    classLevel: "class-10",
+    totalSlides: 32,
+    author: "মো: জহুরুল ইসলাম",
+  },
+  {
+    id: "pres-3",
+    title: "ফোর-স্ট্রোক আইসি ইঞ্জিন ওভারহোলিং ও সেফটি প্রিক্রেশন",
+    subject: "অটোমোবাইল পাওয়ার ট্রেন",
+    trade: "Automobile",
+    classLevel: "diploma",
+    totalSlides: 25,
+    author: "প্রকৌ: আমজাদ হোসেন",
+  },
+  {
+    id: "pres-4",
+    title: "রেফ্রিজারেশন সাইকেল ও কম্প্রেসর ওয়্যারিং ডায়াগ্রাম",
+    subject: "আরএসি মেকানিক্স",
+    trade: "RAC",
+    classLevel: "class-9",
+    totalSlides: 22,
+    author: "মো: আল আমিন",
+  },
+  {
+    id: "pres-5",
+    title: "সিভিল ড্রাফটিং, আরসিসি কলাম ডিজাইন ও সাইট সেফটি",
+    subject: "সিভিল ইঞ্জিনিয়ারিং",
+    trade: "Civil",
+    classLevel: "class-10",
+    totalSlides: 24,
+    author: "মোছা: নাসরিন আকতার",
+  },
+];
+
+export default function CourseContentBuilderAdmin({
+  initialSubTab = "builder",
+}: CourseContentBuilderAdminProps) {
+  // Top Sub-Tab State
+  const [activeSubTab, setActiveSubTab] = useState<"builder" | "ai_prep" | "preview">(
+    initialSubTab
+  );
+
+  // Courses state
+  const [courses, setCourses] = useState<CourseItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
+
+  // Filters for Class and Trade (Strict rule: 6-8 NO trade, 9-12 has trade)
+  const [filterClass, setFilterClass] = useState<number>(9);
+  const [filterTrade, setFilterTrade] = useState<string>("all");
+
+  const adminClassHasTrade = useMemo(() => {
+    return doesClassHaveTrade(filterClass);
+  }, [filterClass]);
+
+  const adminApplicableTrades = useMemo(() => {
+    return adminClassHasTrade ? getApplicableTradesForClass(filterClass) : [];
+  }, [filterClass, adminClassHasTrade]);
+
+  const handleAdminClassChange = (val: number) => {
+    setFilterClass(val);
+    const hasTrade = doesClassHaveTrade(val);
+    if (!hasTrade) {
+      setFilterTrade("General");
+    } else {
+      setFilterTrade("all");
+    }
+    const match = courses.find((c) => c.numericClass === val);
+    if (match) setSelectedCourseId(match.id);
+  };
+
+  // Drag and drop state
+  const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
+  const [draggedOverItemId, setDraggedOverItemId] = useState<number | null>(null);
+  const [activeChapterId, setActiveChapterId] = useState<number | null>(null);
+
+  // Modals for Builder
+  const [showCourseModal, setShowCourseModal] = useState(false);
+  const [showChapterModal, setShowChapterModal] = useState(false);
+  const [showItemModal, setShowItemModal] = useState(false);
+  const [itemModalType, setItemModalType] = useState<ContentItemType>("BLOG_PART");
+  const [editingItem, setEditingItem] = useState<ChapterContentItemData | null>(null);
+  const [targetChapterId, setTargetChapterId] = useState<number | null>(null);
+
+  // New Course Form State
+  const [newCourseForm, setNewCourseForm] = useState({
+    title: "",
+    titleBangla: "",
+    description: "",
+    code: "",
+    classId: 9,
+    className: "Class 9 (Vocational)",
+    tradeCode: "EE",
+    tradeName: "Electrical Works",
+    subjectName: "ইলেকট্রিক্যাল ওয়ার্কস-১",
+    badgeGradient: "from-amber-600 to-orange-700",
+    difficulty: "Intermediate" as "Beginner" | "Intermediate" | "Advanced",
+  });
+
+  // New Chapter Form State
+  const [newChapterForm, setNewChapterForm] = useState({
+    title: "",
+    titleBangla: "",
+    description: "",
+    unlockRule: "PREVIOUS_COMPLETED" as "IMMEDIATE" | "PREVIOUS_COMPLETED",
+  });
+
+  // Content Item Form State
+  const [itemForm, setItemForm] = useState({
+    title: "",
+    titleBangla: "",
+    isMandatory: true,
+    isPublished: true,
+    xpReward: 50,
+    passingScore: 60,
+    minScoreToUnlockNext: 60,
+    attemptLimit: 3,
+    durationMinutes: 6,
+    blogPartNumber: 1,
+    contentMarkdown: "",
+    summary: "",
+    keyTakeawaysText: "",
+    timeLimitSeconds: 300,
+    quizQuestions: [] as QuizQuestionItem[],
+  });
+
+  // Question editing sub-state for quiz builder
+  const [newQuestion, setNewQuestion] = useState({
+    questionText: "",
+    optionA: "",
+    optionB: "",
+    optionC: "",
+    optionD: "",
+    correctOptionIndex: 0,
+    explanation: "",
+  });
+
+  // ==========================================
+  // SUB-TAB 2: AI CLASS PREP & SLIDE TO BLOG
+  // ==========================================
+  const { getTradesForClass, hasTrades } = useAcademySettings();
+  const [prepClassId, setPrepClassId] = useState<string>("class-9");
+  const [prepTradeId, setPrepTradeId] = useState<string>("Electrical");
+  const [selectedPresentationId, setSelectedPresentationId] = useState<string>("pres-1");
+  const [customPresentationTitle, setCustomPresentationTitle] = useState<string>("");
+  const [isCustomUpload, setIsCustomUpload] = useState<boolean>(false);
+  const [startSlide, setStartSlide] = useState<number>(1);
+  const [endSlide, setEndSlide] = useState<number>(15);
+  const [teacherNotes, setTeacherNotes] = useState<string>("");
+  const [teacherName, setTeacherName] = useState<string>(
+    "প্রকৌ: মো: রফিকুল ইসলাম (চিফ ইন্সট্রাক্টর)"
+  );
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generatedPackage, setGeneratedPackage] = useState<GeneratedClassPackage | null>(null);
+  const [activePackageTab, setActivePackageTab] = useState<"summary" | "blog" | "quiz">("summary");
+  const [blogEditMode, setBlogEditMode] = useState<"preview" | "edit">("preview");
+  const [editableMarkdown, setEditableMarkdown] = useState<string>("");
+  const [copiedSummary, setCopiedSummary] = useState<boolean>(false);
+  const [isAddingToChapter, setIsAddingToChapter] = useState<boolean>(false);
+
+  // Sync presentation selection
+  const handlePresentationChange = (presId: string) => {
+    setSelectedPresentationId(presId);
+    if (presId !== "custom") {
+      setIsCustomUpload(false);
+      const found = AVAILABLE_PRESENTATIONS.find((p) => p.id === presId);
+      if (found) {
+        setPrepClassId(found.classLevel);
+        setPrepTradeId(found.trade);
+        setStartSlide(1);
+        setEndSlide(Math.min(15, found.totalSlides));
+      }
+    } else {
+      setIsCustomUpload(true);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const cleanName = file.name.replace(/\.[^/.]+$/, "");
+      setCustomPresentationTitle(cleanName);
+      setIsCustomUpload(true);
+      setSelectedPresentationId("custom");
+    }
+  };
+
+  const currentPresentationTitle = isCustomUpload
+    ? customPresentationTitle || "নতুন কারিগরি প্রেজেন্টেশন"
+    : AVAILABLE_PRESENTATIONS.find((p) => p.id === selectedPresentationId)?.title ||
+      "বেসিক কারিগরি পাঠ";
+
+  const handleGenerateClassPackage = async () => {
+    setIsGenerating(true);
+    try {
+      const response = await fetch("/api/ai/prepare-class", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetClass: prepClassId,
+          trade: prepTradeId,
+          presentationTitle: currentPresentationTitle,
+          slideRange: `স্লাইড ${startSlide} থেকে ${endSlide}`,
+          customNotes: teacherNotes.trim(),
+        }),
+      });
+
+      const resData = await response.json();
+      if (resData.success && resData.data) {
+        const pkg: GeneratedClassPackage = resData.data;
+        setGeneratedPackage(pkg);
+        setEditableMarkdown(pkg.blogPost.markdownContent);
+        toast.success("AI ক্লাস প্যাকেজ সফলভাবে তৈরি হয়েছে!");
+      } else {
+        throw new Error(resData.error || "Failed to generate class package");
+      }
+    } catch (err: any) {
+      console.error("AI Generation error, using fallback package:", err);
+      // Resilient fallback
+      const mockPackage: GeneratedClassPackage = {
+        lessonSummary: {
+          briefOverview: `${currentPresentationTitle} পাঠের স্লাইড ${startSlide}-${endSlide} থেকে সংগৃহীত মূল পয়েন্ট ও শিখনফল।`,
+          objectives: [
+            `${currentPresentationTitle}-এর মূল নীতি ব্যাখ্যা করতে পারবে।`,
+            "ব্যবহারিক কর্মশালায় উপযুক্ত সেফটি নিয়মাবলি মেনে চলতে পারবে।",
+            "সমস্যা চিহ্নিত করে ট্রাবলশুটিং সমাধান করতে পারবে।",
+          ],
+          keyConcepts: [
+            "তাত্ত্বিক ভিত্তি ও মূল গাণিতিক নীতি।",
+            "যন্ত্রাংশের কালার কোডিং এবং কার্যপ্রণালী।",
+            "পরিমাপক মিটার দিয়ে সঠিক রিডিং গ্রহণ।",
+          ],
+          labPracticalGuidance: [
+            "ওয়ার্কবেঞ্চে প্রয়োজনীয় টুলকিট গুছিয়ে টেস্ট সার্কিট রেডি করুন।",
+            "প্রথমে পাওয়ার অফ অবস্থায় তারের সংযোগ যাচাই করুন।",
+          ],
+          safetyTips: [
+            "রাবার গ্লাভস ও ইনসুলেটেড শু পরিধান নিশ্চিত করুন।",
+            "ওয়েট সারফেসে কাজ করা সম্পূর্ণ নিষিদ্ধ।",
+          ],
+        },
+        blogPost: {
+          title: `${currentPresentationTitle}: ব্যবহারিক প্রয়োগ ও টেকনিক্যাল গাইড`,
+          estimatedReadMinutes: 6,
+          markdownContent: `# ${currentPresentationTitle}\n\n## মূল শিখনফল\nএই ব্লগে স্লাইড ${startSlide} থেকে ${endSlide} এর মূল কারিগরি পয়েন্টগুলো আলোচনা করা হয়েছে।\n\n### ১. প্রধান সূত্র ও নীতি\nইলেকট্রিক্যাল ও ভোকেশনাল কাজের ক্ষেত্রে মানদণ্ড বজায় রেখে ধারাবাহিক পর্যবেক্ষণ জরুরি।\n\n### ২. কর্মক্ষেত্রের নিরাপত্তা\n- ইনসুলেটেড টুলস ব্যবহার করুন।\n- সার্কিট টেস্ট করার আগে সংযোগ ডাবল চেক করুন।`,
+        },
+        quizSet: [
+          {
+            id: "q-ai-1",
+            questionText: `${currentPresentationTitle}-এর মূল উদ্দেশ্য কী?`,
+            options: [
+              "সার্কিটের মূল উপাদান বিশ্লেষণ",
+              "কেবল তাত্ত্বিক পড়াশোনা",
+              "অপ্রয়োজনীয় সংযোগ তৈরি",
+              "সরাসরি শর্ট সার্কিট করা",
+            ],
+            correctAnswerIndex: 0,
+            explanation: "সার্কিট উপাদান ও সুরক্ষা বজায় রাখা এই পাঠের মূল লক্ষ্য।",
+            conceptTopic: "বেসিক কনসেপ্ট",
+          },
+          {
+            id: "q-ai-2",
+            questionText: "কর্মশালায় কাজ শুরুর পূর্বে সবচেয়ে গুরুত্বপূর্ণ ধাপ কোনটি?",
+            options: [
+              "ব্যক্তিগত সুরক্ষা সামগ্রী (PPE) পরিধান",
+              "সার্কিট দ্রুত অন করা",
+              "টুলস এলোমেলো রাখা",
+              "সুরক্ষা ফিউজ খুলে রাখা",
+            ],
+            correctAnswerIndex: 0,
+            explanation: "ল্যাব ও ওয়ার্কশপে ব্যক্তিগত নিরাপত্তা সরঞ্জাম (PPE) সবার আগে প্রয়োজন।",
+            conceptTopic: "ল্যাব সেফটি",
+          },
+        ],
+      };
+      setGeneratedPackage(mockPackage);
+      setEditableMarkdown(mockPackage.blogPost.markdownContent);
+      toast.info("অফলাইন রেসিলিয়েন্ট ক্লাস প্যাকেজ লোড হয়েছে!");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Add AI Package directly into the Selected Course Chapter as Blocks!
+  const handleAddAiPackageToChapter = async () => {
+    if (!generatedPackage) return;
+    if (!selectedCourse) {
+      toast.error("প্রথমে কোর্স নির্বাচন করুন");
+      return;
+    }
+    const targetChapter = selectedCourse.chapters[0];
+    if (!targetChapter) {
+      toast.error("নির্বাচিত কোর্সে কোনো অধ্যায় নেই। প্রথমে একটি অধ্যায় তৈরি করুন।");
+      return;
+    }
+
+    try {
+      setIsAddingToChapter(true);
+
+      // 1. Post Blog Part Block
+      await fetch(`/api/learning/chapters/${targetChapter.id}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemType: "BLOG_PART",
+          title: generatedPackage.blogPost.title,
+          titleBangla: generatedPackage.blogPost.title,
+          contentMarkdown: editableMarkdown || generatedPackage.blogPost.markdownContent,
+          summary: generatedPackage.lessonSummary.briefOverview,
+          keyTakeaways: generatedPackage.lessonSummary.keyConcepts,
+          readTimeMinutes: generatedPackage.blogPost.estimatedReadMinutes || 6,
+          isMandatory: true,
+          isPublished: true,
+          xpReward: 50,
+          unlockRule: "UNLOCKED",
+        }),
+      });
+
+      // 2. Post Checkpoint Quiz Block
+      if (generatedPackage.quizSet && generatedPackage.quizSet.length > 0) {
+        await fetch(`/api/learning/chapters/${targetChapter.id}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            itemType: "QUIZ",
+            title: `Checkpoint Assessment: ${generatedPackage.blogPost.title}`,
+            titleBangla: `চেকপয়েন্ট মূল্যায়ন কুইজ: ${generatedPackage.blogPost.title}`,
+            quizQuestions: generatedPackage.quizSet.map((q, idx) => ({
+              id: `q-gen-${Date.now()}-${idx}`,
+              questionText: q.questionText,
+              options: q.options,
+              correctOptionIndex: q.correctAnswerIndex ?? 0,
+              explanation: q.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
+              marks: 1,
+            })),
+            isMandatory: true,
+            isPublished: true,
+            xpReward: 75,
+            passingScore: 60,
+            minScoreToUnlockNext: 60,
+            attemptLimit: 3,
+            timeLimitSeconds: 300,
+            unlockRule: "PREVIOUS_ITEM_COMPLETED",
+          }),
+        });
+      }
+
+      toast.success("সফলভাবে অধ্যায়ে রিচ ব্লগ পার্ট ও চেকপয়েন্ট কুইজ ব্লক যুক্ত হয়েছে!");
+      await fetchCourses();
+      setActiveSubTab("builder");
+    } catch (err) {
+      console.error(err);
+      toast.error("অধ্যায়ে ব্লক যুক্ত করতে ব্যর্থ হয়েছে");
+    } finally {
+      setIsAddingToChapter(false);
+    }
+  };
+
+  // ==========================================
+  // SUB-TAB 3: SEQUENTIAL BLOCK FLOW PREVIEW & ONE-BY-ONE QUIZ
+  // ==========================================
+  // Interactive Session State for Progressive Locking Demonstration
+  const [completedItemIds, setCompletedItemIds] = useState<number[]>([1001]);
+  const [activePreviewItem, setActivePreviewItem] = useState<ChapterContentItemData | null>(null);
+  const [previewQuizCurrentQ, setPreviewQuizCurrentQ] = useState<number>(0);
+  const [previewQuizAnswers, setPreviewQuizAnswers] = useState<Record<string, number>>({});
+  const [previewConfirmedQs, setPreviewConfirmedQs] = useState<Record<string, boolean>>({});
+  const [previewStreak, setPreviewStreak] = useState<number>(0);
+  const [previewXpEarned, setPreviewXpEarned] = useState<number>(0);
+
+  // Fetch courses from API
+  const fetchCourses = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/learning/courses");
+      const data = await res.json();
+      if (data.success && data.courses) {
+        setCourses(data.courses);
+        if (!selectedCourseId && data.courses.length > 0) {
+          const match = data.courses.find(
+            (c: CourseItem) =>
+              c.numericClass === filterClass &&
+              (!c.tradeCode || c.tradeCode === filterTrade)
+          );
+          setSelectedCourseId(match ? match.id : data.courses[0].id);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("কোর্স লোড করতে সমস্যা হয়েছে");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  const selectedCourse = useMemo(() => {
+    return courses.find((c) => c.id === selectedCourseId) || null;
+  }, [courses, selectedCourseId]);
+
+  const adminFilteredCourses = useMemo(() => {
+    const list = courses.filter((c) => {
+      if (c.numericClass !== filterClass) return false;
+      if (adminClassHasTrade && filterTrade !== "all") {
+        if (c.tradeCode !== filterTrade && !c.code.includes(filterTrade)) return false;
+      }
+      return true;
+    });
+    return list.length > 0 ? list : courses;
+  }, [courses, filterClass, adminClassHasTrade, filterTrade]);
+
+  // Handle Drag & Drop reordering
+  const handleDragStart = (itemId: number, chapterId: number) => {
+    setDraggedItemId(itemId);
+    setActiveChapterId(chapterId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, itemId: number) => {
+    e.preventDefault();
+    setDraggedOverItemId(itemId);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetItemId: number, chapterId: number) => {
+    e.preventDefault();
+    if (!draggedItemId || draggedItemId === targetItemId || activeChapterId !== chapterId) {
+      setDraggedItemId(null);
+      setDraggedOverItemId(null);
+      return;
+    }
+
+    const chapter = selectedCourse?.chapters.find((ch) => ch.id === chapterId);
+    if (!chapter) return;
+
+    const items = [...chapter.items].sort((a, b) => a.orderIndex - b.orderIndex);
+    const draggedIdx = items.findIndex((i) => i.id === draggedItemId);
+    const targetIdx = items.findIndex((i) => i.id === targetItemId);
+
+    if (draggedIdx === -1 || targetIdx === -1) return;
+
+    const [moved] = items.splice(draggedIdx, 1);
+    items.splice(targetIdx, 0, moved);
+
+    const newOrderIds = items.map((i) => i.id);
+
+    // Optimistic UI update
+    setCourses((prev) =>
+      prev.map((c) => {
+        if (c.id !== selectedCourse?.id) return c;
+        return {
+          ...c,
+          chapters: c.chapters.map((ch) => {
+            if (ch.id !== chapterId) return ch;
+            return {
+              ...ch,
+              items: items.map((it, idx) => ({ ...it, orderIndex: idx + 1 })),
+            };
+          }),
+        };
+      })
+    );
+
+    setDraggedItemId(null);
+    setDraggedOverItemId(null);
+
+    try {
+      const res = await fetch(`/api/learning/chapters/${chapterId}/reorder`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemIdsInOrder: newOrderIds }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("সিকোয়েন্স সফলভাবে আপডেট করা হয়েছে!");
+      } else {
+        toast.error(data.error || "পুনর্বিন্যাস ব্যর্থ হয়েছে");
+        fetchCourses();
+      }
+    } catch {
+      toast.error("সার্ভার ত্রুটি");
+      fetchCourses();
+    }
+  };
+
+  // Move Up / Move Down buttons for accessible reordering
+  const handleMoveStep = async (chapterId: number, itemId: number, direction: "up" | "down") => {
+    const chapter = selectedCourse?.chapters.find((ch) => ch.id === chapterId);
+    if (!chapter) return;
+
+    const items = [...chapter.items].sort((a, b) => a.orderIndex - b.orderIndex);
+    const idx = items.findIndex((i) => i.id === itemId);
+    if (idx === -1) return;
+    if (direction === "up" && idx === 0) return;
+    if (direction === "down" && idx === items.length - 1) return;
+
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    const temp = items[idx];
+    items[idx] = items[swapIdx];
+    items[swapIdx] = temp;
+
+    const newOrderIds = items.map((i) => i.id);
+
+    try {
+      const res = await fetch(`/api/learning/chapters/${chapterId}/reorder`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemIdsInOrder: newOrderIds }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("সিকোয়েন্স পরিবর্তিত হয়েছে");
+        fetchCourses();
+      }
+    } catch {
+      toast.error("পুনর্বিন্যাস ব্যর্থ হয়েছে");
+    }
+  };
+
+  // Create Course
+  const handleCreateCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("/api/learning/courses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCourseForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("কোর্স সফলভাবে তৈরি হয়েছে!");
+        setShowCourseModal(false);
+        await fetchCourses();
+        setSelectedCourseId(data.course.id);
+      } else {
+        toast.error(data.error || "কোর্স তৈরি করা যায়নি");
+      }
+    } catch {
+      toast.error("নেটওয়ার্ক ত্রুটি");
+    }
+  };
+
+  // Create Chapter
+  const handleCreateChapter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCourseId) return;
+
+    try {
+      const res = await fetch("/api/learning/chapters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId: selectedCourseId,
+          ...newChapterForm,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("অধ্যায় সফলভাবে যুক্ত করা হয়েছে!");
+        setShowChapterModal(false);
+        setNewChapterForm({
+          title: "",
+          titleBangla: "",
+          description: "",
+          unlockRule: "PREVIOUS_COMPLETED",
+        });
+        fetchCourses();
+      } else {
+        toast.error(data.error || "অধ্যায় তৈরি করা যায়নি");
+      }
+    } catch {
+      toast.error("নেটওয়ার্ক ত্রুটি");
+    }
+  };
+
+  // Delete Chapter
+  const handleDeleteChapter = async (chapterId: number) => {
+    if (
+      !confirm(
+        "আপনি কি নিশ্চিতভাবে এই অধ্যায়টি মুছে ফেলতে চান? এর অধীনস্থ সকল ব্লগ পার্ট ও কুইজ মুছে যাবে।"
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/learning/chapters/${chapterId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("অধ্যায় সফলভাবে মুছে ফেলা হয়েছে");
+        fetchCourses();
+      } else {
+        toast.error(data.error || "অধ্যায় মোছা যায়নি");
+      }
+    } catch {
+      toast.error("নেটওয়ার্ক ত্রুটি");
+    }
+  };
+
+  // Open Item Creator Modal
+  const openAddItemModal = (chapterId: number, type: ContentItemType) => {
+    setTargetChapterId(chapterId);
+    setItemModalType(type);
+    setEditingItem(null);
+
+    const chapter = selectedCourse?.chapters.find((ch) => ch.id === chapterId);
+    const existingParts = chapter?.items.filter((i) => i.itemType === "BLOG_PART").length || 0;
+
+    setItemForm({
+      title:
+        type === "BLOG_PART"
+          ? `Part ${existingParts + 1}: Technical Guide`
+          : "Checkpoint Assessment Quiz",
+      titleBangla:
+        type === "BLOG_PART"
+          ? `পার্ট ${existingParts + 1}: ব্যবহারিক নির্দেশিকা`
+          : "চেকপয়েন্ট মূল্যায়ন কুইজ",
+      isMandatory: true,
+      isPublished: true,
+      xpReward: type === "BLOG_PART" ? 50 : 75,
+      passingScore: 60,
+      minScoreToUnlockNext: 60,
+      attemptLimit: type === "QUIZ" ? 3 : 0,
+      durationMinutes: type === "BLOG_PART" ? 6 : 5,
+      blogPartNumber: existingParts + 1,
+      contentMarkdown:
+        type === "BLOG_PART"
+          ? `# পার্ট ${existingParts + 1}: পাঠ্য বিষয়\n\n## ভূমিকা\nএখানে বিস্তারিত কারিগরি নির্দেশনা লিখুন...`
+          : "",
+      summary: "",
+      keyTakeawaysText: "",
+      timeLimitSeconds: 300,
+      quizQuestions: [
+        {
+          id: `q-init-1`,
+          questionText: "একটি আদর্শ মূল্যায়ন প্রশ্ন?",
+          options: ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+          correctOptionIndex: 0,
+          explanation: "সঠিক উত্তরের কারণ এখানে লিখুন।",
+          marks: 1,
+        },
+      ],
+    });
+
+    setShowItemModal(true);
+  };
+
+  // Save Item
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetChapterId) return;
+
+    const payload = {
+      ...itemForm,
+      itemType: itemModalType,
+      keyTakeaways: itemForm.keyTakeawaysText
+        ? itemForm.keyTakeawaysText
+            .split("\n")
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [],
+    };
+
+    try {
+      const url = editingItem
+        ? `/api/learning/items/${editingItem.id}`
+        : `/api/learning/chapters/${targetChapterId}/items`;
+      const method = editingItem ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success(
+          editingItem ? "আইটেম সফলভাবে আপডেট হয়েছে" : "নতুন আইটেম যোগ করা হয়েছে!"
+        );
+        setShowItemModal(false);
+        fetchCourses();
+      } else {
+        toast.error(data.error || "সংরক্ষণ করা যায়নি");
+      }
+    } catch {
+      toast.error("সার্ভার ত্রুটি");
+    }
+  };
+
+  // Delete Item
+  const handleDeleteItem = async (itemId: number) => {
+    if (!confirm("আপনি কি নিশ্চিতভাবে এই আইটেমটি মুছে ফেলতে চান?")) return;
+    try {
+      const res = await fetch(`/api/learning/items/${itemId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("আইটেম মুছে ফেলা হয়েছে");
+        fetchCourses();
+      }
+    } catch {
+      toast.error("আইটেম মোছা যায়নি");
+    }
+  };
+
+  // Add question to quiz form
+  const handleAddQuestionToQuiz = () => {
+    if (!newQuestion.questionText || !newQuestion.optionA || !newQuestion.optionB) {
+      toast.error("প্রশ্ন ও অন্তত ২টি অপশন পূরণ করুন");
+      return;
+    }
+
+    const options = [newQuestion.optionA, newQuestion.optionB];
+    if (newQuestion.optionC) options.push(newQuestion.optionC);
+    if (newQuestion.optionD) options.push(newQuestion.optionD);
+
+    const questionItem: QuizQuestionItem = {
+      id: `q-${Date.now()}`,
+      questionText: newQuestion.questionText,
+      options,
+      correctOptionIndex: Number(newQuestion.correctOptionIndex),
+      explanation: newQuestion.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
+      marks: 1,
+    };
+
+    setItemForm((prev) => ({
+      ...prev,
+      quizQuestions: [...prev.quizQuestions, questionItem],
+    }));
+
+    setNewQuestion({
+      questionText: "",
+      optionA: "",
+      optionB: "",
+      optionC: "",
+      optionD: "",
+      correctOptionIndex: 0,
+      explanation: "",
+    });
+
+    toast.success("প্রশ্ন কুইজে যোগ হয়েছে!");
+  };
+
+  const handleRemoveQuestion = (qId: string) => {
+    setItemForm((prev) => ({
+      ...prev,
+      quizQuestions: prev.quizQuestions.filter((q) => q.id !== qId),
+    }));
+  };
+
+  // Interactive Preview: Quiz option select with Immediate Feedback
+  const handlePreviewSelectOption = (
+    questionId: string,
+    optIdx: number,
+    correctIdx: number,
+    explanation: string
+  ) => {
+    if (previewConfirmedQs[questionId]) return;
+
+    setPreviewQuizAnswers((prev) => ({ ...prev, [questionId]: optIdx }));
+    setPreviewConfirmedQs((prev) => ({ ...prev, [questionId]: true }));
+
+    const isCorrect = optIdx === correctIdx;
+    if (isCorrect) {
+      setPreviewStreak((prev) => prev + 1);
+      setPreviewXpEarned((prev) => prev + 25);
+    } else {
+      setPreviewStreak(0);
+    }
+  };
+
+  // Complete Block Part in Preview
+  const handleCompletePreviewBlog = (itemId: number) => {
+    try {
+      confetti({
+        particleCount: 70,
+        spread: 60,
+        origin: { y: 0.6 },
+        colors: ["#10b981", "#06b6d4", "#6366f1", "#f59e0b"],
+      });
+    } catch {}
+
+    setCompletedItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+    toast.success("ব্লক পড়া সম্পন্ন হয়েছে! পরবর্তী চেকপয়েন্ট কুইজ আনলক হয়েছে।");
+    setActivePreviewItem(null);
+  };
+
+  // Complete Quiz in Preview
+  const handleCompletePreviewQuiz = (itemId: number) => {
+    try {
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.5 },
+        colors: ["#10b981", "#3b82f6", "#f59e0b", "#ec4899"],
+      });
+    } catch {}
+
+    setCompletedItemIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+    toast.success("অভিনন্দন! কুইজ উত্তীর্ণ হয়েছেন এবং পরবর্তী ব্লক পার্ট আনলক হয়েছে!");
+    setActivePreviewItem(null);
+    setPreviewQuizCurrentQ(0);
+    setPreviewQuizAnswers({});
+    setPreviewConfirmedQs({});
+  };
+
+  return (
+    <div className="space-y-6 pb-12 overflow-y-auto">
+      {/* Top Main Banner & Segmented Studio Tabs */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 p-6 sm:p-8 shadow-xl text-white">
+        <div className="absolute right-0 top-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider">
+                UNIFIED ACADEMIC STUDIO
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 text-[10px] font-bold">
+                PTSC Chapter & Class Engine
+              </span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              📚 অধ্যায়ভিত্তিক কন্টেন্ট ও ক্লাস স্টুডিও
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+              স্লাইড থেকে ব্লগ তৈরি, লেসন প্ল্যান জেনারেশন এবং সিকোয়েন্সিয়াল চ্যাপ্টার ও ব্লক
+              পাথওয়ে ম্যানেজমেন্ট—সবকিছু একক প্রিমিয়াম প্ল্যাটফর্মে।
+            </p>
+          </div>
+
+          {/* Sub-Tab Switcher Pills (Notion / Duolingo Style) */}
+          <div className="flex items-center gap-1.5 p-1.5 bg-slate-800/90 border border-slate-700/80 rounded-2xl backdrop-blur-md self-start lg:self-auto overflow-x-auto max-w-full">
+            <button
+              onClick={() => setActiveSubTab("builder")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeSubTab === "builder"
+                  ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-md shadow-emerald-500/20 scale-102"
+                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>১. অধ্যায় ও ব্লক পাথওয়ে</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab("ai_prep")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeSubTab === "ai_prep"
+                  ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-md shadow-indigo-500/20 scale-102"
+                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>২. AI স্লাইড ও লেসন প্ল্যান</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab("preview")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeSubTab === "preview"
+                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-amber-500/20 scale-102"
+                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+              }`}
+            >
+              <Play className="w-4 h-4" />
+              <span>৩. সিকোয়েন্সিয়াল ফ্লো প্রিভিউ</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 1: CHAPTER & SEQUENTIAL BLOCK PATHWAY BUILDER                     */}
+      {/* ========================================================================= */}
+      {activeSubTab === "builder" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-6"
+        >
+          {/* Filter and Course Selection Strip */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            {/* Class Filter */}
+            <div className="md:col-span-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-xs">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                শ্রেণি ফিল্টার (Class) *
+              </label>
+              <select
+                value={filterClass}
+                onChange={(e) => handleAdminClassChange(Number(e.target.value))}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+              >
+                {ACADEMIC_CLASSES.map((cls) => (
+                  <option key={cls.id} value={cls.numericValue}>
+                    {cls.nameBangla} {cls.hasTrade ? "(ট্রেড আছে)" : "(ট্রেড নেই)"}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Trade Filter */}
+            <div className="md:col-span-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-xs">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                ট্রেড ফিল্টার (Trade)
+              </label>
+              {!adminClassHasTrade ? (
+                <div className="w-full p-2 bg-slate-100 dark:bg-slate-800/80 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                    <span>ট্রেড প্রযোজ্য নয়</span>
+                  </span>
+                  <span className="text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded font-mono">
+                    ৬-৮ সাধারণ
+                  </span>
+                </div>
+              ) : (
+                <select
+                  value={filterTrade}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFilterTrade(val);
+                    const match = courses.find(
+                      (c) =>
+                        c.numericClass === filterClass &&
+                        (val === "all" || c.tradeCode === val || c.code.includes(val))
+                    );
+                    if (match) setSelectedCourseId(match.id);
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+                >
+                  <option value="all">সব ট্রেড ({adminApplicableTrades.length} টি ট্রেড)</option>
+                  {adminApplicableTrades.map((tr) => (
+                    <option key={tr.id} value={tr.code}>
+                      {tr.nameBangla} ({tr.code})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Course Select Box */}
+            <div className="md:col-span-6 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                  সক্রিয় বিষয় / কোর্স নির্বাচন ({adminFilteredCourses.length} টি কোর্স পাওয়া গেছে)
+                </label>
+                <button
+                  onClick={() => setShowCourseModal(true)}
+                  className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>+ নতুন কোর্স</span>
+                </button>
+              </div>
+              <select
+                value={selectedCourseId || ""}
+                onChange={(e) => setSelectedCourseId(Number(e.target.value))}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+              >
+                {adminFilteredCourses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    [{c.code}] {c.titleBangla} — {c.className} {c.tradeName ? `(${c.tradeName})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-2" />
+              <p className="text-xs text-slate-500 font-bold">কোর্স ও অধ্যায় লোড হচ্ছে...</p>
+            </div>
+          ) : !selectedCourse ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-xs">
+              <AlertCircle className="w-10 h-10 text-amber-500 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-800 dark:text-white">কোনো কোর্স পাওয়া যায়নি</h3>
+              <p className="text-xs text-slate-500">নির্বাচিত শ্রেণি ও ট্রেডের জন্য একটি নতুন কোর্স তৈরি করুন।</p>
+              <button
+                onClick={() => setShowCourseModal(true)}
+                className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-sm"
+              >
+                কোর্স তৈরি করুন
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Active Course Banner */}
+              <div className="bg-slate-900 text-white p-6 sm:p-7 rounded-3xl border border-slate-800 relative overflow-hidden shadow-lg">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-emerald-950/90 border border-emerald-700/80 text-emerald-300 font-bold">
+                        {selectedCourse.code}
+                      </span>
+                      <span>·</span>
+                      <span>{selectedCourse.className}</span>
+                      {selectedCourse.tradeName && (
+                        <>
+                          <span>·</span>
+                          <span className="text-cyan-400 font-bold">{selectedCourse.tradeName}</span>
+                        </>
+                      )}
+                      <span>·</span>
+                      <span className="text-amber-400 font-bold">মোট {selectedCourse.totalXp} XP</span>
+                    </div>
+
+                    <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                      {selectedCourse.titleBangla}
+                    </h2>
+                    <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                      {selectedCourse.description}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 self-start md:self-auto flex-wrap">
+                    <button
+                      onClick={() => setActiveSubTab("ai_prep")}
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>AI দিয়ে স্লাইড থেকে ব্লক বানান</span>
+                    </button>
+                    <button
+                      onClick={() => setShowChapterModal(true)}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>+ নতুন অধ্যায় যোগ</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Chapters List */}
+              {selectedCourse.chapters.length === 0 ? (
+                <div className="p-10 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-300 dark:border-slate-800 space-y-3">
+                  <BookOpen className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-xs text-slate-500 font-bold">এই কোর্সে এখনও কোনো অধ্যায় নেই।</p>
+                  <button
+                    onClick={() => setShowChapterModal(true)}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
+                  >
+                    প্রথম অধ্যায় যোগ করুন
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {selectedCourse.chapters
+                    .sort((a, b) => a.orderIndex - b.orderIndex)
+                    .map((chapter, chapterIdx) => (
+                      <div
+                        key={chapter.id}
+                        className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden"
+                      >
+                        {/* Chapter Header */}
+                        <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 font-black text-sm flex items-center justify-center shrink-0 border border-emerald-500/20">
+                              {chapterIdx + 1}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                                <span className="font-bold">অধ্যায় {chapter.chapterNumber}</span>
+                                <span>·</span>
+                                <span>{chapter.items.length} টি কনটেন্ট ব্লক</span>
+                                <span>·</span>
+                                <span className="text-emerald-600 dark:text-cyan-400 font-bold">
+                                  {chapter.unlockRule === "PREVIOUS_COMPLETED"
+                                    ? "🔒 পূর্ববর্তী অধ্যায় সম্পন্নে আনলক"
+                                    : "তাৎক্ষণিক উন্মুক্ত"}
+                                </span>
+                              </div>
+                              <h3 className="text-base font-extrabold text-slate-900 dark:text-white mt-0.5">
+                                {chapter.titleBangla}
+                              </h3>
+                            </div>
+                          </div>
+
+                          {/* Chapter Actions: Add Blog, Add Quiz, Delete Chapter */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              onClick={() => openAddItemModal(chapter.id, "BLOG_PART")}
+                              className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>+ ব্লক পার্ট (Blog)</span>
+                            </button>
+                            <button
+                              onClick={() => openAddItemModal(chapter.id, "QUIZ")}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <Award className="w-3.5 h-3.5" />
+                              <span>+ চেকপয়েন্ট কুইজ</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteChapter(chapter.id)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                              title="অধ্যায় মুছুন"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Sequential Content Flow Items */}
+                        <div className="p-4 sm:p-5 space-y-2.5">
+                          {chapter.items.length === 0 ? (
+                            <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                              এই অধ্যায়ে এখনও কোনো ব্লক পার্ট বা কুইজ নেই। উপরের বোতাম দিয়ে ব্লক পার্ট বা কুইজ যোগ করুন।
+                            </div>
+                          ) : (
+                            <div className="space-y-2.5">
+                              <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 px-2 mb-1">
+                                <span>সিকোয়েন্সিয়াল ফ্লো (Sequential Flow) — ক্রমানুসারে সাজানো ব্লকসমূহ</span>
+                                <span>প্রোগ্রেসিভ লকিং ও অ্যাকশন</span>
+                              </div>
+
+                              {chapter.items
+                                .sort((a, b) => a.orderIndex - b.orderIndex)
+                                .map((item, itemIdx) => {
+                                  const isQuiz = item.itemType === "QUIZ";
+                                  const isDragging = draggedItemId === item.id;
+                                  const isDragOver = draggedOverItemId === item.id;
+
+                                  return (
+                                    <div
+                                      key={item.id}
+                                      draggable
+                                      onDragStart={() => handleDragStart(item.id, chapter.id)}
+                                      onDragOver={(e) => handleDragOver(e, item.id)}
+                                      onDrop={(e) => handleDrop(e, item.id, chapter.id)}
+                                      className={`p-3.5 rounded-2xl border transition-all duration-150 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                                        isDragging
+                                          ? "opacity-40 border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30"
+                                          : ""
+                                      } ${
+                                        isDragOver
+                                          ? "border-cyan-500 ring-2 ring-cyan-500/20 bg-cyan-50/20"
+                                          : ""
+                                      } ${
+                                        !item.isPublished
+                                          ? "bg-slate-50 dark:bg-slate-900/50 opacity-60 border-slate-200 dark:border-slate-800"
+                                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs"
+                                      }`}
+                                    >
+                                      {/* Left: Drag Handle, Sequence Badge, Type & Title */}
+                                      <div className="flex items-start md:items-center gap-3">
+                                        <div
+                                          className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 p-1 -ml-1"
+                                          title="ড্র্যাগ করে ক্রম পরিবর্তন করুন"
+                                        >
+                                          <GripVertical className="w-4 h-4" />
+                                        </div>
+
+                                        {/* Order index badge */}
+                                        <div className="w-7 h-7 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-black flex items-center justify-center shrink-0">
+                                          #{item.orderIndex}
+                                        </div>
+
+                                        {/* Type icon & badge */}
+                                        <div className="flex items-center gap-2.5">
+                                          <div
+                                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                                              isQuiz
+                                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                                                : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                                            }`}
+                                          >
+                                            {isQuiz ? (
+                                              <Award className="w-4 h-4" />
+                                            ) : (
+                                              <FileText className="w-4 h-4" />
+                                            )}
+                                          </div>
+
+                                          <div>
+                                            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                              <span className="font-extrabold uppercase">
+                                                {isQuiz
+                                                  ? `চেকপয়েন্ট কুইজ (${item.quizQuestions?.length || 0} টি প্রশ্ন)`
+                                                  : `ব্লক পার্ট ${item.blogPartNumber || itemIdx + 1}`}
+                                              </span>
+                                              <span>·</span>
+                                              <span>{item.durationMinutes} মিনিট</span>
+                                              <span>·</span>
+                                              <span className="text-amber-600 dark:text-amber-400 font-bold">
+                                                +{item.xpReward} XP
+                                              </span>
+                                              {/* Progressive locking badge */}
+                                              {item.unlockRule === "PREVIOUS_ITEM_COMPLETED" && (
+                                                <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5">
+                                                  <Lock className="w-3 h-3" />
+                                                  <span>পূর্ববর্তী ব্লক সাপেক্ষ (Locked 🔒)</span>
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white leading-snug">
+                                              {item.titleBangla}
+                                            </h4>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Right: Step Move, Edit, and Delete */}
+                                      <div className="flex items-center gap-1.5 self-end md:self-auto shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMoveStep(chapter.id, item.id, "up")}
+                                          disabled={itemIdx === 0}
+                                          className="p-1 rounded-lg text-slate-400 hover:text-slate-600 disabled:opacity-20 cursor-pointer"
+                                          title="উপরে নিন"
+                                        >
+                                          <ArrowUp className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMoveStep(chapter.id, item.id, "down")}
+                                          disabled={itemIdx === chapter.items.length - 1}
+                                          className="p-1 rounded-lg text-slate-400 hover:text-slate-600 disabled:opacity-20 cursor-pointer"
+                                          title="নিচে নিন"
+                                        >
+                                          <ArrowDown className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteItem(item.id)}
+                                          className="p-1 text-slate-400 hover:text-rose-500 rounded-lg cursor-pointer"
+                                          title="মুছুন"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 2: AI SLIDE TO BLOG & TEACHER LESSON PLAN GENERATOR               */}
+      {/* ========================================================================= */}
+      {activeSubTab === "ai_prep" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-6"
+        >
+          {/* Controls Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-500" />
+                  <span>AI স্লাইড টু ব্লগ ও লেসন প্ল্যান জেনারেটর</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ভোকেশনাল পাওয়ারপয়েন্ট স্লাইড নির্বাচন করে ১-ক্লিকে রিচ ব্লগ এবং কুইজ সেট তৈরি করুন।
+                </p>
+              </div>
+
+              {/* Quick Add to Chapter Button if package is ready */}
+              {generatedPackage && (
+                <button
+                  onClick={handleAddAiPackageToChapter}
+                  disabled={isAddingToChapter}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  {isAddingToChapter ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Layers className="w-4 h-4" />
+                  )}
+                  <span>📥 সরাসরি এই অধ্যায়ে ব্লক হিসেবে যুক্ত করুন</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-bold">
+              {/* Presentation select */}
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-slate-500">প্রেজেন্টেশন নির্বাচন করুন *</label>
+                <select
+                  value={selectedPresentationId}
+                  onChange={(e) => handlePresentationChange(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+                >
+                  {AVAILABLE_PRESENTATIONS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title} ({p.subject} · {p.totalSlides} স্লাইড)
+                    </option>
+                  ))}
+                  <option value="custom">+ নতুন ফাইল আপলোড করুন (Custom PPTX)</option>
+                </select>
+              </div>
+
+              {/* Slide Range */}
+              <div className="space-y-1.5">
+                <label className="text-slate-500">শুরু স্লাইড</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={startSlide}
+                  onChange={(e) => setStartSlide(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-slate-500">শেষ স্লাইড</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={endSlide}
+                  onChange={(e) => setEndSlide(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Custom file upload if custom is selected */}
+            {isCustomUpload && (
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-300 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-indigo-500" />
+                  <div>
+                    <p className="font-bold text-slate-800 dark:text-white">
+                      কারিগরি প্রেজেন্টেশন ফাইল (.pptx) নির্বাচন করুন
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {customPresentationTitle || "কোনো ফাইল নির্বাচিত হয়নি"}
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  accept=".pptx,.ppt,.pdf"
+                  onChange={handleFileUpload}
+                  className="text-xs"
+                />
+              </div>
+            )}
+
+            {/* Custom Teacher notes */}
+            <div className="space-y-1.5 text-xs font-bold">
+              <label className="text-slate-500">শিক্ষকের বিশেষ নির্দেশনা (ঐচ্ছিক)</label>
+              <textarea
+                rows={2}
+                placeholder="যেমন: ওহমের সূত্রের গাণিতিক উদাহরণ ও সিরিজ সার্কিট সেফটি নিয়মে বেশি জোর দিন..."
+                value={teacherNotes}
+                onChange={(e) => setTeacherNotes(e.target.value)}
+                className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-normal text-xs leading-relaxed focus:outline-none"
+              />
+            </div>
+
+            <button
+              onClick={handleGenerateClassPackage}
+              disabled={isGenerating}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 transition cursor-pointer"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>AI স্লাইড প্রসেস করছে ও প্যাকেজ বানাচ্ছে...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>AI দিয়ে ৩-ইন-১ লেসন প্যাকেজ জেনারেট করুন</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Generated Package Output Area */}
+          {generatedPackage && (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+              {/* Output Sub-Tabs */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActivePackageTab("summary")}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                      activePackageTab === "summary"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    ১. লেসন প্ল্যান ও সামারি
+                  </button>
+                  <button
+                    onClick={() => setActivePackageTab("blog")}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                      activePackageTab === "blog"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    ২. স্লাইড টু রিচ ব্লগ
+                  </button>
+                  <button
+                    onClick={() => setActivePackageTab("quiz")}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                      activePackageTab === "quiz"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    ৩. চেকপয়েন্ট কুইজ ({generatedPackage.quizSet.length})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAddAiPackageToChapter}
+                    disabled={isAddingToChapter}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                  >
+                    {isAddingToChapter ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4" />
+                    )}
+                    <span>অধ্যায়ে ব্লক হিসেবে যুক্ত করুন</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* View 1: Lesson Summary */}
+              {activePackageTab === "summary" && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-900/50">
+                    <span className="text-[10px] uppercase font-bold text-indigo-500 block">
+                      পাঠের সারসংক্ষেপ (Overview)
+                    </span>
+                    <p className="text-xs sm:text-sm text-slate-800 dark:text-slate-200 mt-1 leading-relaxed">
+                      {generatedPackage.lessonSummary.briefOverview}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <GraduationCap className="w-4 h-4 text-emerald-500" />
+                        <span>শিখনফল (Objectives)</span>
+                      </span>
+                      <ul className="space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                        {generatedPackage.lessonSummary.objectives.map((obj, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-emerald-500 font-bold shrink-0">•</span>
+                            <span>{obj}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <ShieldAlert className="w-4 h-4 text-amber-500" />
+                        <span>সেফটি ও ব্যবহারিক টিপস</span>
+                      </span>
+                      <ul className="space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                        {generatedPackage.lessonSummary.safetyTips.map((tip, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
+                            <span className="shrink-0">⚠</span>
+                            <span>{tip}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* View 2: Slide to Blog */}
+              {activePackageTab === "blog" && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">
+                      ব্লগ পোস্ট: {generatedPackage.blogPost.title} ({generatedPackage.blogPost.estimatedReadMinutes} মিনিট পাঠ)
+                    </span>
+                    <button
+                      onClick={() =>
+                        setBlogEditMode((prev) => (prev === "preview" ? "edit" : "preview"))
+                      }
+                      className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                    >
+                      {blogEditMode === "preview" ? "✏️ এডিট মোড" : "👁️ প্রিভিউ মোড"}
+                    </button>
+                  </div>
+
+                  {blogEditMode === "edit" ? (
+                    <textarea
+                      rows={12}
+                      value={editableMarkdown}
+                      onChange={(e) => setEditableMarkdown(e.target.value)}
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 font-mono text-xs leading-relaxed rounded-2xl border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                  ) : (
+                    <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <InternationalStoryLessonRenderer
+                        markdown={editableMarkdown}
+                        titleBangla={generatedPackage?.blogPost?.title}
+                        summary={generatedPackage?.lessonSummary?.briefOverview}
+                        keyTakeaways={generatedPackage?.lessonSummary?.keyConcepts}
+                        durationMinutes={generatedPackage?.blogPost?.estimatedReadMinutes}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* View 3: Checkpoint Quiz */}
+              {activePackageTab === "quiz" && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {generatedPackage.quizSet.map((q, qIdx) => (
+                      <div
+                        key={q.id || qIdx}
+                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2 text-xs"
+                      >
+                        <p className="font-black text-slate-900 dark:text-white">
+                          {qIdx + 1}. {q.questionText}
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px]">
+                          {q.options.map((opt, oIdx) => (
+                            <div
+                              key={oIdx}
+                              className={`p-2 rounded-lg border ${
+                                oIdx === q.correctAnswerIndex
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-800 dark:text-emerald-300 font-bold"
+                                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400"
+                              }`}
+                            >
+                              {String.fromCharCode(65 + oIdx)}. {opt}
+                              {oIdx === q.correctAnswerIndex && " ✓"}
+                            </div>
+                          ))}
+                        </div>
+                        {q.explanation && (
+                          <p className="text-[11px] text-slate-500 italic pt-1 border-t border-slate-200 dark:border-slate-700">
+                            ব্যাখ্যা: {q.explanation}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 3: SEQUENTIAL BLOCK FLOW PREVIEW & ONE-BY-ONE QUIZ ARENA           */}
+      {/* ========================================================================= */}
+      {activeSubTab === "preview" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-6"
+        >
+          {/* Header Strip with Subject & Class info */}
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                <span className="font-bold text-amber-500">🎮 লাইভ সিকোয়েন্সিয়াল ফ্লো</span>
+                <span>·</span>
+                <span>প্রোগ্রেসিভ লকিং ও স্টেপ কুইজ টেস্ট</span>
+              </div>
+              <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                {selectedCourse?.titleBangla || "বিষয় নির্বাচন করুন"}
+              </h3>
+              <p className="text-xs text-slate-500">
+                নিচের ব্লক পার্টগুলো ক্রমানুসারে সাজানো আছে। পূর্ববর্তী ব্লক বা কুইজ সম্পন্ন না করলে পরবর্তী ব্লক লক থাকবে।
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 self-start md:self-auto">
+              <div className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-mono font-bold flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-amber-500 animate-pulse" />
+                <span>স্ট্রিক: {previewStreak}x</span>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-bold">
+                অর্জন: +{previewXpEarned} XP
+              </div>
+            </div>
+          </div>
+
+          {/* Chapters and Sequential Blocks Map */}
+          {selectedCourse?.chapters.map((chapter) => (
+            <div
+              key={chapter.id}
+              className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  অধ্যায় {chapter.chapterNumber}: {chapter.titleBangla}
+                </h4>
+                <span className="text-xs text-slate-500">
+                  {chapter.items.length} টি ব্লক পার্ট ও কুইজ
+                </span>
+              </div>
+
+              {/* Sequential Path Flow Nodes */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {chapter.items
+                  .sort((a, b) => a.orderIndex - b.orderIndex)
+                  .map((item, itemIdx) => {
+                    const isCompleted = completedItemIds.includes(item.id);
+                    const prevItem = chapter.items[itemIdx - 1];
+                    const isLocked =
+                      itemIdx > 0 &&
+                      prevItem &&
+                      !completedItemIds.includes(prevItem.id);
+
+                    const isQuiz = item.itemType === "QUIZ";
+
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          if (isLocked) {
+                            toast.warning(
+                              "ধারাবাহিক নিয়ম অনুযায়ী পূর্ববর্তী ধাপ সম্পন্ন না করে সামনে যাওয়া যাবে না (Locked 🔒)"
+                            );
+                            return;
+                          }
+                          setActivePreviewItem(item);
+                          setPreviewQuizCurrentQ(0);
+                        }}
+                        className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col justify-between gap-3 ${
+                          isLocked
+                            ? "opacity-50 bg-slate-100 dark:bg-slate-900 border-dashed border-slate-300 dark:border-slate-800 cursor-not-allowed"
+                            : isCompleted
+                            ? "bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-500/50 hover:border-emerald-500 cursor-pointer shadow-xs"
+                            : "bg-white dark:bg-slate-900 border-indigo-500/40 ring-1 ring-indigo-500/20 hover:scale-[1.02] cursor-pointer shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase ${
+                              isQuiz
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                            }`}
+                          >
+                            {isQuiz ? "চেকপয়েন্ট কুইজ" : `ব্লক পার্ট ${item.blogPartNumber || itemIdx + 1}`}
+                          </span>
+
+                          {isCompleted ? (
+                            <span className="text-emerald-500 flex items-center gap-1 text-[11px] font-bold">
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>সম্পন্ন</span>
+                            </span>
+                          ) : isLocked ? (
+                            <span className="text-slate-400 flex items-center gap-1 text-[11px] font-bold">
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>লকড 🔒</span>
+                            </span>
+                          ) : (
+                            <span className="text-indigo-600 dark:text-indigo-400 flex items-center gap-1 text-[11px] font-bold animate-pulse">
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>উন্মুক্ত</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div>
+                          <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white leading-snug">
+                            {item.titleBangla}
+                          </h5>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
+                            <span>{item.durationMinutes} মিনিট</span>
+                            <span>·</span>
+                            <span className="text-amber-600 font-bold">+{item.xpReward} XP</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                            isLocked
+                              ? "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                              : isCompleted
+                              ? "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200"
+                              : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs"
+                          }`}
+                        >
+                          {isLocked ? (
+                            <>
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>লকড (পূর্ববর্তী ব্লক করুন)</span>
+                            </>
+                          ) : isCompleted ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>পুনরায় পড়ুন</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3.5 h-3.5" />
+                              <span>{isQuiz ? "কুইজ শুরু করুন" : "পাঠটি পড়ুন"}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+
+          {/* Interactive Modal / Drawer for active preview item */}
+          <AnimatePresence>
+            {activePreviewItem && (
+              <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl p-6 sm:p-7 space-y-6"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase">
+                        {activePreviewItem.itemType === "QUIZ" ? "কুইজ মূল্যায়ন" : "রিচ ব্লগ কনটেন্ট"}
+                      </span>
+                      <h3 className="font-black text-slate-900 dark:text-white text-sm sm:text-base">
+                        {activePreviewItem.titleBangla}
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setActivePreviewItem(null)}
+                      className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Render Blog Part View */}
+                  {activePreviewItem.itemType === "BLOG_PART" ? (
+                    <div className="space-y-4">
+                      {activePreviewItem.summary && (
+                        <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-900/50 text-xs text-slate-800 dark:text-slate-200">
+                          <strong>💡 সারসংক্ষেপ:</strong> {activePreviewItem.summary}
+                        </div>
+                      )}
+
+                      {activePreviewItem.keyTakeaways &&
+                        activePreviewItem.keyTakeaways.length > 0 && (
+                          <div className="space-y-1.5">
+                            <span className="text-[11px] font-bold text-slate-500 uppercase">
+                              মূল শিখন পয়েন্ট:
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {activePreviewItem.keyTakeaways.map((k, i) => (
+                                <span
+                                  key={i}
+                                  className="px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-medium"
+                                >
+                                  ✓ {k}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                      <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed whitespace-pre-wrap bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+                        {activePreviewItem.contentMarkdown || "কোনো কনটেন্ট লেখা হয়নি।"}
+                      </div>
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          onClick={() => handleCompletePreviewBlog(activePreviewItem.id)}
+                          className="px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-xs flex items-center gap-2 shadow-md cursor-pointer hover:scale-102 active:scale-95 transition"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>✅ পড়া শেষ - পরবর্তী চেকপয়েন্ট কুইজ আনলক করুন</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Render Checkpoint Quiz: One-by-One Question Flow with Immediate Feedback */
+                    <div className="space-y-5">
+                      {(() => {
+                        const questions = activePreviewItem.quizQuestions || [];
+                        const totalQ = questions.length;
+                        const currentQ = questions[previewQuizCurrentQ];
+
+                        if (!currentQ) {
+                          return (
+                            <div className="py-6 text-center text-xs text-slate-500">
+                              এই কুইজে এখনও কোনো প্রশ্ন সংযুক্ত নেই।
+                            </div>
+                          );
+                        }
+
+                        const currentSelected = previewQuizAnswers[currentQ.id];
+                        const isConfirmed = !!previewConfirmedQs[currentQ.id];
+
+                        return (
+                          <div className="space-y-4">
+                            {/* Question Step Circles with Forward Locking */}
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-500">
+                                প্রশ্ন {previewQuizCurrentQ + 1} / {totalQ}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {questions.map((q, qIdx) => {
+                                  const isAns = previewConfirmedQs[q.id];
+                                  const isCur = qIdx === previewQuizCurrentQ;
+                                  const isLock = qIdx > previewQuizCurrentQ && !isAns;
+
+                                  return (
+                                    <div
+                                      key={q.id || qIdx}
+                                      className={`w-6 h-6 rounded-lg text-[10px] font-black flex items-center justify-center font-mono ${
+                                        isCur
+                                          ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                                          : isAns
+                                          ? "bg-emerald-500 text-white"
+                                          : isLock
+                                          ? "bg-slate-100 dark:bg-slate-800 text-slate-400"
+                                          : "bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200"
+                                      }`}
+                                    >
+                                      {isLock ? <Lock className="w-2.5 h-2.5" /> : qIdx + 1}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Question Card */}
+                            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 space-y-3">
+                              <h4 className="font-black text-sm sm:text-base text-slate-900 dark:text-white leading-snug">
+                                {previewQuizCurrentQ + 1}. {currentQ.questionText}
+                              </h4>
+
+                              {/* Options List */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                {currentQ.options.map((option, oIdx) => {
+                                  const isSelected = currentSelected === oIdx;
+                                  const isCorrect = oIdx === currentQ.correctOptionIndex;
+
+                                  let optStyle =
+                                    "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400";
+
+                                  if (isConfirmed) {
+                                    if (isCorrect) {
+                                      optStyle =
+                                        "bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-bold ring-2 ring-emerald-500/40";
+                                    } else if (isSelected && !isCorrect) {
+                                      optStyle =
+                                        "bg-rose-50 dark:bg-rose-950/60 border-rose-500 text-rose-800 dark:text-rose-200 font-bold ring-2 ring-rose-500/40";
+                                    } else {
+                                      optStyle =
+                                        "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60";
+                                    }
+                                  }
+
+                                  return (
+                                    <button
+                                      key={oIdx}
+                                      onClick={() =>
+                                        handlePreviewSelectOption(
+                                          currentQ.id,
+                                          oIdx,
+                                          currentQ.correctOptionIndex,
+                                          currentQ.explanation
+                                        )
+                                      }
+                                      disabled={isConfirmed}
+                                      className={`p-3.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between gap-2 ${
+                                        !isConfirmed ? "cursor-pointer" : "cursor-default"
+                                      } ${optStyle}`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                          {String.fromCharCode(65 + oIdx)}
+                                        </span>
+                                        <span>{option}</span>
+                                      </div>
+
+                                      {isConfirmed && (
+                                        <span className="shrink-0 text-xs font-bold">
+                                          {isCorrect ? (
+                                            <span className="text-emerald-600 flex items-center gap-0.5">
+                                              <CheckCircle2 className="w-4 h-4" />
+                                              <span>সঠিক</span>
+                                            </span>
+                                          ) : isSelected ? (
+                                            <span className="text-rose-600 flex items-center gap-0.5">
+                                              <XCircle className="w-4 h-4" />
+                                              <span>ভুল</span>
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Immediate Feedback Explanation Box */}
+                              {isConfirmed && (
+                                <div
+                                  className={`p-3.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5 animate-fade-in ${
+                                    currentSelected === currentQ.correctOptionIndex
+                                      ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500/50 text-emerald-800 dark:text-emerald-200"
+                                      : "bg-rose-50 dark:bg-rose-950/40 border-rose-500/50 text-rose-800 dark:text-rose-200"
+                                  }`}
+                                >
+                                  {currentSelected === currentQ.correctOptionIndex ? (
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                                  ) : (
+                                    <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                                  )}
+                                  <div>
+                                    <span className="font-black block">
+                                      {currentSelected === currentQ.correctOptionIndex
+                                        ? "🎉 চমৎকার! সঠিক উত্তর।"
+                                        : `ভুল উত্তর। সঠিক উত্তর হলো: (${String.fromCharCode(
+                                            65 + currentQ.correctOptionIndex
+                                          )}) ${currentQ.options[currentQ.correctOptionIndex]}`}
+                                    </span>
+                                    <span className="text-[11px] text-slate-600 dark:text-slate-300 block mt-0.5">
+                                      💡 ব্যাখ্যা: {currentQ.explanation}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Stepper Navigation */}
+                            <div className="flex items-center justify-between pt-2">
+                              <button
+                                onClick={() => setPreviewQuizCurrentQ((prev) => Math.max(0, prev - 1))}
+                                disabled={previewQuizCurrentQ === 0}
+                                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <ArrowLeft className="w-3.5 h-3.5" />
+                                <span>পূর্ববর্তী</span>
+                              </button>
+
+                              {previewQuizCurrentQ < totalQ - 1 ? (
+                                <button
+                                  onClick={() => {
+                                    if (!isConfirmed) {
+                                      toast.warning("পরবর্তী প্রশ্নে যেতে উত্তর নির্বাচন করুন (Locked 🔒)");
+                                      return;
+                                    }
+                                    setPreviewQuizCurrentQ((prev) => prev + 1);
+                                  }}
+                                  disabled={!isConfirmed}
+                                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                >
+                                  <span>পরবর্তী প্রশ্নে যান</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleCompletePreviewQuiz(activePreviewItem.id)}
+                                  disabled={!isConfirmed}
+                                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 disabled:opacity-40 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer hover:scale-102 active:scale-95 transition"
+                                >
+                                  <Check className="w-4 h-4" />
+                                  <span>কুইজ সম্পন্ন ও পরবর্তী ব্লক আনলক করুন</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODALS: CREATE COURSE, CREATE CHAPTER, ADD ITEM                           */}
+      {/* ========================================================================= */}
+      {/* Create Course Modal */}
+      {showCourseModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                নতুন কোর্স / বিষয় তৈরি করুন
+              </h3>
+              <button
+                onClick={() => setShowCourseModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCourse} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-500">কোর্সের কোড (যেমন: CRS-VOC-EE-901)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="CRS-VOC-EE-901"
+                  value={newCourseForm.code}
+                  onChange={(e) => setNewCourseForm({ ...newCourseForm, code: e.target.value })}
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-500">কোর্সের শিরোনাম (বাংলায়)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="ইলেকট্রিক্যাল সেফটি ও ওহমের সূত্র"
+                  value={newCourseForm.titleBangla}
+                  onChange={(e) =>
+                    setNewCourseForm({ ...newCourseForm, titleBangla: e.target.value, title: e.target.value })
+                  }
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-500">বিবরণ (Description)</label>
+                <textarea
+                  rows={2}
+                  placeholder="এই কোর্সের মূল বিষয়বস্তু..."
+                  value={newCourseForm.description}
+                  onChange={(e) => setNewCourseForm({ ...newCourseForm, description: e.target.value })}
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCourseModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs"
+                >
+                  তৈরি করুন
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Chapter Modal */}
+      {showChapterModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                নতুন অধ্যায় যোগ করুন
+              </h3>
+              <button
+                onClick={() => setShowChapterModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateChapter} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-500">অধ্যায়ের নাম (বাংলায়)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="যেমন: অধ্যায় ১: বেসিক সার্কিট উপাদান"
+                  value={newChapterForm.titleBangla}
+                  onChange={(e) =>
+                    setNewChapterForm({
+                      ...newChapterForm,
+                      titleBangla: e.target.value,
+                      title: e.target.value,
+                    })
+                  }
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-500">অধ্যায়ের সংক্ষিপ্ত বিবরণ</label>
+                <textarea
+                  rows={2}
+                  placeholder="সার্কিটের মূল উপাদান ও ওহমের সূত্র..."
+                  value={newChapterForm.description}
+                  onChange={(e) =>
+                    setNewChapterForm({ ...newChapterForm, description: e.target.value })
+                  }
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowChapterModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs"
+                >
+                  অধ্যায় যোগ করুন
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Item Modal (Blog Part / Quiz) */}
+      {showItemModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                {itemModalType === "BLOG_PART" ? "নতুন ব্লগ পার্ট যোগ" : "নতুন চেকপয়েন্ট কুইজ যোগ"}
+              </h3>
+              <button
+                onClick={() => setShowItemModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveItem} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="font-bold text-slate-500">শিরোনাম (বাংলায়) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={itemForm.titleBangla}
+                    onChange={(e) =>
+                      setItemForm({
+                        ...itemForm,
+                        titleBangla: e.target.value,
+                        title: e.target.value,
+                      })
+                    }
+                    className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-500">আনুমানিক সময় (মিনিট)</label>
+                  <input
+                    type="number"
+                    value={itemForm.durationMinutes}
+                    onChange={(e) =>
+                      setItemForm({ ...itemForm, durationMinutes: Number(e.target.value) })
+                    }
+                    className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-500">XP রিওয়ার্ড পয়েন্ট</label>
+                  <input
+                    type="number"
+                    value={itemForm.xpReward}
+                    onChange={(e) =>
+                      setItemForm({ ...itemForm, xpReward: Number(e.target.value) })
+                    }
+                    className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                  />
+                </div>
+              </div>
+
+              {itemModalType === "BLOG_PART" ? (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-500">সারসংক্ষেপ (Summary)</label>
+                    <textarea
+                      rows={2}
+                      placeholder="পাঠের মূল পয়েন্ট..."
+                      value={itemForm.summary}
+                      onChange={(e) => setItemForm({ ...itemForm, summary: e.target.value })}
+                      className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-500">মূল ব্লগ কনটেন্ট (Markdown)</label>
+                    <textarea
+                      rows={8}
+                      placeholder="# পাঠ্য বিষয়..."
+                      value={itemForm.contentMarkdown}
+                      onChange={(e) =>
+                        setItemForm({ ...itemForm, contentMarkdown: e.target.value })
+                      }
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 font-mono text-xs rounded-xl border border-slate-200 dark:border-slate-700"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50 dark:bg-slate-800/40 space-y-3">
+                    <span className="font-extrabold text-slate-900 dark:text-white block">
+                      কুইজের প্রশ্নাবলি ({itemForm.quizQuestions.length} টি সংযুক্ত)
+                    </span>
+
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                      {itemForm.quizQuestions.map((q, idx) => (
+                        <div
+                          key={q.id || idx}
+                          className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2"
+                        >
+                          <div>
+                            <p className="font-bold text-slate-800 dark:text-white">
+                              {idx + 1}. {q.questionText}
+                            </p>
+                            <span className="text-[10px] text-emerald-600 font-bold">
+                              সঠিক উত্তর: {q.options[q.correctOptionIndex]}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveQuestion(q.id)}
+                            className="text-slate-400 hover:text-rose-500"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* New Question Form */}
+                    <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                      <span className="font-bold text-indigo-600 block text-[11px]">
+                        + নতুন প্রশ্ন যোগ করুন
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="প্রশ্নটি লিখুন..."
+                        value={newQuestion.questionText}
+                        onChange={(e) =>
+                          setNewQuestion({ ...newQuestion, questionText: e.target.value })
+                        }
+                        className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="অপশন A"
+                          value={newQuestion.optionA}
+                          onChange={(e) =>
+                            setNewQuestion({ ...newQuestion, optionA: e.target.value })
+                          }
+                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                        <input
+                          type="text"
+                          placeholder="অপশন B"
+                          value={newQuestion.optionB}
+                          onChange={(e) =>
+                            setNewQuestion({ ...newQuestion, optionB: e.target.value })
+                          }
+                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                        <input
+                          type="text"
+                          placeholder="অপশন C"
+                          value={newQuestion.optionC}
+                          onChange={(e) =>
+                            setNewQuestion({ ...newQuestion, optionC: e.target.value })
+                          }
+                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                        <input
+                          type="text"
+                          placeholder="অপশন D"
+                          value={newQuestion.optionD}
+                          onChange={(e) =>
+                            setNewQuestion({ ...newQuestion, optionD: e.target.value })
+                          }
+                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 items-center">
+                        <select
+                          value={newQuestion.correctOptionIndex}
+                          onChange={(e) =>
+                            setNewQuestion({
+                              ...newQuestion,
+                              correctOptionIndex: Number(e.target.value),
+                            })
+                          }
+                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
+                        >
+                          <option value={0}>অপশন A সঠিক</option>
+                          <option value={1}>অপশন B সঠিক</option>
+                          <option value={2}>অপশন C সঠিক</option>
+                          <option value={3}>অপশন D সঠিক</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="উত্তরের ব্যাখ্যা..."
+                          value={newQuestion.explanation}
+                          onChange={(e) =>
+                            setNewQuestion({ ...newQuestion, explanation: e.target.value })
+                          }
+                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddQuestionToQuiz}
+                        className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>প্রশ্নটি যোগ করুন</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowItemModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-xs cursor-pointer"
+                >
+                  সংরক্ষণ করুন
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

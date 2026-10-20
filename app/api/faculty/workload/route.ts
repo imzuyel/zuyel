@@ -1,0 +1,156 @@
+import { NextRequest, NextResponse } from "next/server";
+import { institutionalDb, FacultyMember, RoutineItem } from "@/lib/database";
+import { calculateTeacherWorkload, WEEK_DAYS } from "@/lib/routineEngine";
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const teacherId = searchParams.get("teacherId");
+    const department = searchParams.get("department");
+
+    // Compute workload from real institutional routines
+    const workloadData = calculateTeacherWorkload(
+      institutionalDb.routines,
+      institutionalDb.faculty
+    );
+
+    // If a specific teacher's workload is requested:
+    if (teacherId) {
+      const tId = Number(teacherId);
+      const teacher = institutionalDb.faculty.find((f) => f.id === tId);
+      if (!teacher) {
+        return NextResponse.json({ success: false, error: "Teacher not found." }, { status: 404 });
+      }
+
+      // Find all routines assigned to this teacher
+      const routines = institutionalDb.routines.filter(
+        (r) =>
+          r.teacherId === tId ||
+          (r.teacherName && r.teacherName.trim().toLowerCase() === teacher.name.trim().toLowerCase())
+      );
+
+      // Daily distribution
+      const dailyBreakdown: Record<string, { periods: number; practical: number; theory: number; routines: RoutineItem[] }> = {
+        Sunday: { periods: 0, practical: 0, theory: 0, routines: [] },
+        Monday: { periods: 0, practical: 0, theory: 0, routines: [] },
+        Tuesday: { periods: 0, practical: 0, theory: 0, routines: [] },
+        Wednesday: { periods: 0, practical: 0, theory: 0, routines: [] },
+        Thursday: { periods: 0, practical: 0, theory: 0, routines: [] },
+      };
+
+      let totalTeachingMinutes = 0;
+      let practicalCount = 0;
+      let theoryCount = 0;
+
+      const assignedSubjectsMap = new Map<string, { code: string; name: string; class: string; section: string; isLab: boolean }>();
+
+      routines.forEach((r) => {
+        if (dailyBreakdown[r.day]) {
+          dailyBreakdown[r.day].periods++;
+          dailyBreakdown[r.day].routines.push(r);
+        }
+
+        const isLab =
+          r.isLab ||
+          (r.durationMinutes && r.durationMinutes >= 80) ||
+          r.periodType === "lab_block" ||
+          r.periodType === "practical" ||
+          r.subjectCode.includes("-902") ||
+          r.subjectCode.includes("-1002");
+
+        if (isLab) {
+          practicalCount++;
+          if (dailyBreakdown[r.day]) dailyBreakdown[r.day].practical++;
+        } else {
+          theoryCount++;
+          if (dailyBreakdown[r.day]) dailyBreakdown[r.day].theory++;
+        }
+
+        totalTeachingMinutes += r.durationMinutes || 45;
+
+        const subjectKey = `${r.classId}_${r.subjectCode}_${r.section}`;
+        if (!assignedSubjectsMap.has(subjectKey)) {
+          assignedSubjectsMap.set(subjectKey, {
+            code: r.subjectCode,
+            name: r.subjectName,
+            class: r.className,
+            section: r.section || "A",
+            isLab: !!isLab,
+          });
+        }
+      });
+
+      // Free periods calculation (Standard 7 periods per academic day = 35 weekly slots)
+      const standardDailyCapacity = 7;
+      const freePeriodsDaily: Record<string, number> = {};
+      WEEK_DAYS.forEach((day) => {
+        const busy = dailyBreakdown[day] ? dailyBreakdown[day].periods : 0;
+        freePeriodsDaily[day] = Math.max(0, standardDailyCapacity - busy);
+      });
+
+      const weeklyClassesCount = routines.length;
+      const monthlyWorkloadEstimated = Math.round(weeklyClassesCount * 4.2);
+      const totalTeachingHours = Number((totalTeachingMinutes / 60).toFixed(1));
+      const maxWeeklyCapacity = 24; // Standard technical school teacher ceiling
+      const workloadPercentage = Math.round((weeklyClassesCount / maxWeeklyCapacity) * 100);
+
+      let workloadStatus: "Optimal Workload" | "Light Workload" | "Overloaded" = "Optimal Workload";
+      let statusBangla = "সুষম কাজের চাপ (Optimal)";
+      if (weeklyClassesCount > 22) {
+        workloadStatus = "Overloaded";
+        statusBangla = "অতিরিক্ত কাজের চাপ (>২২ পিরিয়ড)";
+      } else if (weeklyClassesCount < 12) {
+        workloadStatus = "Light Workload";
+        statusBangla = "হালকা কাজের চাপ (<১২ পিরিয়ড)";
+      }
+
+      return NextResponse.json({
+        success: true,
+        workload: {
+          teacherId: tId,
+          name: teacher.name,
+          nameBangla: teacher.nameBangla,
+          designation: teacher.designation,
+          department: teacher.department,
+          tradeCode: teacher.tradeCode,
+          weeklyClassesCount,
+          monthlyWorkloadEstimated,
+          totalTeachingHours,
+          totalTeachingMinutes,
+          theoryPeriods: theoryCount,
+          practicalPeriods: practicalCount,
+          assignedSubjects: Array.from(assignedSubjectsMap.values()),
+          assignedSubjectsCount: assignedSubjectsMap.size,
+          dailyBreakdown,
+          freePeriodsDaily,
+          totalFreePeriodsWeekly: 35 - weeklyClassesCount,
+          maxWeeklyCapacity,
+          workloadPercentage,
+          status: workloadStatus,
+          statusBangla,
+        },
+      });
+    }
+
+    // Otherwise return institutional all-faculty workload summary
+    let teachers = workloadData.teachers || [];
+    if (department && department !== "all") {
+      teachers = teachers.filter((t: any) => t.department === department);
+    }
+
+    return NextResponse.json({
+      success: true,
+      institutionalAverage: workloadData.institutionalAverage || 18,
+      recommendations: workloadData.recommendations || [],
+      teachers: teachers.map((t: any) => ({
+        ...t,
+        monthlyWorkloadEstimated: Math.round(t.totalWeeklyPeriods * 4.2),
+        totalTeachingHours: Number((t.totalMinutes / 60).toFixed(1)),
+        freePeriodsCount: Math.max(0, 35 - t.totalWeeklyPeriods),
+      })),
+      totalFacultyEvaluated: teachers.length,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}

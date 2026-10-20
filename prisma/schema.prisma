@@ -1,0 +1,1167 @@
+// Prisma Schema for Panchagarh Government Technical School and College (PTSC) ERP
+// Supporting Technical Education Directorate & Bangladesh Technical Education Board (BTEB)
+// Hybrid architecture: Production Database ORM with 100% Fallback Resilience.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum Shift {
+  FIRST_SHIFT   // ১ম শিফট (সকাল ৮:০০ - দুপুর ১:০০)
+  SECOND_SHIFT  // ২য় শিফট (দুপুর ১:৩০ - সন্ধ্যা ৬:০০)
+}
+
+enum AttendanceStatus {
+  PRESENT  // উপস্থিত
+  ABSENT   // অনুপস্থিত
+  LATE     // বিলম্বিত
+  LEAVE    // ছুটি
+}
+
+enum DocumentStatus {
+  PENDING   // প্রক্রিয়াধীন
+  APPROVED  // অনুমোদিত
+  REJECTED  // বাতিল
+  ISSUED    // ইস্যুকৃত
+}
+
+enum NoticeCategory {
+  ACADEMIC       // একাডেমিক নোটিশ
+  EXAM           // পরীক্ষা ও মূল্যায়ন
+  ADMISSION      // ভর্তি সংক্রান্ত
+  ADMINISTRATIVE // প্রশাসনিক প্রজ্ঞাপন
+  TENDER         // দরপত্র ও ক্রয়
+  URGENT         // জরুরি বিজ্ঞপ্তি
+  EVENT          // সহ-শিক্ষা ও অনুষ্ঠান
+}
+
+enum QuizStatus {
+  DRAFT      // খসড়া
+  SCHEDULED  // সময়সূচি নির্ধারিত
+  ACTIVE     // চলমান
+  COMPLETED  // সমাপ্ত
+  CANCELLED  // বাতিল
+}
+
+enum SessionStatus {
+  WAITING      // লবিতে অপেক্ষমাণ
+  ACTIVE       // চলমান
+  IN_PROGRESS  // কুইজ অগ্রগতিতে
+  COMPLETED    // সমাপ্ত
+  CLOSED       // সেশন বন্ধ
+}
+
+enum StudentStatus {
+  ACTIVE       // নিয়মিত শিক্ষার্থী
+  INACTIVE     // অনিয়মিত
+  ARCHIVED     // আর্কাইভড
+  TRANSFERRED  // ছাড়পত্রপ্রাপ্ত (TC)
+  DROPPED      // ঝরে পড়া
+}
+
+enum ResultStatus {
+  PASSED  // উত্তীর্ণ
+  FAILED  // অনুত্তীর্ণ
+}
+
+enum FacultyType {
+  FACULTY  // শিক্ষক মণ্ডলী
+  STAFF    // কর্মকর্তা ও কর্মচারী
+}
+
+// ==========================================
+// CORE ACADEMIC & INSTITUTIONAL MODELS
+// ==========================================
+
+/// শিক্ষাবর্ষ মডেল (Academic Year Master)
+model AcademicYear {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(50) // e.g., "2026"
+  startDate   String   @db.VarChar(30) // YYYY-MM-DD
+  endDate     String   @db.VarChar(30) // YYYY-MM-DD
+  status      String   @default("Active") @db.VarChar(50) // "Active", "Inactive", "Upcoming"
+  isCurrent   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+  @@index([status])
+  @@map("academic_years")
+}
+
+/// প্রাতিষ্ঠানিক শ্রেণি কাঠামো (Class 6 - 12)
+model AcademicClass {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(100) // e.g., "Class 9 (Vocational)"
+  nameBangla   String   @db.VarChar(100) // e.g., "নবম শ্রেণি (ভোকেশনাল)"
+  numericValue Int      // 6, 7, 8, 9, 10, 11, 12
+  level        String   @default("technical") @db.VarChar(50) // "general" or "technical"
+  hasTrade     Boolean  @default(false) // 6,7,8 = false; 9,10,11,12 = true
+  sections     String   @default("A,B") @db.VarChar(100)
+  shifts       String   @default("FIRST_SHIFT,SECOND_SHIFT") @db.VarChar(100)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relationships
+  students          Student[]
+  attendanceRecords AttendanceRecord[]
+  examMarks         ExamMark[]
+  pdfDocuments      PdfDocument[]
+
+  @@unique([numericValue])
+  @@index([numericValue, hasTrade])
+  @@map("academic_classes")
+}
+
+/// শ্রেণি শাখা মডেল (Academic Section Master)
+model AcademicSection {
+  id           Int      @id @default(autoincrement())
+  academicYear String   @default("2026") @db.VarChar(50)
+  classNumeric Int      // 6, 7, 8, 9, 10, 11, 12
+  className    String   @db.VarChar(100)
+  sectionName  String   @db.VarChar(50) // "A", "B", "C"
+  status       String   @default("Active") @db.VarChar(50)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([academicYear, classNumeric, sectionName], name: "unique_year_class_section")
+  @@index([academicYear, classNumeric])
+  @@map("academic_sections")
+}
+
+/// কারিগরি বিশেষায়িত ৪টি ট্রেড (নবম থেকে দ্বাদশ শ্রেণি)
+model Trade {
+  id             Int      @id @default(autoincrement())
+  code           String   @unique @db.VarChar(20) // e.g., "GE", "IT-IoT", "EE", "AMB"
+  name           String   @db.VarChar(150) // e.g., "General Electronics"
+  nameBangla     String   @db.VarChar(150) // e.g., "জেনারেল ইলেকট্রনিক্স"
+  description    String?  @db.Text
+  duration       String   @default("2 Years (SSC) / 2 Years (HSC)") @db.VarChar(100)
+  intakeCapacity Int      @default(80)
+  totalLabs      Int      @default(2)
+  badgeGradient  String   @default("from-blue-600 to-indigo-700") @db.VarChar(100)
+  iconName       String   @default("Cpu") @db.VarChar(50)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relationships
+  students     Student[]
+  faculty      Faculty[]
+  quizzes      Quiz[]
+  labEquipment LabEquipment[]
+  pdfDocuments PdfDocument[]
+
+  @@index([code])
+  @@map("trades")
+}
+
+/// বিষয় মাস্টার ক্যাটালগ (Subject Master Catalog)
+model SubjectMaster {
+  id                Int      @id @default(autoincrement())
+  code              String   @unique @db.VarChar(50)
+  name              String   @db.VarChar(200)
+  nameBangla        String   @db.VarChar(200)
+  nameEnglish       String   @db.VarChar(200)
+  shortName         String   @db.VarChar(50)
+  subjectType       String   @default("Theory") @db.VarChar(50)
+  creditHours       Float    @default(3.0)
+  fullMarks         Float    @default(100)
+  passMarks         Float    @default(33)
+  theoryMarks       Float    @default(100)
+  practicalMarks    Float    @default(0)
+  vivaMarks         Float    @default(0)
+  continuousMarks   Float    @default(40)
+  status            String   @default("Active") @db.VarChar(50)
+  displayOrder      Int      @default(1)
+  description       String?  @db.Text
+  btebCurriculumRef String?  @db.VarChar(100)
+  createdBy         String   @default("Admin") @db.VarChar(100)
+  updatedBy         String   @default("Admin") @db.VarChar(100)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relationships
+  mappings           AcademicSubjectMapping[]
+  teacherAssignments TeacherSubjectAssignment[]
+  topics             SubjectTopic[]
+  pdfDocuments       PdfDocument[]
+
+  @@index([code])
+  @@index([status])
+  @@map("subject_masters")
+}
+
+/// শ্রেণি ও ট্রেড ভিত্তিক বিষয় ম্যাপিং (Academic Subject Mapping)
+model AcademicSubjectMapping {
+  id                  Int           @id @default(autoincrement())
+  academicYear        String        @db.VarChar(50)
+  classId             Int
+  className           String        @db.VarChar(100)
+  numericClass        Int
+  section             String        @default("all") @db.VarChar(20)
+  tradeId             Int?
+  tradeCode           String?       @db.VarChar(20)
+  tradeName           String?       @db.VarChar(150)
+  subjectId           Int
+  subject             SubjectMaster @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectCode         String        @db.VarChar(50)
+  subjectName         String        @db.VarChar(200)
+  subjectNameBangla   String        @db.VarChar(200)
+  subjectType         String        @default("Theory") @db.VarChar(50)
+  isOptional          Boolean       @default(false)
+  weeklyPeriods       Int           @default(4)
+  theoryPeriods       Int           @default(3)
+  practicalPeriods    Int           @default(0)
+  labPeriods          Int           @default(0)
+  requiredWeeklyHours Float         @default(3.0)
+  fullMarks           Float         @default(100)
+  passMarks           Float         @default(33)
+  theoryMarks         Float         @default(100)
+  practicalMarks      Float         @default(0)
+  vivaMarks           Float         @default(0)
+  continuousMarks     Float         @default(40)
+  displayOrder        Int           @default(1)
+  status              String        @default("Active") @db.VarChar(50)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@unique([academicYear, classId, tradeId, section, subjectId], name: "unique_year_class_trade_section_subject")
+  @@index([academicYear, classId])
+  @@map("subject_mappings")
+}
+
+/// শিক্ষক বিষয় ও শ্রেণি বণ্টন (Teacher Subject Assignment)
+model TeacherSubjectAssignment {
+  id                    Int           @id @default(autoincrement())
+  academicYear          String        @db.VarChar(50)
+  classId               Int
+  className             String        @db.VarChar(100)
+  numericClass          Int
+  section               String        @default("all") @db.VarChar(20)
+  tradeId               Int?
+  tradeCode             String?       @db.VarChar(20)
+  tradeName             String?       @db.VarChar(150)
+  subjectId             Int
+  subject               SubjectMaster @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectCode           String        @db.VarChar(50)
+  subjectName           String        @db.VarChar(200)
+  subjectNameBangla     String        @db.VarChar(200)
+  teacherId             Int
+  teacher               Faculty       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  teacherName           String        @db.VarChar(150)
+  teacherNameBangla     String        @db.VarChar(150)
+  role                  String        @default("Primary Teacher") @db.VarChar(100)
+  weeklyAssignedPeriods Int           @default(4)
+  isClassTeacher        Boolean       @default(false)
+  assignmentType        String        @default("Subject Teacher") @db.VarChar(100)
+  status                String        @default("Active") @db.VarChar(50)
+  assignedBy            String        @default("Admin") @db.VarChar(100)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@unique([academicYear, classId, tradeId, section, subjectId, teacherId], name: "unique_teacher_subject_assignment")
+  @@index([academicYear, teacherId])
+  @@index([classId, subjectId])
+  @@map("teacher_subject_assignments")
+}
+
+/// বিষয়ের অধ্যায় ও টপিক লিস্ট (Subject Topic / Curriculum Chapter)
+model SubjectTopic {
+  id                   Int           @id @default(autoincrement())
+  subjectId            Int
+  subject              SubjectMaster @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  chapterNumber        Int
+  chapterName          String        @db.VarChar(200)
+  chapterNameBangla    String        @db.VarChar(200)
+  topicName            String        @db.VarChar(200)
+  topicNameBangla      String        @db.VarChar(200)
+  serialOrder          Int           @default(1)
+  estimatedHours       Float         @default(2.0)
+  learningOutcomesJson String?       @db.Text
+  status               String        @default("Active") @db.VarChar(50)
+  hasQuizAvailable     Boolean       @default(false)
+  hasLabJob            Boolean       @default(false)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([subjectId, chapterNumber])
+  @@map("subject_topics")
+}
+
+/// ডায়নামিক সিস্টেম ও মেটাডেটা স্টোর (Dynamic Metadata Store)
+model DynamicMetadataStore {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique @db.VarChar(100)
+  valueJson String   @db.LongText
+  category  String   @default("general") @db.VarChar(100)
+  updatedBy String?  @db.VarChar(100)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@index([category])
+  @@map("dynamic_metadata_stores")
+}
+
+// ==========================================
+// USER & STUDENT ENTITIES
+// ==========================================
+
+/// শিক্ষার্থী তথ্য মডেল (Student Master)
+model Student {
+  id                   Int           @id @default(autoincrement())
+  studentId            String        @unique @db.VarChar(50) // e.g., "PTSC-2026-9-001"
+  admissionNo          String        @unique @db.VarChar(50) // e.g., "ADM-2026-0001"
+  roll                 Int           // Class roll number
+  name                 String        @db.VarChar(150)
+  nameBangla           String        @db.VarChar(150)
+  gender               String        @default("Male") @db.VarChar(20)
+  dob                  String        @db.VarChar(20) // YYYY-MM-DD
+  dobBangla            String?       @db.VarChar(50)
+  bloodGroup           String        @default("B+") @db.VarChar(10)
+  birthRegNo           String?       @db.VarChar(50)
+  fatherName           String        @db.VarChar(150)
+  motherName           String        @db.VarChar(150)
+  guardianMobile       String        @db.VarChar(30)
+  studentMobile        String?       @db.VarChar(30)
+  email                String?       @db.VarChar(120)
+  presentAddress       String        @db.Text
+  permanentAddress     String        @db.Text
+  photoUrl             String        @db.VarChar(500)
+
+  // Academic placement
+  classId              Int
+  class                AcademicClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  
+  tradeId              Int?
+  trade                Trade?        @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+
+  shift                Shift         @default(FIRST_SHIFT)
+  shiftBangla          String        @default("১ম শিফট") @db.VarChar(50)
+  section              String        @default("A") @db.VarChar(20)
+  session              String        @default("2026") @db.VarChar(20) // e.g., "2026"
+  status               StudentStatus @default(ACTIVE)
+
+  // Performance metrics
+  attendanceRate       Float         @default(100.0)
+  gpa                  String        @default("0.00") @db.VarChar(10)
+  resultStatus         ResultStatus  @default(PASSED)
+
+  // Extended institutional data
+  nationality          String        @default("Bangladeshi") @db.VarChar(50)
+  guardianName         String?       @db.VarChar(150)
+  guardianRelationship String?       @default("Father") @db.VarChar(50)
+  emergencyContact     String?       @db.VarChar(30)
+  admissionDate        String?       @db.VarChar(20)
+
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  // Relationships
+  attendanceEntries AttendanceEntry[]
+  examMarks         ExamMark[]
+  documents         Document[]
+  feeInvoices       FeeInvoice[]
+
+  // Indexes & Constraints
+  @@unique([classId, session, section, roll], name: "unique_class_session_section_roll")
+  @@index([studentId])
+  @@index([admissionNo])
+  @@index([classId, session])
+  @@index([tradeId])
+  @@index([status])
+  @@index([guardianMobile])
+  @@map("students")
+}
+
+/// শিক্ষক ও কর্মকর্তা পরিষদ (Faculty & Staff)
+model Faculty {
+  id            Int         @id @default(autoincrement())
+  employeeId    String      @unique @db.VarChar(50) // e.g., "FAC-001"
+  name          String      @db.VarChar(150)
+  nameBangla    String      @db.VarChar(150)
+  designation   String      @db.VarChar(100)
+  department    String      @db.VarChar(100)
+  qualification String      @db.VarChar(200)
+  joiningDate   String      @db.VarChar(30)
+  mobile        String      @db.VarChar(30)
+  email         String      @db.VarChar(120)
+  photoUrl      String      @db.VarChar(500)
+  order         Int         @default(1)
+  type          FacultyType @default(FACULTY)
+
+  // Optional Trade relation for technical instructors
+  tradeId       Int?
+  trade         Trade?      @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relationships
+  notices                    Notice[]
+  liveSessions               LiveSession[]
+  teacherSubjectAssignments TeacherSubjectAssignment[]
+  systemUser                SystemUser?
+
+  @@index([employeeId])
+  @@index([department])
+  @@index([type])
+  @@map("faculty")
+}
+
+// ==========================================
+// ACADEMIC OPERATIONS & RECORDS
+// ==========================================
+
+/// দৈনিক উপস্থিতি শিট মাস্টার রেকর্ড
+model AttendanceRecord {
+  id           Int           @id @default(autoincrement())
+  date         String        @db.VarChar(20) // YYYY-MM-DD
+  classId      Int
+  class        AcademicClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  tradeId      Int?          // Null for 6-8, specific trade for 9-12
+  shift        Shift         @default(FIRST_SHIFT)
+  section      String        @default("A") @db.VarChar(20)
+  session      String        @default("2026") @db.VarChar(20)
+  totalCount   Int           @default(0)
+  presentCount Int           @default(0)
+  absentCount  Int           @default(0)
+  lateCount    Int           @default(0)
+  leaveCount   Int           @default(0)
+  verifiedBy   String?       @db.VarChar(150)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relationships
+  entries      AttendanceEntry[]
+
+  @@unique([date, classId, tradeId, shift, section, session], name: "unique_attendance_sheet")
+  @@index([date, classId])
+  @@map("attendance_records")
+}
+
+/// একক শিক্ষার্থীর উপস্থিতি এন্ট্রি
+model AttendanceEntry {
+  id          Int              @id @default(autoincrement())
+  recordId    Int
+  record      AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  studentId   Int
+  student     Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status      AttendanceStatus @default(PRESENT)
+  remarks     String?          @db.VarChar(200)
+  inTime      String?          @db.VarChar(20) // HH:mm
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([recordId, studentId], name: "unique_record_student_entry")
+  @@index([studentId, status])
+  @@map("attendance_entries")
+}
+
+/// পরীক্ষার ফলাফল ও মার্কশীট রেকর্ড
+model ExamMark {
+  id             Int           @id @default(autoincrement())
+  studentId      Int
+  student        Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classId        Int
+  class          AcademicClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  examName       String        @db.VarChar(100) // "Semester Final 2026", "Test Exam"
+  subjectCode    String        @db.VarChar(30)
+  subjectName    String        @db.VarChar(150)
+  theoryMarks    Float         @default(0)
+  practicalMarks Float         @default(0)
+  totalMarks     Float         @default(0)
+  highestMarks   Float         @default(100)
+  grade          String        @db.VarChar(10) // "A+", "A", "F"
+  gpaPoint       Float         @default(0.0)
+  isPassed       Boolean       @default(true)
+  examDate       String        @db.VarChar(30)
+  session        String        @default("2026") @db.VarChar(20)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([studentId, examName])
+  @@index([classId, session])
+  @@map("exam_marks")
+}
+
+/// প্রাতিষ্ঠানিক ফিস ও পাওনা ইনভয়েস
+model FeeInvoice {
+  id            Int      @id @default(autoincrement())
+  invoiceNo     String   @unique @db.VarChar(50)
+  studentId     Int
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentName   String   @db.VarChar(150)
+  classId       Int
+  session       String   @default("2026") @db.VarChar(20)
+  feeType       String   @db.VarChar(100) // "Tuition Fee", "Admission Fee", "Exam Fee"
+  amount        Float    @default(0)
+  discount      Float    @default(0)
+  netAmount     Float    @default(0)
+  paidAmount    Float    @default(0)
+  dueAmount     Float    @default(0)
+  status        String   @default("Unpaid") @db.VarChar(50) // "Paid", "Partial", "Unpaid"
+  paymentMethod String?  @db.VarChar(50)
+  transactionId String?  @db.VarChar(100)
+  paymentDate   String?  @db.VarChar(30)
+  dueDate       String   @db.VarChar(30)
+  remarks       String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([invoiceNo])
+  @@index([studentId, status])
+  @@map("fee_invoices")
+}
+
+/// ল্যাব সরঞ্জাম ও ইনভেন্টরি
+model LabEquipment {
+  id              Int      @id @default(autoincrement())
+  itemCode        String   @unique @db.VarChar(50)
+  itemName        String   @db.VarChar(200)
+  itemNameBangla  String   @db.VarChar(200)
+  category        String   @db.VarChar(100)
+  tradeId         Int?
+  trade           Trade?   @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  labName         String   @db.VarChar(150)
+  quantity        Int      @default(1)
+  operationalQty  Int      @default(1)
+  damagedQty      Int      @default(0)
+  unitPrice       Float    @default(0)
+  totalValue      Float    @default(0)
+  supplier        String?  @db.VarChar(150)
+  purchaseDate    String?  @db.VarChar(30)
+  warrantyExpDate String?  @db.VarChar(30)
+  status          String   @default("Operational") @db.VarChar(50)
+  remarks         String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([itemCode])
+  @@index([tradeId])
+  @@map("lab_equipment")
+}
+
+/// প্রাতিষ্ঠানিক প্রত্যায়নপত্র, প্রশংসাপত্র ও চারিত্রিক সনদপত্র
+model Document {
+  id           Int            @id @default(autoincrement())
+  docId        String         @unique @db.VarChar(50) // e.g., "DOC-2026-0001"
+  studentId    Int
+  student      Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type         String         @db.VarChar(100) // "Testimonial", "Character Certificate", "Transfer Certificate"
+  titleBangla  String         @db.VarChar(200)
+  purpose      String?        @db.VarChar(255)
+  status       DocumentStatus @default(PENDING)
+  issuedDate   String?        @db.VarChar(30)
+  expiryDate   String?        @db.VarChar(30)
+  signedBy     String?        @db.VarChar(150)
+  qrCodeUrl    String?        @db.VarChar(500)
+  metadataJson String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([docId])
+  @@index([studentId, status])
+  @@map("documents")
+}
+
+/// প্রাতিষ্ঠানিক ডিজিটাল নোটিশ বোর্ড
+model Notice {
+  id             Int            @id @default(autoincrement())
+  title          String         @db.VarChar(255)
+  titleBangla    String         @db.VarChar(255)
+  content        String         @db.Text
+  category       NoticeCategory @default(ACADEMIC)
+  categoryBangla String         @default("একাডেমিক") @db.VarChar(100)
+  isUrgent       Boolean        @default(false)
+  isPinned       Boolean        @default(false)
+  attachmentUrl  String?        @db.VarChar(500)
+  publishedAt    String         @db.VarChar(30)
+  publishedBy    String         @default("অধ্যক্ষ কার্যালয়") @db.VarChar(150)
+  authorId       Int?
+  author         Faculty?       @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([category, isUrgent])
+  @@index([publishedAt])
+  @@map("notices")
+}
+
+/// অনলাইন ও লাইভ কুইজ প্রতিযোগিতা
+model Quiz {
+  id          Int             @id @default(autoincrement())
+  title       String          @db.VarChar(200)
+  titleBangla String          @db.VarChar(200)
+  description String?         @db.Text
+  tradeId     Int?            // Null if general for all trades
+  trade       Trade?          @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  classLevel  String          @default("All") @db.VarChar(50) // "Class 9-10", "HSC Voc", "All"
+  durationMin Int             @default(15)
+  totalMarks  Int             @default(20)
+  passMarks   Int             @default(8)
+  status      QuizStatus      @default(ACTIVE)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relationships
+  questions    QuizQuestion[]
+  liveSessions LiveSession[]
+
+  @@index([status, tradeId])
+  @@map("quizzes")
+}
+
+/// কুইজের বহুনির্বাচনী প্রশ্নাবলি (MCQ Question Bank)
+model QuizQuestion {
+  id            Int      @id @default(autoincrement())
+  quizId        Int
+  quiz          Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  questionText  String   @db.Text
+  optionA       String   @db.VarChar(255)
+  optionB       String   @db.VarChar(255)
+  optionC       String   @db.VarChar(255)
+  optionD       String   @db.VarChar(255)
+  correctOption String   @db.VarChar(10) // "A", "B", "C", "D"
+  explanation   String?  @db.Text
+  marks         Int      @default(1)
+  order         Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([quizId])
+  @@map("quiz_questions")
+}
+
+/// লাইভ মাল্টিপ্লেয়ার কুইজ সেশন (৬-সংখ্যার পিন যুক্ত)
+model LiveSession {
+  id               Int               @id @default(autoincrement())
+  pin              String            @unique @db.VarChar(10) // e.g., "749201"
+  quizId           Int
+  quiz             Quiz              @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  hostName         String            @db.VarChar(150)
+  hostId           Int?
+  hostFaculty      Faculty?          @relation(fields: [hostId], references: [id], onDelete: SetNull)
+  status           SessionStatus     @default(WAITING)
+  currentQuestion  Int               @default(0)
+  totalQuestions   Int               @default(10)
+  participantsJson String?           @db.LongText // Stored real-time active users & scores
+  startedAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  participants     LiveParticipant[]
+  answers          LiveAnswer[]
+
+  @@index([pin])
+  @@index([status])
+  @@map("live_sessions")
+}
+
+/// লাইভ কুইজ অংশগ্রহণকারী
+model LiveParticipant {
+  id            String      @id @default(uuid())
+  sessionId     Int
+  session       LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantId String      @db.VarChar(100)
+  name          String      @db.VarChar(150)
+  score         Int         @default(0)
+  streak        Int         @default(0)
+  lastActive    DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  answers       LiveAnswer[]
+
+  @@unique([sessionId, participantId])
+  @@index([sessionId])
+  @@map("live_participants")
+}
+
+/// লাইভ কুইজের রিয়েল-টাইম উত্তর রেকর্ড
+model LiveAnswer {
+  id            Int             @id @default(autoincrement())
+  sessionId     Int
+  session       LiveSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantId String          @db.VarChar(100)
+  participant   LiveParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  questionIndex Int
+  selectedOpt   Int
+  isCorrect     Boolean
+  scoreEarned   Int             @default(0)
+  timeTakenMs   Int             @default(0)
+  createdAt     DateTime        @default(now())
+
+  @@index([sessionId, questionIndex])
+  @@map("live_answers")
+}
+
+// ==========================================
+// PHASE 3: PDF DOCUMENT LIBRARY & COGNITIVE AI PARSER
+// ==========================================
+
+enum PdfProcessingStatus {
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  PROCESSED
+  FAILED
+  ARCHIVED
+}
+
+enum ExtractionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AiJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/// পিডিএফ কারিকুলাম ও টেক্সটবুক ডকুমেন্ট মডেল (Curriculum PDF & Textbook Repository)
+model PdfDocument {
+  id                      String              @id @default(uuid())
+  title                   String              @db.VarChar(255)
+  originalFilename        String              @db.VarChar(255)
+  description             String?             @db.Text
+  
+  // Relations to Institutional Entities
+  classId                 Int?
+  class                   AcademicClass?      @relation(fields: [classId], references: [id], onDelete: SetNull)
+  tradeId                 Int?
+  trade                   Trade?              @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  subjectId               Int?
+  subject                 SubjectMaster?      @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+
+  sectionId               Int?
+  academicYearId          Int                 @default(2026)
+  chapter                 String?             @db.VarChar(200)
+  topic                   String?             @db.VarChar(200)
+  tagsJson                String?             @db.Text // JSON string array of tags
+
+  storageProvider         String              @default("local") @db.VarChar(50) // "local", "s3", "gcs"
+  storageKey              String              @db.VarChar(500)
+  mimeType                String              @default("application/pdf") @db.VarChar(100)
+  fileSize                Int                 @default(0)
+  pageCount               Int                 @default(1)
+  processingStatus        PdfProcessingStatus @default(UPLOADED)
+  
+  uploadedById            Int                 @default(1)
+  version                 Int                 @default(1)
+  generatedQuestionsCount Int                 @default(0)
+  lastUsedAt              DateTime?
+  archivedAt              DateTime?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  // Child Relations
+  pages                   PdfPage[]
+  chunks                  PdfChunk[]
+  generationJobs          AiGenerationJob[]
+  generatedQuestions      AiGeneratedQuestion[]
+
+  @@index([classId])
+  @@index([tradeId])
+  @@index([subjectId])
+  @@index([processingStatus])
+  @@index([createdAt])
+  @@map("pdf_documents")
+}
+
+/// পিডিএফ পৃষ্ঠার এক্সট্র্যাক্টেড টেক্সট ও ওসিআর ম্যাপিং (Extracted PDF Page)
+model PdfPage {
+  id               String           @id @default(uuid())
+  documentId       String
+  document         PdfDocument      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageNumber       Int
+  extractedText    String           @db.LongText
+  isScanned        Boolean          @default(false)
+  extractionStatus ExtractionStatus @default(PENDING)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([documentId, pageNumber], name: "unique_doc_page")
+  @@index([documentId])
+  @@map("pdf_pages")
+}
+
+/// কগনিটিভ এআই গ্রাউন্ডিং টেক্সট চাঙ্ক (Extracted PDF Text Chunks for Semantic Grounding)
+model PdfChunk {
+  id         String      @id @default(uuid())
+  documentId String
+  document   PdfDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  startPage  Int
+  endPage    Int
+  chunkText  String      @db.LongText
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@unique([documentId, chunkIndex], name: "unique_doc_chunk")
+  @@index([documentId])
+  @@map("pdf_chunks")
+}
+
+/// এআই প্রশ্ন জেনারেশন জব হিস্ট্রি (AI Cognitive Generation Job)
+model AiGenerationJob {
+  id                String                @id @default(uuid())
+  documentId        String?
+  document          PdfDocument?          @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  userId            Int                   @default(1)
+  classId           Int?
+  tradeId           Int?
+  subjectId         Int?
+  topic             String                @db.VarChar(255)
+  chapter           String?               @db.VarChar(200)
+  lesson            String?               @db.VarChar(200)
+  learningObjective String?               @db.Text
+  language          String                @default("Bangla") @db.VarChar(50)
+  difficulty        String                @default("medium") @db.VarChar(50)
+  questionType      String                @default("mcq_single") @db.VarChar(100)
+  questionCount     Int                   @default(5)
+  groundedPagesJson String?               @db.Text
+  provider          String                @default("Google Gemini") @db.VarChar(100)
+  model             String                @default("gemini-3.8-flash") @db.VarChar(100)
+  status            AiJobStatus           @default(PROCESSING)
+  errorMessage      String?               @db.Text
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  questions         AiGeneratedQuestion[]
+
+  @@index([documentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("ai_generation_jobs")
+}
+
+/// এআই জেনারেটেড ও গ্রাউন্ডেড প্রশ্নাবলি (Cognitively Generated Questions)
+model AiGeneratedQuestion {
+  id                String           @id @default(uuid())
+  documentId        String?
+  document          PdfDocument?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  generationJobId   String?
+  generationJob     AiGenerationJob? @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
+  questionText      String           @db.Text
+  questionType      String           @default("mcq_single") @db.VarChar(50)
+  difficulty        String           @default("medium") @db.VarChar(50)
+  optionsJson       String?          @db.LongText
+  correctAnswerJson String           @db.Text
+  explanation       String?          @db.Text
+  learningObjective String?          @db.Text
+  bloomTaxonomy     String?          @db.VarChar(50)
+  tagsJson          String?          @db.Text
+  status            String           @default("generated") @db.VarChar(50)
+  reviewedBy        Int?
+  targetQuizId      Int?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([documentId])
+  @@index([generationJobId])
+  @@index([status])
+  @@map("ai_generated_questions")
+}
+
+// ==========================================
+// PHASE 4: CHAPTER LEARNING PATH & SEQUENTIAL CURRICULUM
+// Hierarchy: Class → Trade → Subject → Course → Chapter → Ordered Content Items (Blog Parts & Quizzes)
+// ==========================================
+
+/// কোর্স মাস্টার (Course Master Entity)
+model Course {
+  id             Int             @id @default(autoincrement())
+  code           String          @unique @db.VarChar(50) // e.g. "CRS-VOC-EE-901"
+  title          String          @db.VarChar(200)
+  titleBangla    String          @db.VarChar(200)
+  description    String?         @db.Text
+  classId        Int             // 6, 7, 8, 9, 10, 11, 12
+  className      String          @db.VarChar(100)
+  numericClass   Int             @default(9)
+  tradeId        Int?
+  tradeCode      String?         @db.VarChar(20) // "GE", "IT-IoT", "EE", "AMB", or null
+  tradeName      String?         @db.VarChar(150)
+  subjectId      Int?
+  subjectCode    String?         @db.VarChar(50)
+  subjectName    String?         @db.VarChar(200)
+  thumbnailUrl   String?         @db.VarChar(500)
+  badgeGradient  String          @default("from-indigo-600 to-cyan-600") @db.VarChar(100)
+  isPublished    Boolean         @default(true)
+  orderIndex     Int             @default(1)
+  totalXp        Int             @default(500)
+  estimatedHours Float           @default(12.0)
+  difficulty     String          @default("Intermediate") @db.VarChar(50)
+
+  // Relationships
+  chapters       CourseChapter[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([classId, tradeId])
+  @@index([isPublished])
+  @@map("learning_courses")
+}
+
+/// কোর্সের অধ্যায় (Course Chapter)
+model CourseChapter {
+  id             Int                  @id @default(autoincrement())
+  courseId       Int
+  course         Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  chapterNumber  Int                  @default(1)
+  title          String               @db.VarChar(255)
+  titleBangla    String               @db.VarChar(255)
+  description    String?              @db.Text
+  orderIndex     Int                  @default(1)
+  isPublished    Boolean              @default(true)
+  unlockRule     String               @default("PREVIOUS_COMPLETED") @db.VarChar(50) // "IMMEDIATE" | "PREVIOUS_COMPLETED"
+  requiredMinXp  Int                  @default(0)
+
+  // Ordered polymorphic content items
+  items          ChapterContentItem[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([courseId, orderIndex])
+  @@map("course_chapters")
+}
+
+/// অধ্যায়ের ক্রমিক কনটেন্ট আইটেম (Polymorphic: Blog Part or Quiz)
+model ChapterContentItem {
+  id                  Int                   @id @default(autoincrement())
+  chapterId           Int
+  chapter             CourseChapter         @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  orderIndex          Int                   @default(1) // 1, 2, 3, 4... defines sequence
+  itemType            String                @db.VarChar(30) // "BLOG_PART" | "QUIZ"
+  title               String                @db.VarChar(255)
+  titleBangla         String                @db.VarChar(255)
+  isPublished         Boolean               @default(true)
+  isMandatory         Boolean               @default(true)
+  xpReward            Int                   @default(50)
+  unlockRule          String                @default("PREVIOUS_ITEM_COMPLETED") @db.VarChar(50)
+  minScoreToUnlockNext Int                  @default(60) // %
+  attemptLimit        Int                   @default(3) // 0 = unlimited
+  passingScore        Int                   @default(60) // %
+  durationMinutes     Int                   @default(10)
+
+  // Blog Part specific fields
+  blogPartNumber      Int?
+  contentMarkdown     String?               @db.LongText
+  summary             String?               @db.Text
+  keyTakeaways        String?               @db.Text
+  readTimeMinutes     Int?                  @default(5)
+
+  // Quiz specific fields
+  quizId              Int?
+  quizQuestionsJson   String?               @db.LongText
+  timeLimitSeconds    Int                   @default(300)
+  shuffleQuestions    Boolean               @default(true)
+  showCorrectAnswersAfter Boolean           @default(true)
+
+  // Progress records
+  studentProgress     StudentItemProgress[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@index([chapterId, orderIndex])
+  @@index([itemType])
+  @@map("chapter_content_items")
+}
+
+/// শিক্ষার্থীর অগ্রগতি ও আনলক রেকর্ড (Student Progress Tracking)
+model StudentItemProgress {
+  id               Int                @id @default(autoincrement())
+  studentRoll      String             @db.VarChar(50)
+  studentName      String?            @db.VarChar(150)
+  itemId           Int
+  item             ChapterContentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  status           String             @default("LOCKED") @db.VarChar(30) // "LOCKED" | "UNLOCKED" | "IN_PROGRESS" | "COMPLETED" | "FAILED"
+  attemptsCount    Int                @default(0)
+  bestScore        Int                @default(0)
+  lastScore        Int                @default(0)
+  isPassed         Boolean            @default(false)
+  xpEarned         Int                @default(0)
+  completedAt      DateTime?
+  timeSpentSeconds Int                @default(0)
+  answersJson      String?            @db.LongText
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([studentRoll, itemId])
+  @@index([studentRoll])
+  @@index([itemId])
+  @@map("student_item_progress")
+}
+
+// ==========================================
+// RBAC & DYNAMIC PERMISSION MANAGEMENT
+// ==========================================
+
+/// সিস্টেম ব্যবহারকারী (System User - Authentication & RBAC Anchor)
+model SystemUser {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique @db.VarChar(150)
+  fullName      String   @db.VarChar(200)
+  nameBangla    String?  @db.VarChar(200)
+  designation   String?  @db.VarChar(150)
+  department    String?  @db.VarChar(150)
+  mobile        String?  @db.VarChar(30)
+  avatarUrl     String?  @db.VarChar(500)
+  passwordHash  String?  @db.VarChar(255) // For future auth
+  isActive      Boolean  @default(true)
+
+  // Link to Faculty record (for teachers/staff)
+  facultyId     Int?     @unique
+  faculty       Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+
+  // RBAC Role assignment
+  roleId        Int?
+  role          RoleDefinition? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roleName      String  @default("teacher") @db.VarChar(50) // Denormalized for quick access
+
+  // Per-user custom permission overrides
+  userPermissions UserPermission[]
+
+  // Audit trail
+  auditActions    SecurityAuditEntry[] @relation("AuditActor")
+  auditTargets    SecurityAuditEntry[] @relation("AuditTarget")
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([email])
+  @@index([roleName])
+  @@index([facultyId])
+  @@map("system_users")
+}
+
+/// ভূমিকা সংজ্ঞা (Role Definition - RBAC Layer)
+model RoleDefinition {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(50)  // e.g., "super_admin", "teacher", "staff"
+  displayName String   @db.VarChar(100) // e.g., "Super Administrator"
+  displayNameBangla String? @db.VarChar(100) // e.g., "সুপার অ্যাডমিন"
+  description String?  @db.Text
+  level       Int      @default(0) // Higher = more authority (100=super_admin, 90=principal, 50=teacher, 10=student)
+  isSystemRole Boolean @default(false) // Cannot be deleted
+  isActive    Boolean  @default(true)
+
+  // Relationships
+  users           SystemUser[]
+  rolePermissions RolePermission[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+  @@index([level])
+  @@map("role_definitions")
+}
+
+/// পারমিশন ক্যাটালগ (Permission Catalog - All Granular Permission Keys)
+model PermissionCatalog {
+  id              Int      @id @default(autoincrement())
+  key             String   @unique @db.VarChar(100) // e.g., "quiz:create", "attendance:manage", "ai:generate"
+  module          String   @db.VarChar(50) // e.g., "quiz", "attendance", "routine", "ai"
+  action          String   @db.VarChar(50) // e.g., "create", "edit", "view", "delete", "manage"
+  title           String   @db.VarChar(200)
+  titleBangla     String?  @db.VarChar(200)
+  description     String?  @db.Text
+  descriptionBangla String? @db.Text
+  category        String   @default("general") @db.VarChar(50) // "academic", "examination", "administrative", "security"
+  riskLevel       String   @default("low") @db.VarChar(20) // "low", "medium", "high", "critical"
+  isActive        Boolean  @default(true)
+
+  // Relationships
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([module, action], name: "unique_module_action")
+  @@index([key])
+  @@index([module])
+  @@index([category])
+  @@map("permission_catalog")
+}
+
+/// ভূমিকা-পারমিশন সম্পর্ক (Role-Permission Bridge - Many-to-Many)
+model RolePermission {
+  id           Int               @id @default(autoincrement())
+  roleId       Int
+  role         RoleDefinition    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId Int
+  permission   PermissionCatalog @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  grantedAt    DateTime          @default(now())
+  grantedBy    String?           @db.VarChar(150)
+
+  @@unique([roleId, permissionId], name: "unique_role_permission")
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+/// ব্যবহারকারী-পারমিশন ওভাররাইড (User-Permission Override)
+model UserPermission {
+  id           Int               @id @default(autoincrement())
+  userId       Int
+  user         SystemUser        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissionId Int
+  permission   PermissionCatalog @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  granted      Boolean           @default(true)  // true = grant, false = explicit deny
+
+  grantedAt    DateTime          @default(now())
+  grantedBy    String?           @db.VarChar(150)
+  reason       String?           @db.Text
+
+  @@unique([userId, permissionId], name: "unique_user_permission")
+  @@index([userId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+
+/// নিরাপত্তা অডিট লগ (Persistent Security Audit Trail)
+model SecurityAuditEntry {
+  id            Int      @id @default(autoincrement())
+  actionType    String   @db.VarChar(50) // "PERMISSION_GRANTED", "PERMISSION_REVOKED", "ROLE_SWITCH", etc.
+  actorId       Int?
+  actor         SystemUser? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName     String   @db.VarChar(200)
+  actorRole     String   @db.VarChar(50)
+  actorEmail    String?  @db.VarChar(150)
+  targetId      Int?
+  target        SystemUser? @relation("AuditTarget", fields: [targetId], references: [id], onDelete: SetNull)
+  targetName    String?  @db.VarChar(200)
+  targetRole    String?  @db.VarChar(50)
+  permissionKey String?  @db.VarChar(100)
+  routePath     String?  @db.VarChar(255)
+  ipAddress     String?  @db.VarChar(50)
+  status        String   @db.VarChar(30) // "ALLOWED", "BLOCKED", "INTERCEPTED", "MODIFIED"
+  details       String?  @db.Text
+  detailsBangla String?  @db.Text
+
+  createdAt     DateTime @default(now())
+
+  @@index([actionType])
+  @@index([actorId])
+  @@index([targetId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("security_audit_log")
+}
+
