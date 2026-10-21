@@ -248,6 +248,25 @@ export default function ExamMarkEntryWorkspace({
     setHasUnsavedChanges(true);
   };
 
+  // Keyboard Navigation: ArrowUp / ArrowDown / Enter between rows
+  const handleGridKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, rowIdx: number, colField: string) => {
+    if (e.key === "ArrowDown" || e.key === "Enter") {
+      e.preventDefault();
+      const nextInput = document.querySelector<HTMLInputElement>(`input[data-grid-row="${rowIdx + 1}"][data-grid-col="${colField}"]`);
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.select();
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prevInput = document.querySelector<HTMLInputElement>(`input[data-grid-row="${rowIdx - 1}"][data-grid-col="${colField}"]`);
+      if (prevInput) {
+        prevInput.focus();
+        prevInput.select();
+      }
+    }
+  };
+
   // Quick Action: Mark All Present
   const handleMarkAllPresent = () => {
     if (isLocked) return;
@@ -747,6 +766,9 @@ export default function ExamMarkEntryWorkspace({
                         <td className="p-3 text-center">
                           <input
                             type="number"
+                            data-grid-row={idx}
+                            data-grid-col="theoryMarks"
+                            onKeyDown={(e) => handleGridKeyDown(e, idx, "theoryMarks")}
                             disabled={isLocked || stu.attendanceStatus !== "Present"}
                             value={stu.theoryMarks ?? ""}
                             onChange={(e) => handleMarkChange(idx, "theoryMarks", e.target.value)}
@@ -765,6 +787,9 @@ export default function ExamMarkEntryWorkspace({
                         <td className="p-3 text-center">
                           <input
                             type="number"
+                            data-grid-row={idx}
+                            data-grid-col="practicalMarks"
+                            onKeyDown={(e) => handleGridKeyDown(e, idx, "practicalMarks")}
                             disabled={isLocked || stu.attendanceStatus !== "Present"}
                             value={stu.practicalMarks ?? ""}
                             onChange={(e) => handleMarkChange(idx, "practicalMarks", e.target.value)}
@@ -783,6 +808,9 @@ export default function ExamMarkEntryWorkspace({
                         <td className="p-3 text-center">
                           <input
                             type="number"
+                            data-grid-row={idx}
+                            data-grid-col="vivaMarks"
+                            onKeyDown={(e) => handleGridKeyDown(e, idx, "vivaMarks")}
                             disabled={isLocked || stu.attendanceStatus !== "Present"}
                             value={stu.vivaMarks ?? ""}
                             onChange={(e) => handleMarkChange(idx, "vivaMarks", e.target.value)}
@@ -797,6 +825,9 @@ export default function ExamMarkEntryWorkspace({
                         <td className="p-3 text-center">
                           <input
                             type="number"
+                            data-grid-row={idx}
+                            data-grid-col="continuousMarks"
+                            onKeyDown={(e) => handleGridKeyDown(e, idx, "continuousMarks")}
                             disabled={isLocked || stu.attendanceStatus !== "Present"}
                             value={stu.continuousMarks ?? ""}
                             onChange={(e) => handleMarkChange(idx, "continuousMarks", e.target.value)}

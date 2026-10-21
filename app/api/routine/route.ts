@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
+import { pdfMasterRoutines } from "@/lib/panchagarhTscPdfRoutineData";
 
 export async function GET(req: Request) {
   try {
@@ -7,63 +8,17 @@ export async function GET(req: Request) {
     const classId = searchParams.get("classId");
     const day = searchParams.get("day");
 
-    // Sample class routine items if not present in database
-    const defaultRoutines = [
-      {
-        id: 1,
-        periodNo: 1,
-        startTime: "09:00 AM",
-        endTime: "09:40 AM",
-        durationMinutes: 40,
-        subjectNameBangla: "বাংলা-১",
-        subjectName: "Bangla-1",
-        subjectCode: "1911",
-        tradeName: "সাধারণ",
-        teacherName: "মোঃ রফিকুল ইসলাম",
-        roomNo: "Room 101",
-      },
-      {
-        id: 2,
-        periodNo: 2,
-        startTime: "09:40 AM",
-        endTime: "10:20 AM",
-        durationMinutes: 40,
-        subjectNameBangla: "ইংরেজি-১",
-        subjectName: "English-1",
-        subjectCode: "1912",
-        tradeName: "সাধারণ",
-        teacherName: "মোসাঃ পারভীন আক্তার",
-        roomNo: "Room 101",
-      },
-      {
-        id: 3,
-        periodNo: 3,
-        startTime: "10:20 AM",
-        endTime: "12:20 PM",
-        durationMinutes: 120,
-        subjectNameBangla: "ইলেকট্রিক্যাল ওয়ার্কশপ প্র্যাকটিক্যাল",
-        subjectName: "Electrical Workshop Practical",
-        subjectCode: "1921",
-        tradeName: "General Electrical Works",
-        teacherName: "ইঞ্জিঃ রাজীব হোসেন",
-        roomNo: "Lab 2 (Electrical)",
-      },
-      {
-        id: 4,
-        periodNo: 4,
-        startTime: "12:20 PM",
-        endTime: "01:00 PM",
-        durationMinutes: 40,
-        subjectNameBangla: "পদার্থবিজ্ঞান-১",
-        subjectName: "Physics-1",
-        subjectCode: "1925",
-        tradeName: "সাধারণ",
-        teacherName: "মোস্তফা কামাল",
-        roomNo: "Room 102",
-      },
-    ];
+    let routines = (institutionalDb as any).routines && (institutionalDb as any).routines.length > 0
+      ? (institutionalDb as any).routines
+      : pdfMasterRoutines;
 
-    const routines = (institutionalDb as any).routines || defaultRoutines;
+    if (classId && classId !== "all") {
+      routines = routines.filter((r: any) => String(r.classId) === classId || r.className?.includes(`Class ${classId}`));
+    }
+
+    if (day && day !== "all") {
+      routines = routines.filter((r: any) => r.day?.toLowerCase() === day.toLowerCase());
+    }
 
     return NextResponse.json({
       success: true,

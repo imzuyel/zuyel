@@ -136,6 +136,8 @@ export default function AdminSidebar({
   onCloseMobile,
 }: AdminSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [isHovered, setIsHovered] = useState<boolean>(false);
+  const isVisuallyExpanded = !isCollapsed || isHovered;
   const [iconModalOpen, setIconModalOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const { iconTheme, iconAnimation, currentIconTheme } = useTheme();
@@ -887,9 +889,15 @@ export default function AdminSidebar({
       )}
 
       <aside
+        onMouseEnter={() => {
+          if (isCollapsed) setIsHovered(true);
+        }}
+        onMouseLeave={() => {
+          if (isCollapsed) setIsHovered(false);
+        }}
         className={`fixed lg:sticky top-0 h-screen max-h-screen inset-y-0 left-0 z-40 flex flex-col justify-between transition-all duration-300 ease-in-out border-r border-slate-200/80 dark:border-slate-800/90 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shadow-2xl lg:shadow-none select-none shrink-0 overflow-hidden ${
           mobileOpen ? "translate-x-0 w-72 sm:w-80" : "-translate-x-full lg:translate-x-0"
-        } ${isCollapsed ? "lg:w-20" : "lg:w-72"}`}
+        } ${!isVisuallyExpanded ? "lg:w-20" : "lg:w-72"}`}
       >
         {/* Decorative Grid Pattern Backdrop */}
         <div className="absolute inset-0 pointer-events-none opacity-[0.03] dark:opacity-[0.05] overflow-hidden">
@@ -910,7 +918,7 @@ export default function AdminSidebar({
               <InstitutionTechnicalSealSVG size={32} showGlow={false} />
             </div>
 
-            {!isCollapsed && (
+            {isVisuallyExpanded && (
               <div className="truncate animate-in fade-in duration-200">
                 <div className="flex items-center gap-1.5">
                   <span className="font-black text-xs text-slate-900 dark:text-white tracking-tight truncate">
@@ -928,12 +936,15 @@ export default function AdminSidebar({
           </div>
 
           <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
+            onClick={() => {
+              setIsCollapsed(!isCollapsed);
+              setIsHovered(false);
+            }}
             className="hidden lg:flex p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all border border-slate-200 dark:border-slate-700 shadow-xs cursor-pointer active:scale-95"
-            title={isCollapsed ? "সাইডবার বড় করুন" : "সাইডবার ছোট করুন"}
+            title={!isVisuallyExpanded ? "সাইডবার বড় করুন" : "সাইডবার ছোট করুন"}
             type="button"
           >
-            {isCollapsed ? <ChevronRight className="w-4 h-4 text-cyan-500" /> : <ChevronLeft className="w-4 h-4 text-slate-400" />}
+            {!isVisuallyExpanded ? <ChevronRight className="w-4 h-4 text-cyan-500" /> : <ChevronLeft className="w-4 h-4 text-slate-400" />}
           </button>
 
           <button
@@ -946,7 +957,7 @@ export default function AdminSidebar({
         </div>
 
         {/* 2. INSTANT SEARCH BAR */}
-        {!isCollapsed && (
+        {isVisuallyExpanded && (
           <div className="px-3 pt-3 pb-1 relative z-10">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -980,7 +991,7 @@ export default function AdminSidebar({
             return (
               <div key={category.id} className="space-y-1">
                 {/* Category Header */}
-                {!isCollapsed ? (
+                {isVisuallyExpanded ? (
                   <button
                     onClick={() => toggleCategory(category.id)}
                     type="button"
@@ -1013,7 +1024,7 @@ export default function AdminSidebar({
                 )}
 
                 {/* Category Items */}
-                {(isCategoryExpanded || isCollapsed || searchQuery) && (
+                {(isCategoryExpanded || !isVisuallyExpanded || searchQuery) && (
                   <div className="space-y-1">
                     {category.items.map((item) => {
                       const Icon = item.icon;
@@ -1033,7 +1044,7 @@ export default function AdminSidebar({
                               isActive
                                 ? `${themedFallback.activeBg} text-white shadow-[0_0_22px_rgba(99,102,241,0.35)] border border-white/30 font-black`
                                 : "text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100/90 dark:hover:bg-slate-800/80 border border-transparent hover:border-indigo-300/50 dark:hover:border-cyan-500/40 hover:shadow-[0_0_15px_rgba(99,102,241,0.18)]"
-                            } ${isCollapsed ? "justify-center px-0" : ""}`}
+                            } ${!isVisuallyExpanded ? "justify-center px-0" : ""}`}
                           >
                             {/* Active Glowing Indicator Bar */}
                             {isActive && (
@@ -1062,7 +1073,7 @@ export default function AdminSidebar({
                             </div>
 
                             {/* Label & Colorful Badge */}
-                            {!isCollapsed && (
+                            {isVisuallyExpanded && (
                               <div className="flex-1 flex items-center justify-between min-w-0">
                                 <span className="truncate">{item.label}</span>
                                 {item.badge && (
@@ -1081,7 +1092,7 @@ export default function AdminSidebar({
                           </button>
 
                           {/* Hover Tooltip Flyout for Collapsed State */}
-                          {isCollapsed && (
+                          {isCollapsed && !isHovered && (
                             <div className="fixed left-20 ml-2 hidden group-hover:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold shadow-2xl border border-slate-700 z-50 whitespace-nowrap pointer-events-none animate-in fade-in zoom-in-95 duration-150">
                               <span>{item.label}</span>
                               {item.badge && (
@@ -1113,14 +1124,14 @@ export default function AdminSidebar({
             onClick={() => setIconModalOpen(true)}
             type="button"
             className={`w-full flex items-center gap-2 p-1.5 rounded-xl bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 hover:from-indigo-500/20 text-slate-800 dark:text-slate-200 border border-indigo-500/20 text-xs font-bold transition-all cursor-pointer active:scale-95 ${
-              isCollapsed ? "justify-center" : ""
+              !isVisuallyExpanded ? "justify-center" : ""
             }`}
             title="আইকন থিম ও অ্যানিমেশন স্টুডিও"
           >
             <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-rose-500 via-amber-500 to-indigo-500 text-white flex items-center justify-center shrink-0 shadow-xs">
               <Palette className="w-3 h-3 text-white" />
             </div>
-            {!isCollapsed && (
+            {isVisuallyExpanded && (
               <div className="flex-1 text-left min-w-0">
                 <div className="text-[11px] font-black text-slate-900 dark:text-white flex items-center justify-between">
                   <span className="truncate">আইকন থিম স্টুডিও</span>
@@ -1132,7 +1143,7 @@ export default function AdminSidebar({
             )}
           </button>
 
-          {!isCollapsed ? (
+          {isVisuallyExpanded ? (
             <div className="flex items-center gap-2.5 p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
               <div className="relative shrink-0">
                 <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-xs">

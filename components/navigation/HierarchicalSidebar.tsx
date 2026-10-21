@@ -77,6 +77,7 @@ export default function HierarchicalSidebar({
 
   // Internal collapse state if uncontrolled
   const [internalCollapsed, setInternalCollapsed] = useState<boolean>(false);
+  const [isHovered, setIsHovered] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   // Sync with localStorage on client mount if uncontrolled
@@ -94,8 +95,10 @@ export default function HierarchicalSidebar({
   }, [controlledCollapsed]);
 
   const isCollapsed = controlledCollapsed !== undefined ? controlledCollapsed : internalCollapsed;
+  const isVisuallyExpanded = !isCollapsed || isHovered;
 
   const handleToggle = () => {
+    setIsHovered(false);
     if (onToggleCollapse) {
       onToggleCollapse();
     } else {
@@ -441,26 +444,32 @@ export default function HierarchicalSidebar({
 
   return (
     <aside
+      onMouseEnter={() => {
+        if (isCollapsed) setIsHovered(true);
+      }}
+      onMouseLeave={() => {
+        if (isCollapsed) setIsHovered(false);
+      }}
       className={`bg-slate-950 text-slate-200 h-screen max-h-screen sticky top-0 border-r border-slate-800/90 flex flex-col select-none font-sans shrink-0 transition-all duration-300 ease-in-out z-30 shadow-2xl ${
-        isCollapsed ? "w-20 p-2.5" : "w-72 p-3.5"
+        !isVisuallyExpanded ? "w-20 p-2.5" : "w-72 p-3.5"
       } ${className}`}
       aria-label="Institutional ERP Sidebar"
     >
       {/* 1. BRAND HEADER & TOGGLE BUTTON */}
       <div
         className={`shrink-0 flex items-center border-b border-slate-800/90 pb-3 mb-2.5 transition-all ${
-          isCollapsed ? "flex-col justify-center gap-2 px-1" : "justify-between gap-3 px-1"
+          !isVisuallyExpanded ? "flex-col justify-center gap-2 px-1" : "justify-between gap-3 px-1"
         }`}
       >
         <Link
           href="/admin"
-          className={`flex items-center gap-2.5 min-w-0 group cursor-pointer ${isCollapsed ? "justify-center" : ""}`}
+          className={`flex items-center gap-2.5 min-w-0 group cursor-pointer ${!isVisuallyExpanded ? "justify-center" : ""}`}
         >
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white font-black shadow-lg shadow-cyan-500/20 shrink-0 group-hover:scale-105 transition-transform">
             <GraduationCap className="w-5 h-5 text-white" />
           </div>
 
-          {!isCollapsed && (
+          {isVisuallyExpanded && (
             <div className="overflow-hidden min-w-0 transition-opacity duration-200">
               <h1 className="font-black text-white text-xs tracking-tight truncate group-hover:text-cyan-300 transition-colors">
                 PTSC ERP System
@@ -474,11 +483,11 @@ export default function HierarchicalSidebar({
         <button
           onClick={handleToggle}
           type="button"
-          title={isCollapsed ? "সাইডবার বড় করুন (Expand)" : "সাইডবার ছোট করুন (Collapse)"}
+          title={!isVisuallyExpanded ? "সাইডবার বড় করুন (Expand)" : "সাইডবার ছোট করুন (Collapse)"}
           className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 border border-slate-800/80 transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-95 shadow-xs"
-          aria-label={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          aria-label={!isVisuallyExpanded ? "Expand Sidebar" : "Collapse Sidebar"}
         >
-          {isCollapsed ? (
+          {!isVisuallyExpanded ? (
             <ChevronRight className="w-4 h-4 text-cyan-400" />
           ) : (
             <ChevronLeft className="w-4 h-4 text-slate-300" />
@@ -487,7 +496,7 @@ export default function HierarchicalSidebar({
       </div>
 
       {/* 2. INSTANT SEARCH BAR */}
-      {!isCollapsed && (
+      {isVisuallyExpanded && (
         <div className="mb-2 px-0.5">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -521,7 +530,7 @@ export default function HierarchicalSidebar({
           return (
             <div key={group.id} className="space-y-1">
               {/* Group Section Header */}
-              {!isCollapsed ? (
+              {isVisuallyExpanded ? (
                 <button
                   onClick={() => group.isCollapsible && toggleGroup(group.id)}
                   type="button"
@@ -549,7 +558,7 @@ export default function HierarchicalSidebar({
               )}
 
               {/* Items in Group */}
-              {(isOpen || isCollapsed || searchQuery) && (
+              {(isOpen || !isVisuallyExpanded || searchQuery) && (
                 <div className="space-y-1">
                   {group.items.map((item) => {
                     const active = isActive(item.href);
@@ -562,7 +571,7 @@ export default function HierarchicalSidebar({
                         <Link
                           href={item.href}
                           className={`flex items-center rounded-xl transition-all duration-300 relative overflow-hidden ${
-                            isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-3 py-2"
+                            !isVisuallyExpanded ? "justify-center p-2.5" : "gap-2.5 px-3 py-2"
                           } ${
                             active
                               ? `${themedStyle.activeBg} text-white font-black border border-cyan-400/50 shadow-[0_0_20px_rgba(6,182,212,0.35)]`
@@ -587,14 +596,14 @@ export default function HierarchicalSidebar({
                             <Icon
                               className={`w-3.5 h-3.5 ${
                                 active
-                                  ? "text-white filter drop-shadow(0 0 4px rgba(255,255,255,0.8))"
-                                  : `${themedStyle.iconColor} ${themedStyle.animClass}`
-                              }`}
+                              ? "text-white filter drop-shadow(0 0 4px rgba(255,255,255,0.8))"
+                              : `${themedStyle.iconColor} ${themedStyle.animClass}`
+                            }`}
                             />
                           </div>
 
                           {/* Label and Badge */}
-                          {!isCollapsed && (
+                          {isVisuallyExpanded && (
                             <div className="flex-1 flex items-center justify-between min-w-0">
                               <span className="truncate">{item.label}</span>
                               {item.badge && (
@@ -613,7 +622,7 @@ export default function HierarchicalSidebar({
                         </Link>
 
                         {/* Collapsed Hover Tooltip Flyout */}
-                        {isCollapsed && (
+                        {isCollapsed && !isHovered && (
                           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold whitespace-nowrap shadow-2xl border border-slate-700 opacity-0 pointer-events-none group-hover/item:opacity-100 transition-all duration-150 z-50 flex items-center gap-1.5">
                             <span>{item.label}</span>
                             {item.badge && (
@@ -641,7 +650,7 @@ export default function HierarchicalSidebar({
 
       {/* 4. SLEEK INSTITUTION PROFILE FOOTER */}
       <div className="shrink-0 pt-3 mt-auto border-t border-slate-800/90 text-xs">
-        {!isCollapsed ? (
+        {isVisuallyExpanded ? (
           <div className="space-y-1.5 px-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-black text-white text-xs tracking-tight">

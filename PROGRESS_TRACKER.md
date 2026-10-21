@@ -159,3 +159,42 @@
   - [x] Update `PROGRESS_TRACKER.md` to mark all Phase 4 tasks complete.
   - [x] Generate Phase 4 summary report.
 
+## PHASE 5 (REVISED): Core Institutional ERP Re-Engineering with UI Preservation & Sidebar Hover Fix
+
+- [x] **Task 5.1: Update PROGRESS_TRACKER.md with Revised Phase 5 Checklist**
+  - [x] Add Tasks 5.1 through 5.9 to `PROGRESS_TRACKER.md`.
+
+- [x] **Task 5.2: Fix Sidebar Collapsed State Hover-to-Expand Feature (`components/layout/Sidebar.tsx`, `components/navigation/*`)**
+  - [x] Inspect sidebar implementations (`components/layout/Sidebar.tsx`, `components/navigation/HierarchicalSidebar.tsx`, `components/navigation/AdminSidebar.tsx`).
+  - [x] Implement smooth hover-to-expand in collapsed mini-rail mode (`onMouseEnter` -> expanded, `onMouseLeave` -> collapsed) with buttery transitions and zero layout jitter.
+  - [x] Ensure full readability of text labels and icons while preserving exact visual theme and container bounds.
+
+- [x] **Task 5.3: Academic Structure & Global Subject Mapping (`lib/academicStructure.ts`, `lib/subjectEngine.ts`, `app/api/academic/**`, `components/academic/**`)**
+  - [x] Validate BTEB trade codes, class levels, subject mappings, and theory/practical splits.
+  - [x] Preserve exact visual layout in `ClassesAndTradesView.tsx`, `SubjectsView.tsx`, `TradeAndLabView.tsx`, and `GlobalSettingsSubjectMappingHub.tsx` while ensuring robust backend handling and API safety.
+
+- [x] **Task 5.4: Student Management, Bulk Import & Lifecycle Rollover (`app/api/students/**`, `components/students/**`, `components/excel/SmartExcelWizard.tsx`)**
+  - [x] Secure student CRUD, bulk CSV/Excel parsing (`/api/students/bulk`), 360 profile queries, and annual rollover/promotion (`/api/students/rollover`) with Prisma transactions.
+  - [x] Preserve visual tables, drawer, and modal designs in `StudentManagementView.tsx`, `Student360ProfileModal.tsx`, `StudentLifecycleDashboard.tsx`, and `SmartExcelWizard.tsx`.
+
+- [x] **Task 5.5: Digital/QR Attendance & BTEB Annual Khata (`lib/attendanceEngine.ts`, `app/api/attendance/**`, `components/attendance/**`)**
+  - [x] Secure QR attendance scanning (`/api/attendance/scan`), idempotency, and daily/monthly record saving.
+  - [x] Preserve all 12 attendance views (`TodaysAttendanceDashboard.tsx`, `DigitalAttendanceRegister.tsx`, `AdvancedAttendanceKhata.tsx`, `AnnualKhataView.tsx`, `MonthlyAttendanceRegisterView.tsx`, `BtebAnnualLongTermRegisterView.tsx`, etc.) with responsive, stable data binding.
+
+- [x] **Task 5.6: BTEB Examination, Marks Entry & Tabulation Sheet Studio (`lib/btebGrader.ts`, `lib/examinationEngine.ts`, `lib/resultCalculation.ts`, `app/api/examination/**`, `app/api/results/**`, `components/examination/**`, `components/results/**`)**
+  - [x] Maintain 100% strict compliance with BTEB grading rules (GPA, TC/PC/TF/PF pass marks, component fail logic) in `lib/btebGrader.ts` and `lib/resultCalculation.ts`.
+  - [x] Prevent mark entries from exceeding maximums, log audit trails, and preserve exact layout of `BtebTabulationSheetStudio.tsx`, `ExamMarkEntryWorkspace.tsx`, and `TabulationSheetPrint.tsx`.
+
+- [x] **Task 5.7: Master Routine Studio, Faculty Workload & Substitute Engine (`lib/routineEngine.ts`, `lib/panchagarhTscPdfRoutineData.ts`, `app/api/routine/route.ts`, `app/api/faculty/**`, `components/routine/**`, `components/faculty/**`)**
+  - [x] Protect Panchagarh TSC routine data and double-booking conflict detection.
+  - [x] Connect teacher leave requests with `/api/faculty/substitute` for automated replacement suggestions.
+  - [x] Preserve exact visual grid and perspective switcher in `PtscMasterRoutineStudio.tsx` and `AutoSubstituteEngineModal.tsx`.
+
+- [x] **Task 5.8: Fee Accounts Studio, Lab Equipment Inventory & Guardian SMS (`lib/feeAccountsEngine.ts`, `lib/labInventoryEngine.ts`, `lib/smsGatewayEngine.ts`, `app/api/accounts/fees/route.ts`, `app/api/inventory/equipment/route.ts`, `app/api/communication/sms/**`, `components/accounts/**`, `components/inventory/**`, `components/communication/**`)**
+  - [x] Validate fee payments, receipt generation, lab equipment stock levels, and SMS template interpolation safely on server.
+  - [x] Maintain exact UI structure of `FeeCollectionStudio.tsx`, `LabEquipmentStudio.tsx`, and `GuardianSmsStudio.tsx`.
+
+- [x] **Task 5.9: Verification & Phase 5 Completion Report**
+  - [x] Run full typecheck (`npx tsc --noEmit`), route health check, and verify smooth sidebar hover-to-expand.
+  - [x] Update `PROGRESS_TRACKER.md` to mark all Phase 5 tasks complete.
+

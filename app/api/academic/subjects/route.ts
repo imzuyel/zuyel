@@ -264,6 +264,26 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: "শিক্ষাবর্ষ, শ্রেণি এবং বিষয় আইডি আবশ্যক।" }, { status: 400 });
       }
 
+      const numericCls = parseClassNumeric(classId);
+      if (!doesClassHaveTrade(numericCls) && tradeId && Number(tradeId) !== 0) {
+        return NextResponse.json({ success: false, error: "৬ষ্ঠ-৮ম শ্রেণির জন্য কোনো ভোকেশনাল ট্রেড প্রযোজ্য নয়।" }, { status: 400 });
+      }
+
+      const fMarks = Number(fullMarks) || 100;
+      const tMarks = theoryMarks !== undefined ? Number(theoryMarks) : (fullMarks ? Number(fullMarks) : 100);
+      const pMarks = practicalMarks !== undefined ? Number(practicalMarks) : 0;
+      const pPass = Number(passMarks) || 33;
+
+      if (fMarks <= 0 || fMarks > 300) {
+        return NextResponse.json({ success: false, error: "মোট নম্বর ১ থেকে ৩০০ এর মধ্যে হতে হবে।" }, { status: 400 });
+      }
+      if (tMarks + pMarks > fMarks) {
+        return NextResponse.json({ success: false, error: `তত্ত্বীয় (${tMarks}) ও ব্যবহারিক (${pMarks}) নম্বরের যোগফল মোট নম্বরের (${fMarks}) চেয়ে বেশি হতে পারে না।` }, { status: 400 });
+      }
+      if (pPass > fMarks) {
+        return NextResponse.json({ success: false, error: "পাস নম্বর মোট নম্বরের চেয়ে বেশি হতে পারে না।" }, { status: 400 });
+      }
+
       const result = saveSubjectMapping(
         {
           academicYear,

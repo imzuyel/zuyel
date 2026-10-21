@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   LayoutDashboard,
   Sparkles,
@@ -35,6 +35,8 @@ interface SidebarProps {
   onSelectTab: (tab: string) => void;
   isOpen: boolean;
   onClose: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export default function Sidebar({
@@ -42,7 +44,11 @@ export default function Sidebar({
   onSelectTab,
   isOpen,
   onClose,
+  isCollapsed = false,
+  onToggleCollapse,
 }: SidebarProps) {
+  const [isHovered, setIsHovered] = useState<boolean>(false);
+  const isVisuallyExpanded = !isCollapsed || isHovered;
   // Navigation items with individually assigned COLORFUL icons and glowing backgrounds
   const navSections = [
     {
@@ -257,9 +263,15 @@ export default function Sidebar({
 
       {/* Main Responsive Sidebar Drawer */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 sm:w-80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border-r border-slate-200/80 dark:border-slate-800 flex flex-col justify-between transition-transform duration-300 ease-in-out shadow-2xl md:shadow-none md:translate-x-0 ${
+        onMouseEnter={() => {
+          if (isCollapsed) setIsHovered(true);
+        }}
+        onMouseLeave={() => {
+          if (isCollapsed) setIsHovered(false);
+        }}
+        className={`fixed top-0 bottom-0 left-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border-r border-slate-200/80 dark:border-slate-800 flex flex-col justify-between transition-all duration-300 ease-in-out shadow-2xl md:shadow-none md:translate-x-0 ${
           isOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        } ${!isVisuallyExpanded ? "w-20" : "w-72 sm:w-80"}`}
       >
         {/* Top Institutional Header */}
         <div className="relative p-5 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between">

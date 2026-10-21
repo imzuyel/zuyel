@@ -33,6 +33,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 4. Validate Theory/Practical Mark Splits (BTEB Regulations)
+    const { fullMarks, theoryMarks, practicalMarks, passMarks } = body;
+    if (fullMarks !== undefined) {
+      const fMarks = Number(fullMarks);
+      if (Number.isNaN(fMarks) || fMarks <= 0 || fMarks > 300) {
+        errors.push("Full marks must be a positive integer between 1 and 300.");
+      } else {
+        const tMarks = theoryMarks !== undefined ? Number(theoryMarks) : 0;
+        const pMarks = practicalMarks !== undefined ? Number(practicalMarks) : 0;
+        if (tMarks < 0 || pMarks < 0) {
+          errors.push("Theory and practical marks cannot be negative.");
+        } else if (tMarks + pMarks > fMarks) {
+          errors.push(`Sum of Theory (${tMarks}) and Practical (${pMarks}) cannot exceed Full Marks (${fMarks}).`);
+        }
+
+        if (passMarks !== undefined) {
+          const pass = Number(passMarks);
+          if (pass < 0 || pass > fMarks) {
+            errors.push(`Pass marks (${pass}) must be between 0 and full marks (${fMarks}).`);
+          }
+        }
+      }
+    }
+
     if (errors.length > 0) {
       return NextResponse.json({
         success: false,
