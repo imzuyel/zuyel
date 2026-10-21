@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import pptxgen from "pptxgenjs";
 import { getPresentationThemeById } from "@/lib/presentationThemes";
 import { generateWithFailover } from "@/lib/aiFailoverPipeline";
+import { safeParseAiObject } from "@/lib/safeJsonParser";
 
 export async function POST(req: NextRequest) {
   try {
@@ -85,13 +86,7 @@ Return ONLY valid JSON with no markdown formatting.`;
 
     let data: any = null;
     if (responseText) {
-      try {
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        const cleanJson = jsonMatch ? jsonMatch[0] : responseText;
-        data = JSON.parse(cleanJson);
-      } catch (e) {
-        console.error("[PPTX Generation] JSON Parse error:", e);
-      }
+      data = safeParseAiObject<{ slides: any[] } | null>(responseText, null);
     }
 
     if (!data || !Array.isArray(data.slides) || data.slides.length === 0) {

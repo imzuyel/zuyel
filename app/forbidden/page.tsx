@@ -6,7 +6,7 @@ import { ShieldAlert, ArrowLeft, BookOpen, GraduationCap, Bell, Lock, Home } fro
 import { useAuth } from "@/context/AuthContext";
 
 export default function ForbiddenSecurityPage() {
-  const { currentUser, switchRole } = useAuth();
+  const { currentUser } = useAuth();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden">
@@ -89,34 +89,12 @@ export default function ForbiddenSecurityPage() {
               <span>হোমে যান</span>
             </Link>
             <Link
-              href="/admin/login"
+              href="/login?role=admin"
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>প্রশাসনিক লগইন করুন</span>
+              <span>প্রশাসনিক স্টাফ লগইন</span>
             </Link>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-            <span className="text-[10px] text-slate-500">টেস্টিং রোল সুইচ:</span>
-            <button
-              onClick={() => {
-                switchRole("principal");
-                window.location.href = "/admin";
-              }}
-              className="px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 text-[11px] font-bold transition-all cursor-pointer"
-            >
-              অধ্যক্ষ মোড
-            </button>
-            <button
-              onClick={() => {
-                switchRole("teacher");
-                window.location.href = "/admin";
-              }}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-all cursor-pointer"
-            >
-              শিক্ষক মোড
-            </button>
           </div>
         </div>
       </div>

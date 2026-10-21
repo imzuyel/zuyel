@@ -37,26 +37,97 @@ export interface ApiResponse<T = any> {
 
 /**
  * Universal safe fetch function that guarantees returning a structured response
- * and never throws an unhandled promise rejection.
+ * and never throws an unhandled promise rejection or uncaught AbortError.
  */
 export async function safeFetchJson<T = any>(
   url: string,
   options: SafeFetchOptions = {}
 ): Promise<ApiResponse<T>> {
+  const isDev = process.env.NODE_ENV === "development";
+  const defaultTimeout = isDev ? 35000 : 20000;
+
   const {
-    timeoutMs = 15000,
+    timeoutMs = defaultTimeout,
     onUnauthorized,
     onForbidden,
     suppressErrorLogging = false,
     ...fetchOptions
   } = options;
 
-  const controller = new AbortController();
+  // If external signal is already aborted, return immediately without network call
+  if (options.signal?.aborted) {
+    return {
+      ok: false,
+      success: false,
+      status: 499,
+      data: null,
+      error: "অনুরোধটি বাতিল করা হয়েছে (Request Cancelled)",
+      errorCode: "REQUEST_ABORTED",
+      message: "অনুরোধটি বাতিল করা হয়েছে (Request Cancelled)",
+    };
+  }
+
+  const timeoutController = new AbortController();
+  let timedOut = false;
+
   const timeoutId = setTimeout(() => {
-    controller.abort();
+    timedOut = true;
+    try {
+      const reason =
+        typeof DOMException !== "undefined"
+          ? new DOMException(
+              `Request timed out — server took longer than ${timeoutMs}ms for ${url}`,
+              "TimeoutError"
+            )
+          : new Error(`Request timed out — server took longer than ${timeoutMs}ms for ${url}`);
+      timeoutController.abort(reason);
+    } catch {
+      // In older runtimes without abort reason support
+      timeoutController.abort();
+    }
   }, timeoutMs);
 
-  const signal = options.signal || controller.signal;
+  // Safely combine external signal and internal timeout controller
+  let signal: AbortSignal;
+  let cleanupListeners: (() => void) | null = null;
+
+  if (options.signal) {
+    if (typeof AbortSignal.any === "function") {
+      try {
+        signal = AbortSignal.any([options.signal, timeoutController.signal]);
+      } catch {
+        signal = timeoutController.signal;
+      }
+    } else {
+      const combinedController = new AbortController();
+      const onAbort = () => {
+        if (!combinedController.signal.aborted) {
+          const reason = options.signal?.reason || timeoutController.signal.reason;
+          try {
+            combinedController.abort(reason);
+          } catch {
+            combinedController.abort();
+          }
+        }
+      };
+
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      timeoutController.signal.addEventListener("abort", onAbort, { once: true });
+
+      cleanupListeners = () => {
+        try {
+          options.signal?.removeEventListener("abort", onAbort);
+          timeoutController.signal.removeEventListener("abort", onAbort);
+        } catch {
+          // ignore
+        }
+      };
+
+      signal = combinedController.signal;
+    }
+  } else {
+    signal = timeoutController.signal;
+  }
 
   try {
     const res = await fetch(url, {
@@ -65,6 +136,7 @@ export async function safeFetchJson<T = any>(
     });
 
     clearTimeout(timeoutId);
+    if (cleanupListeners) cleanupListeners();
 
     const status = res.status;
 
@@ -107,7 +179,7 @@ export async function safeFetchJson<T = any>(
         }
       }
     } catch (parseErr) {
-      if (!suppressErrorLogging) {
+      if (!suppressErrorLogging && process.env.NODE_ENV !== "production") {
         console.warn(`[safeFetchJson] Failed parsing body from ${url}:`, parseErr);
       }
     }
@@ -181,23 +253,48 @@ export async function safeFetchJson<T = any>(
     return result;
   } catch (err: any) {
     clearTimeout(timeoutId);
+    if (cleanupListeners) cleanupListeners();
 
-    const isAbort = err?.name === "AbortError";
-    const errorMessage = isAbort
+    const isAbort =
+      err?.name === "AbortError" ||
+      err?.name === "TimeoutError" ||
+      err?.code === 20 ||
+      err?.message?.includes("aborted") ||
+      err?.message?.includes("timeout") ||
+      Boolean(signal?.aborted) ||
+      timedOut;
+
+    const isExplicitTimeout = timedOut || err?.name === "TimeoutError";
+
+    const errorMessage = isExplicitTimeout
       ? "সার্ভার থেকে সাড়া পেতে বেশি সময় লাগছে (Request Timed Out)"
+      : isAbort
+      ? "অনুরোধটি বাতিল করা হয়েছে (Request Cancelled)"
       : err?.message || "নেটওয়ার্ক সংযোগ ত্রুটি (Network Connection Error)";
 
     if (!suppressErrorLogging) {
-      console.error(`[safeFetchJson] Network/Fetch failure for ${url}:`, err);
+      if (isAbort) {
+        // Abort/timeout is an expected cancellation or slow dev compilation.
+        // We log via console.warn only in dev so Next.js Dev Overlay never triggers a fatal red modal.
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(`[safeFetchJson] Fetch ${isExplicitTimeout ? "timed out" : "aborted"} for ${url}`);
+        }
+      } else {
+        console.error(`[safeFetchJson] Network/Fetch failure for ${url}:`, err);
+      }
     }
 
     return {
       ok: false,
       success: false,
-      status: isAbort ? 408 : 0,
+      status: isExplicitTimeout ? 408 : isAbort ? 499 : 0,
       data: null,
       error: errorMessage,
-      errorCode: isAbort ? "REQUEST_TIMEOUT" : "NETWORK_ERROR",
+      errorCode: isExplicitTimeout
+        ? "REQUEST_TIMEOUT"
+        : isAbort
+        ? "REQUEST_ABORTED"
+        : "NETWORK_ERROR",
       message: errorMessage,
     };
   }

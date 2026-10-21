@@ -54,12 +54,14 @@ export async function GET(req: Request) {
     return NextResponse.json({
       success: true,
       verified: verificationResult.verified,
+      verificationStatus: verificationResult.verificationStatus,
       message: verificationResult.message,
       messageBangla: verificationResult.messageBangla,
       document: verificationResult.document || null,
       errorCode: verificationResult.errorCode,
     });
   } catch (error: any) {
+
     return NextResponse.json(
       {
         success: false,

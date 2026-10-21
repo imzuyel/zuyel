@@ -1,6 +1,7 @@
 import { Type } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { generateWithFailover } from "@/lib/aiFailoverPipeline";
+import { safeParseAiObject } from "@/lib/safeJsonParser";
 
 // Standardize Lucide icon options for better rendering safety
 const VALID_ICONS = [
@@ -112,13 +113,7 @@ Return ONLY the JSON response without any Markdown formatting or backticks.`;
 
     let data: any = null;
     if (responseText) {
-      try {
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        const cleanJson = jsonMatch ? jsonMatch[0] : responseText;
-        data = JSON.parse(cleanJson);
-      } catch (e) {
-        console.error("[Slide Generation] JSON Parse error:", e);
-      }
+      data = safeParseAiObject<{ slides: any[] } | null>(responseText, null);
     }
 
     // High-Quality Contextual TVET Fallback Slides Generator if AI response is empty or malformed

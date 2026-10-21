@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, GeneratedDocument, DocumentType, DocumentStatus, DocumentAuditLog } from "@/lib/database";
 import { formatDocumentNo, toBanglaDateString } from "@/lib/utils";
-import { DOCUMENT_TYPE_LABELS, replaceDocumentTokens, DEFAULT_SIGNATORIES } from "@/lib/documentsData";
+import { DOCUMENT_TYPE_LABELS, replaceDocumentTokens, DEFAULT_SIGNATORIES, generateTamperProofDocNumber } from "@/lib/documentsData";
 import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
 
 export async function POST(req: NextRequest) {
@@ -62,21 +62,20 @@ export async function POST(req: NextRequest) {
       : DEFAULT_SIGNATORIES;
 
     const generatedDocs: GeneratedDocument[] = [];
-    let startSerial = institutionalDb.documents.length + 101;
 
     for (const student of targetStudents) {
-      const docNumber = formatDocumentNo(typeConfig.code, student.session || session, startSerial);
-      startSerial++;
+      const studentSession = student.session || session || "2026";
+      const docNumber = generateTamperProofDocNumber(typeConfig.code, studentSession, institutionalDb.documents);
 
       const personalizedBody = replaceDocumentTokens(typeConfig.defaultBodyTemplate, student, {
         memoNo: docNumber,
         issueDate: todayStr,
         leavingReason,
-        passingYear: passingYear || student.session || session,
+        passingYear: passingYear || studentSession,
       });
 
       const auditLog: DocumentAuditLog = {
-        id: `aud_${Date.now()}_${student.id}`,
+        id: `aud_${Date.now()}_${student.id}_${Math.random().toString(36).substr(2, 4)}`,
         action: status === "issued" ? "issued" : "created",
         performedBy: generatedBy,
         timestamp: new Date().toISOString(),
@@ -90,31 +89,31 @@ export async function POST(req: NextRequest) {
         docTypeBangla: typeConfig.bn,
         theme: theme || "gov_classic",
         studentId: student.id,
-        studentCode: student.studentId,
-        studentName: student.name,
-        studentNameBangla: student.nameBangla || student.name,
-        roll: student.roll,
-        classId: student.classId,
-        className: student.className,
+        studentCode: student.studentId || `PTSC-${studentSession}-${student.id}`,
+        studentName: student.name || "শিক্ষার্থী",
+        studentNameBangla: student.nameBangla || student.name || "শিক্ষার্থী",
+        roll: student.roll || 1,
+        classId: student.classId || 4,
+        className: student.className || "Class 9 (SSC Vocational)",
         tradeId: student.tradeId,
-        tradeName: student.tradeName,
-        tradeNameBangla: student.tradeNameBangla,
-        section: student.section,
-        session: student.session || session,
-        admissionNo: student.admissionNo || `ADM-${student.studentId}`,
+        tradeName: student.tradeName || "",
+        tradeNameBangla: student.tradeNameBangla || student.tradeName || "",
+        section: student.section || "A",
+        session: studentSession,
+        admissionNo: student.admissionNo || `ADM-${student.studentId || student.id}`,
         fatherName: student.fatherName || "মোঃ রফিকুল ইসলাম",
         motherName: student.motherName || "মোছাঃ রোকেয়া বেগম",
-        dob: student.dob,
-        dobBangla: student.dobBangla || toBanglaDateString(student.dob),
+        dob: student.dob || "2009-01-01",
+        dobBangla: student.dobBangla || (student.dob ? toBanglaDateString(student.dob) : "০১ জানুয়ারি, ২০০৯"),
         birthRegNo: student.birthRegNo || "—",
         gpa: student.gpa || "5.00",
         resultStatus: student.resultStatus || "Passed",
-        passingYear: passingYear || student.session || session,
+        passingYear: passingYear || studentSession,
         leavingReason: leavingReason || "উচ্চতর শিক্ষা ও পেশাগত কারিগরি ক্ষেত্রে ভর্তির সুবিধার্থে",
         issueDate: todayStr,
         issueDateBangla: todayBangla,
         generatedBy,
-        qrCodeData: `https://tsc.panchagarh.gov.bd/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId}`,
+        qrCodeData: `https://tsc.panchagarh.gov.bd/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId || student.id}`,
         customBodyText: personalizedBody,
         remarks,
         status: (status as DocumentStatus) || "issued",
@@ -132,6 +131,7 @@ export async function POST(req: NextRequest) {
       institutionalDb.documents.unshift(newDoc);
       generatedDocs.push(newDoc);
     }
+
 
     return NextResponse.json({
       success: true,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PdfDocumentService } from "@/lib/pdfDocumentService";
+import { institutionalDb } from "@/lib/database";
 
 export async function GET(
   req: NextRequest,
@@ -17,12 +18,15 @@ export async function GET(
     }
 
     const jobs = await PdfDocumentService.getGenerationHistory(id);
+    const questions = institutionalDb.aiGeneratedQuestions.filter((q) => q.documentId === id);
 
     return NextResponse.json({
       success: true,
       documentId: id,
+      documentName: document.title,
       totalJobs: jobs.length,
       jobs,
+      questions,
     });
   } catch (err: any) {
     console.error("[API: /api/ai/pdf-manager/[id]/generation-history GET] Error:", err);

@@ -65,7 +65,10 @@ export function getAssignedPlate(
     ? candidates[Math.floor(Math.random() * candidates.length)]
     : enabledTemplates[Math.floor(Math.random() * enabledTemplates.length)];
 
-  // Persist assignment
+  // Persist assignment (bounded to avoid memory leaks)
+  if (plateAssignments.length > 2000) {
+    plateAssignments.splice(0, 500);
+  }
   plateAssignments.push({
     sessionId,
     participantId,

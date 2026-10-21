@@ -69,10 +69,20 @@ export async function POST(
       });
     }
 
+    const questions = institutionalDb.quizQuestions.filter((qq) => qq.quizId === id);
+
+    if (questions.length === 0) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: "কুইজ পাবলিশ করার আগে কমপক্ষে একটি প্রশ্ন যোগ করতে হবে (Quiz must contain at least one question before publishing)" 
+        },
+        { status: 400 }
+      );
+    }
+
     quiz.status = "published";
     quiz.updatedAt = new Date().toISOString();
-
-    const questions = institutionalDb.quizQuestions.filter((qq) => qq.quizId === id);
 
     return NextResponse.json({
       success: true,

@@ -6,6 +6,7 @@ import {
   Filter,
   Download,
   FileSpreadsheet,
+  Printer,
   Search,
   CheckCircle2,
   XCircle,
@@ -25,6 +26,8 @@ import {
 } from "@/lib/academicStructure";
 import { Student } from "@/lib/database";
 import AcademicFilterBar from "@/components/common/AcademicFilterBar";
+import PrintInstitutionalHeader from "@/components/common/PrintInstitutionalHeader";
+import PrintSignatureBlock from "@/components/common/PrintSignatureBlock";
 
 interface AttendanceReportRow {
   studentId: string;
@@ -210,29 +213,42 @@ export default function AttendanceReportView() {
   return (
     <div className="space-y-4 pb-12">
       {/* 1. Header & Export CTA */}
-      <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print">
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
             <BarChart3 className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
             <span>উপস্থিতি রিপোর্ট ও বিশ্লেষণ (Attendance Report)</span>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            তারিখভিত্তিক ও শ্রেণিকেন্দ্রিক উপস্থিতি পরিসংখ্যান • এক্সেল এক্সপোর্ট সুবিধা
+            তারিখভিত্তিক ও শ্রেণিকেন্দ্রিক উপস্থিতি পরিসংখ্যান • এক্সেল এক্সপোর্ট ও প্রিন্ট সুবিধা
           </p>
         </div>
 
-        <button
-          onClick={handleExportExcel}
-          disabled={reportRows.length === 0}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/20 transition-all active:scale-95 disabled:opacity-50 shrink-0"
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          <span>এক্সেলে ডাউনলোড (Export to Excel)</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExportExcel}
+            disabled={reportRows.length === 0}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/20 transition-all active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>এক্সেলে ডাউনলোড (Excel)</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined") window.print();
+            }}
+            disabled={reportRows.length === 0}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            <Printer className="w-4 h-4" />
+            <span>প্রিন্ট ও পিডিএফ (Print)</span>
+          </button>
+        </div>
       </div>
 
       {/* 2. Top Aggregate Metrics (Total Classes, Present, Absent, Late, Attendance %) */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 no-print">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">মোট ক্লাস (Total Classes)</div>
           <div className="text-2xl font-black text-slate-900 dark:text-white">
@@ -277,7 +293,7 @@ export default function AttendanceReportView() {
       </div>
 
       {/* 3. Comprehensive Filters (Date / Date Range, Class, Trade [hidden for 6-8], Section, Student) */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3 no-print">
         {/* Date Mode Toggle & Pickers */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
           <div>
@@ -404,8 +420,8 @@ export default function AttendanceReportView() {
         </div>
 
       {/* 4. Report Table (Desktop & Mobile) */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden universal-print-container print:border-none print:shadow-none print:p-0">
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between no-print">
           <div className="text-xs font-black text-slate-900 dark:text-white">
             রিপোর্ট তালিকা ({reportRows.length} জন শিক্ষার্থী)
           </div>
@@ -424,76 +440,102 @@ export default function AttendanceReportView() {
           </div>
         ) : (
           <>
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4 w-12">রোল</th>
-                    <th className="py-3 px-4">আইডি</th>
-                    <th className="py-3 px-4">শিক্ষার্থীর নাম</th>
-                    <th className="py-3 px-4">শ্রেণি ও শাখা</th>
-                    <th className="py-3 px-4">ট্রেড</th>
-                    <th className="py-3 px-4 text-center">মোট দিন</th>
-                    <th className="py-3 px-4 text-center text-emerald-600">উপস্থিত</th>
-                    <th className="py-3 px-4 text-center text-rose-600">অনুপস্থিত</th>
-                    <th className="py-3 px-4 text-center text-amber-600">দেরি</th>
-                    <th className="py-3 px-4 text-right">উপস্থিতি %</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {reportRows.map((r) => (
-                    <tr key={r.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/60/60 dark:hover:bg-slate-800/30">
-                      <td className="py-3 px-4 font-mono font-bold text-indigo-600">
-                        {String(r.roll).padStart(2, "0")}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">
-                        {r.studentId}
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
-                        {r.name}
-                      </td>
-                      <td className="py-3 px-4 text-slate-700 dark:text-slate-300">
-                        {r.className} ({r.section})
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
-                          {r.tradeName}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-center font-semibold text-slate-700 dark:text-slate-300">
-                        {r.totalDays}
-                      </td>
-                      <td className="py-3 px-4 text-center font-bold text-emerald-600">
-                        {r.presentDays}
-                      </td>
-                      <td className="py-3 px-4 text-center font-bold text-rose-600">
-                        {r.absentDays}
-                      </td>
-                      <td className="py-3 px-4 text-center font-bold text-amber-600">
-                        {r.lateDays}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <span
-                          className={`font-black font-mono px-2 py-0.5 rounded-full text-xs ${
-                            r.percentage >= 85
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                              : r.percentage >= 75
-                              ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                              : "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-                          }`}
-                        >
-                          {r.percentage}%
-                        </span>
-                      </td>
+            {/* Print Header for Physical/PDF Output */}
+            <div className="p-4 sm:p-6 print:p-0">
+              <PrintInstitutionalHeader
+                documentTitle="শিক্ষার্থী সার্বিক উপস্থিতি ও মূল্যায়ন বিবরণী"
+                classNameBangla={selectedClassId !== "all" ? `শ্রেণি ${classNumeric}` : undefined}
+                tradeNameBangla={
+                  selectedTradeId !== "all"
+                    ? ALL_TRADES.find((t) => t.id === Number(selectedTradeId))?.nameBangla
+                    : undefined
+                }
+                academicYear="২০২৬"
+                subTitle={
+                  dateMode === "single"
+                    ? `তারিখ: ${singleDate}`
+                    : `তারিখ পরিসীমা: ${startDate} হতে ${endDate}`
+                }
+              />
+
+              {/* Desktop & Print Table */}
+              <div className="hidden md:block overflow-x-auto print:block">
+                <table className="w-full text-left text-xs print-table">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4 w-12">রোল</th>
+                      <th className="py-3 px-4">আইডি</th>
+                      <th className="py-3 px-4">শিক্ষার্থীর নাম</th>
+                      <th className="py-3 px-4">শ্রেণি ও শাখা</th>
+                      <th className="py-3 px-4">ট্রেড</th>
+                      <th className="py-3 px-4 text-center">মোট দিন</th>
+                      <th className="py-3 px-4 text-center text-emerald-600">উপস্থিত</th>
+                      <th className="py-3 px-4 text-center text-rose-600">অনুপস্থিত</th>
+                      <th className="py-3 px-4 text-center text-amber-600">দেরি</th>
+                      <th className="py-3 px-4 text-right">উপস্থিতি %</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {reportRows.map((r) => (
+                      <tr key={r.studentId} className="hover:bg-slate-50 dark:hover:bg-slate-800/60/60 dark:hover:bg-slate-800/30">
+                        <td className="py-3 px-4 font-mono font-bold text-indigo-600">
+                          {String(r.roll).padStart(2, "0")}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">
+                          {r.studentId}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
+                          {r.name}
+                        </td>
+                        <td className="py-3 px-4 text-slate-700 dark:text-slate-300">
+                          {r.className} ({r.section})
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
+                            {r.tradeName}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center font-semibold text-slate-700 dark:text-slate-300">
+                          {r.totalDays}
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-emerald-600">
+                          {r.presentDays}
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-rose-600">
+                          {r.absentDays}
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-amber-600">
+                          {r.lateDays}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span
+                            className={`font-black font-mono px-2 py-0.5 rounded-full text-xs ${
+                              r.percentage >= 85
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                : r.percentage >= 75
+                                ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                                : "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                            }`}
+                          >
+                            {r.percentage}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Official Signatures on Print */}
+                <PrintSignatureBlock
+                  preparedByTitle="হাজিরা প্রস্তুতকারী (শ্রেণি শিক্ষক)"
+                  verifiedByTitle="যাচাইকারী (ট্রেড ইনস্ট্রাক্টর/বিভাগীয় প্রধান)"
+                  approvedByTitle="অনুমোদনকারী (অধ্যক্ষ)"
+                />
+              </div>
             </div>
 
             {/* Mobile Cards View (Single column) */}
-            <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800 print:hidden">
               {reportRows.map((r) => (
                 <div key={r.studentId} className="p-3.5 space-y-2">
                   <div className="flex items-center justify-between">

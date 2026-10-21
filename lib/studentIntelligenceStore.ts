@@ -306,6 +306,27 @@ export function getRegisteredStudents(): StudentAuthAccount[] {
   return PRELOADED_STUDENTS;
 }
 
+export function getStudentAccountByRoll(rollNumber: string): StudentAuthAccount | null {
+  const cleanRoll = rollNumber.trim();
+  const dbStudent = institutionalDb.students.find(
+    (s) => String(s.roll) === cleanRoll || s.studentId === cleanRoll
+  );
+  const registeredStudents = getRegisteredStudents();
+  const regFound = registeredStudents.find((s) => s.rollNumber === cleanRoll);
+  if (!dbStudent && !regFound) return null;
+
+  return {
+    rollNumber: cleanRoll,
+    studentName: dbStudent?.nameBangla || dbStudent?.name || regFound?.studentName || `শিক্ষার্থী (রোল ${cleanRoll})`,
+    classLevel: dbStudent?.className || regFound?.classLevel || "Class 9",
+    trade: dbStudent?.tradeNameBangla || regFound?.trade || "General",
+    password: regFound?.password || UNIVERSAL_DEFAULT_PASSWORD,
+    createdAt: regFound?.createdAt || new Date().toISOString(),
+    isLoggedIn: false,
+    hasChangedDefaultPassword: regFound?.hasChangedDefaultPassword,
+  };
+}
+
 export function saveRegisteredStudents(students: StudentAuthAccount[]): void {
   if (typeof window === "undefined") return;
   try {
@@ -550,7 +571,19 @@ export function logoutStudentAccount(): void {
     // 4. Wipe all sessionStorage completely to prevent any transient in-memory state leaks
     sessionStorage.clear();
 
-    // 5. Broadcast global logout events to reset all mounted components immediately
+    // 5. Clear student and session cookies
+    document.cookie = "ptsc_user_role=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "pgtsc_user_role=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "ptsc_student_roll=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "pgtsc_student_roll=; path=/; max-age=0; SameSite=Lax";
+    document.cookie = "pgtsc_auth_token=; path=/; max-age=0; SameSite=Lax";
+
+    // 6. Asynchronously trigger server logout to clear HttpOnly tokens
+    try {
+      fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    } catch {}
+
+    // 7. Broadcast global logout events to reset all mounted components immediately
     window.dispatchEvent(
       new CustomEvent("ptsc_student_auth_changed", { detail: { isLoggedIn: false, account: null } })
     );

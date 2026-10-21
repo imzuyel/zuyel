@@ -1,12 +1,34 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import Header from "@/components/layout/Header";
 import HierarchicalSidebar from "@/components/navigation/HierarchicalSidebar";
-import StudentIdCardStudio from "@/components/documents/StudentIdCardStudio";
-import StudentIdHub from "@/components/students/StudentIdHub";
+import { TableSkeleton } from "@/components/ui/SkeletonScreens";
 import Link from "next/link";
 import { CreditCard, Users, ShieldCheck, Printer, Sparkles, Layers } from "lucide-react";
+
+const StudentIdCardStudio = dynamic(
+  () => import("@/components/documents/StudentIdCardStudio"),
+  {
+    loading: () => (
+      <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+        <TableSkeleton rows={4} cols={4} />
+      </div>
+    ),
+  }
+);
+
+const StudentIdHub = dynamic(
+  () => import("@/components/students/StudentIdHub"),
+  {
+    loading: () => (
+      <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+        <TableSkeleton rows={4} cols={4} />
+      </div>
+    ),
+  }
+);
 
 export default function StudentIdCardsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

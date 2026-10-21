@@ -1,5 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
+import { generateWithFailover } from "@/lib/aiFailoverPipeline";
+import { safeParseAiObject } from "@/lib/safeJsonParser";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,23 +14,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "GEMINI_API_KEY পরিবেশ পরিবর্তনশীল পাওয়া যায়নি।" },
-        { status: 500 }
-      );
-    }
-
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
 
     const prompt = `You are an expert academic routine scheduler for Panchagarh Government Technical School & College (PTSC), Bangladesh.
 Analyse the provided JSON file contents and automatically generate a complete, valid, 0-conflict weekly class schedule array of RoutineItem objects.
@@ -59,67 +44,59 @@ Rules:
 3. Ensure no teacher is assigned to two different classes/rooms in the exact same day and period.
 4. Set durationMinutes to 80 or 120 for Lab/Practical/Workshop subjects, and 40 for Theory subjects.
 5. Provide clear Bangla names for subjects (subjectNameBangla), teachers (teacherBangla), and room numbers (roomNo like "ল্যাব-০১", "রুম-১০১", etc.).
-6. Output a JSON array of RoutineItem objects matching the required schema.`;
+6. Output a JSON array of RoutineItem objects matching the required schema. Return ONLY valid JSON.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        temperature: 0.2,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.NUMBER },
-              academicYear: { type: Type.STRING },
-              classId: { type: Type.NUMBER },
-              className: { type: Type.STRING },
-              tradeCode: { type: Type.STRING },
-              day: { type: Type.STRING },
-              periodNo: { type: Type.NUMBER },
-              startTime: { type: Type.STRING },
-              endTime: { type: Type.STRING },
-              durationMinutes: { type: Type.NUMBER },
-              subjectCode: { type: Type.STRING },
-              subjectName: { type: Type.STRING },
-              subjectNameBangla: { type: Type.STRING },
-              teacherName: { type: Type.STRING },
-              teacherBangla: { type: Type.STRING },
-              roomNo: { type: Type.STRING },
-              isLab: { type: Type.BOOLEAN },
-              status: { type: Type.STRING },
-            },
-            required: [
-              "academicYear",
-              "classId",
-              "className",
-              "day",
-              "periodNo",
-              "startTime",
-              "endTime",
-              "durationMinutes",
-              "subjectCode",
-              "subjectName",
-              "teacherName",
-              "roomNo",
-            ],
+    const result = await generateWithFailover({
+      prompt,
+      responseMimeType: "application/json",
+      temperature: 0.2,
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.NUMBER },
+            academicYear: { type: Type.STRING },
+            classId: { type: Type.NUMBER },
+            className: { type: Type.STRING },
+            tradeCode: { type: Type.STRING },
+            day: { type: Type.STRING },
+            periodNo: { type: Type.NUMBER },
+            startTime: { type: Type.STRING },
+            endTime: { type: Type.STRING },
+            durationMinutes: { type: Type.NUMBER },
+            subjectCode: { type: Type.STRING },
+            subjectName: { type: Type.STRING },
+            subjectNameBangla: { type: Type.STRING },
+            teacherName: { type: Type.STRING },
+            teacherBangla: { type: Type.STRING },
+            roomNo: { type: Type.STRING },
+            isLab: { type: Type.BOOLEAN },
+            status: { type: Type.STRING },
           },
+          required: [
+            "academicYear",
+            "classId",
+            "className",
+            "day",
+            "periodNo",
+            "startTime",
+            "endTime",
+            "durationMinutes",
+            "subjectCode",
+            "subjectName",
+            "teacherName",
+            "roomNo",
+          ],
         },
       },
     });
 
-    const responseText = response.text?.trim() || "[]";
-    let parsedRoutines = [];
-    try {
-      parsedRoutines = JSON.parse(responseText);
-    } catch {
-      parsedRoutines = [];
-    }
+    const responseText = result.text?.trim() || "[]";
+    const parsedRoutines = safeParseAiObject<any[]>(responseText, []);
 
     // Ensure valid IDs
-    const normalized = parsedRoutines.map((item: Record<string, unknown>, idx: number) => ({
+    const normalized = (Array.isArray(parsedRoutines) ? parsedRoutines : []).map((item: Record<string, unknown>, idx: number) => ({
       ...item,
       id: item.id || Date.now() + idx,
       academicYear: item.academicYear || academicYear,
@@ -130,6 +107,7 @@ Rules:
       success: true,
       routines: normalized,
       count: normalized.length,
+      providerUsed: `${result.keyAlias} (${result.modelName})`,
       message: `সফলভাবে ${normalized.length}টি রুটিন স্লট এআই দিয়ে প্রক্রিয়াজাত করা হয়েছে!`,
     });
   } catch (error: unknown) {

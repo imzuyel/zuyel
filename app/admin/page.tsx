@@ -41,6 +41,7 @@ import GlobalSearchBar from "@/components/common/GlobalSearchBar";
 import { institutionalDb } from "@/lib/database";
 import { useAuth } from "@/context/AuthContext";
 import dynamic from "next/dynamic";
+import AdminStaffProfileView from "@/components/admin/AdminStaffProfileView";
 
 const ViewLoader = ({ title }: { title?: string }) => (
   <div className="flex flex-col items-center justify-center min-h-[380px] p-8 text-center space-y-3 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -233,13 +234,24 @@ const AllInOneQuizStudio = dynamic(() => import("@/components/quiz/AllInOneQuizS
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
-  const { currentUser, isStudentZeroTrust, switchRole } = useAuth();
+  const { currentUser, isStudentZeroTrust } = useAuth();
   const { theme, toggleTheme, currentIconTheme } = useTheme();
   const { startLoading, stopLoading } = useLoading();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isQuizLive, setIsQuizLive] = useState(false);
   const [headerIconModalOpen, setHeaderIconModalOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+
+  // Synchronize tab from URL query params (e.g., /admin?tab=profile)
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab") as AdminTab;
+      if (tabParam) {
+        setActiveTab(tabParam);
+      }
+    }
+  }, []);
 
   // DIRECTIVE 1 ENFORCEMENT: Absolute Zero-Trust Exclusion for Students (Production Secured)
   if (isStudentZeroTrust || currentUser.role === "student") {
@@ -258,7 +270,7 @@ export default function AdminPage() {
           </p>
           <div className="pt-2 flex flex-col gap-2">
             <Link
-              href="/admin/login"
+              href="/login?role=admin"
               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-xs font-bold text-white transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
             >
               <Lock className="w-4 h-4" />
@@ -270,26 +282,6 @@ export default function AdminPage() {
             >
               হোমপেজে ফিরে যান
             </Link>
-
-            {process.env.NODE_ENV === "development" && (
-              <div className="pt-2 flex flex-col gap-2 border-t border-slate-800/80">
-                <p className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
-                  ডেভেলপমেন্ট মোড টেস্ট কন্ট্রোল
-                </p>
-                <button
-                  onClick={() => switchRole("principal")}
-                  className="w-full py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 text-xs font-bold transition-colors"
-                >
-                  অধ্যক্ষ মোডে সুইচ করুন (টেস্টিং)
-                </button>
-                <button
-                  onClick={() => switchRole("teacher")}
-                  className="w-full py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-colors"
-                >
-                  শিক্ষক মোডে সুইচ করুন (টেস্টিং)
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -299,6 +291,11 @@ export default function AdminPage() {
   const handleTabChange = (tab: AdminTab) => {
     startLoading("মডিউলের ডাটা লোড হচ্ছে...");
     setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tab);
+      window.history.replaceState({}, "", url.toString());
+    }
     setTimeout(() => {
       stopLoading();
     }, 250);
@@ -374,11 +371,24 @@ export default function AdminPage() {
               )}
             </button>
 
-            <div className="hidden sm:flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-mono shrink-0">
+            <button
+              type="button"
+              onClick={() => handleTabChange("profile")}
+              className={`hidden sm:flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs transition-colors shrink-0 cursor-pointer ${
+                activeTab === "profile"
+                  ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
+                  : "bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700"
+              }`}
+              title="আমার প্রোফাইল ও সেটিংস"
+            >
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
-              <span className="font-bold text-slate-700 dark:text-slate-300 hidden md:inline">Admin Mode</span>
-              <span className="font-bold text-slate-700 dark:text-slate-300 md:hidden">Admin</span>
-            </div>
+              <span className="font-bold hidden md:inline">{currentUser?.nameBangla || currentUser?.fullName || "অ্যাডমিন"}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                activeTab === "profile" ? "bg-white/20 text-white" : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+              }`}>
+                {currentUser?.role === "teacher" ? "শিক্ষক" : currentUser?.role === "principal" ? "অধ্যক্ষ" : "ERP"}
+              </span>
+            </button>
           </div>
         </header>
       )}
@@ -460,6 +470,7 @@ export default function AdminPage() {
               {(activeTab === "quiz_studio" || activeTab === "ai_quiz_import") && <AllInOneQuizStudio />}
               {activeTab === "presentations" && <PresentationViewer />}
               {activeTab === "security_governance" && <SecurityGovernanceHub />}
+              {activeTab === "profile" && <AdminStaffProfileView />}
               {activeTab === "quiz_admin" && (
                 <LiveQuizPortal
                   onLiveStateChange={(live) => setIsQuizLive(live)}

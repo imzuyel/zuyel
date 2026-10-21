@@ -307,11 +307,12 @@ export class ScoringService {
     // Correct Answer - calculate points and speed bonus
     const nextStreak = currentStreak + 1;
 
-    // Speed Bonus calculation: remainingTime / totalQuestionTime
+    // Speed Bonus calculation: remainingTime / totalQuestionTime (bounded against clock skew)
     let speedBonus = 0;
     if (speedBonusEnabled && questionDurationMs > 0) {
-      const remainingMs = Math.max(0, questionDurationMs - responseTimeMs);
-      const ratio = remainingMs / questionDurationMs;
+      const boundedResponseTime = Math.max(0, Math.min(responseTimeMs, questionDurationMs));
+      const remainingMs = Math.max(0, questionDurationMs - boundedResponseTime);
+      const ratio = Math.max(0, Math.min(1, remainingMs / questionDurationMs));
       speedBonus = Math.round(maxSpeedBonus * ratio);
     }
 

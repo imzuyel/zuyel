@@ -808,7 +808,7 @@ export default function UniversalPrintExportHub() {
                   পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC)
                 </h1>
                 <p className="text-[11px] text-slate-700 dark:text-slate-300 font-medium">
-                  কলেজ রোড, পঞ্চগড় সদর, পঞ্চগড়-৫০০০ • EIIN: ১৩৩১৪৮ • কোড: ৫৩০০১ • tsc.panchagarh.gov.bd
+                  পূর্ব জালাসী, পঞ্চগড় সদর, পঞ্চগড়-৫০০০ • EIIN: ১৩২২৪৪ • প্রতিষ্ঠান কোড: ১৮০১৭ • tsc.panchagarh.gov.bd
                 </p>
 
                 {/* Document Title Banner */}

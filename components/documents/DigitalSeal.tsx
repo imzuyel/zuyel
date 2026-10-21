@@ -1,36 +1,144 @@
-import React from "react";
+import React, { useId } from "react";
 import { cn } from "@/lib/utils";
 
 interface DigitalSealProps {
   className?: string;
   text?: string;
+  color?: string;
+  subText?: string;
+  animated?: boolean;
 }
 
-export default function DigitalSeal({ className, text = "OFFICIAL VERIFIED" }: DigitalSealProps) {
+export default function DigitalSeal({
+  className,
+  text = "PTSC OFFICIAL VERIFIED",
+  color = "#dc2626",
+  subText = "GOVT OF BANGLADESH",
+  animated = true,
+}: DigitalSealProps) {
+  const uniqueId = useId().replace(/:/g, "_");
+  const pathId = `sealCirclePath_${uniqueId}`;
+
   return (
-    <div className={cn("relative w-24 h-24 flex items-center justify-center opacity-80 select-none pointer-events-none", className)}>
-      <svg viewBox="0 0 100 100" className="w-full h-full animate-spin-slow">
+    <div
+      className={cn(
+        "relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center opacity-85 print:opacity-100 select-none pointer-events-none drop-shadow-sm",
+        className
+      )}
+      style={{ color }}
+    >
+      <svg
+        viewBox="0 0 200 200"
+        className={cn(
+          "w-full h-full",
+          animated && "animate-spin-slow print:animate-none print:transform-none"
+        )}
+        shapeRendering="geometricPrecision"
+        textRendering="geometricPrecision"
+      >
         <defs>
-          <path id="circlePath" d="M50,50 m-40,0 a40,40 0 1,1 80,0 a40,40 0 1,1 -80,0" />
+          {/* Path for outer circular text */}
+          <path
+            id={pathId}
+            d="M 100, 100 m -72, 0 a 72,72 0 1,1 144,0 a 72,72 0 1,1 -144,0"
+          />
         </defs>
-        
-        {/* Outer Ring */}
-        <circle cx="50" cy="50" r="45" fill="none" stroke="#dc2626" strokeWidth="2" strokeDasharray="4 4" />
-        <circle cx="50" cy="50" r="40" fill="none" stroke="#dc2626" strokeWidth="1" />
-        
-        {/* Text */}
-        <text fill="#dc2626" fontSize="10" fontWeight="bold" letterSpacing="1">
-          <textPath xlinkHref="#circlePath" startOffset="0%">
-            {text} • {text} •
+
+        {/* Outer Serrated / Beaded Ring */}
+        <circle
+          cx="100"
+          cy="100"
+          r="94"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeDasharray="4 3"
+        />
+
+        {/* Outer Solid Border Ring */}
+        <circle
+          cx="100"
+          cy="100"
+          r="86"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3.5"
+        />
+
+        {/* Inner Border Ring */}
+        <circle
+          cx="100"
+          cy="100"
+          r="58"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+
+        {/* Circular Curved Text along Path */}
+        <text
+          fill="currentColor"
+          fontSize="11.5"
+          fontWeight="800"
+          letterSpacing="2.2"
+          className="font-serif uppercase"
+        >
+          <textPath href={`#${pathId}`} xlinkHref={`#${pathId}`} startOffset="0%">
+            ★ {text} ★ {subText}
           </textPath>
         </text>
 
-        {/* Central Emblem */}
-        <circle cx="50" cy="50" r="25" fill="none" stroke="#dc2626" strokeWidth="2" />
-        <path d="M50 30 L60 50 L50 70 L40 50 Z" fill="#dc2626" />
-        <text x="50" y="55" textAnchor="middle" fill="#dc2626" fontSize="12" fontWeight="black">
-          GOVT
+        {/* Central Seal Core Emblem */}
+        <circle
+          cx="100"
+          cy="100"
+          r="48"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeDasharray="2 2"
+        />
+
+        {/* Star Polygon Center */}
+        <polygon
+          points="100,66 104,78 116,78 107,85 110,97 100,90 90,97 93,85 84,78 96,78"
+          fill="currentColor"
+          opacity="0.9"
+        />
+
+        {/* Center Typography */}
+        <text
+          x="100"
+          y="114"
+          textAnchor="middle"
+          fill="currentColor"
+          fontSize="14"
+          fontWeight="900"
+          letterSpacing="1"
+          className="font-sans"
+        >
+          PTSC
         </text>
+
+        <text
+          x="100"
+          y="128"
+          textAnchor="middle"
+          fill="currentColor"
+          fontSize="8.5"
+          fontWeight="800"
+          letterSpacing="1.5"
+          className="font-mono uppercase"
+        >
+          GOVT 18017
+        </text>
+
+        {/* Bottom Micro Star */}
+        <polygon
+          points="100,135 101.5,140 106,140 102.5,143 104,148 100,145 96,148 97.5,143 94,140 98.5,140"
+          fill="currentColor"
+          opacity="0.8"
+        />
       </svg>
     </div>
   );

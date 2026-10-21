@@ -1,11 +1,23 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import Header from "@/components/layout/Header";
 import HierarchicalSidebar from "@/components/navigation/HierarchicalSidebar";
-import BtebTabulationSheetStudio from "@/components/examination/BtebTabulationSheetStudio";
+import { TableSkeleton } from "@/components/ui/SkeletonScreens";
 import Link from "next/link";
 import { Award, Calendar, Layers } from "lucide-react";
+
+const BtebTabulationSheetStudio = dynamic(
+  () => import("@/components/examination/BtebTabulationSheetStudio"),
+  {
+    loading: () => (
+      <div className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <TableSkeleton rows={8} cols={6} />
+      </div>
+    ),
+  }
+);
 
 export default function TabulationPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

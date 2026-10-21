@@ -116,6 +116,15 @@ export default function StudentAiChatWidget({ currentLessonTitle }: StudentAiCha
         }
       }
     } catch (e) {}
+
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        try { window.speechSynthesis.cancel(); } catch (err) {}
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (err) {}
+      }
+    };
   }, [isOpen]);
 
   useEffect(() => {

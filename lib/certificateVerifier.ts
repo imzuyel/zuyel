@@ -20,12 +20,15 @@ export type DocumentClassification =
 
 export type DocumentLifecycleStatus = "issued" | "draft" | "cancelled" | "revoked";
 
+export type VerificationStatus = "VALID" | "REVOKED" | "EXPIRED" | "NOT_FOUND";
+
 export interface PublicVerifiedDocument {
   docNumber: string;
   docType: DocumentClassification;
   docTypeBangla: string;
   status: DocumentLifecycleStatus;
   statusBangla: string;
+  verificationStatus: VerificationStatus;
   isAuthentic: boolean;
   issueDate: string;
   issueDateBangla: string;
@@ -59,11 +62,13 @@ export interface PublicVerifiedDocument {
 
 export interface VerificationResult {
   verified: boolean;
+  verificationStatus: VerificationStatus;
   message: string;
   messageBangla: string;
   document?: PublicVerifiedDocument;
-  errorCode?: "NOT_FOUND" | "REVOKED" | "DRAFT" | "TAMPERED";
+  errorCode?: "NOT_FOUND" | "REVOKED" | "EXPIRED" | "DRAFT" | "TAMPERED";
 }
+
 
 /**
  * Mask sensitive personal identification for public display
@@ -105,16 +110,24 @@ export function generateVerificationHash(docNumber: string, studentId: string, i
 export function formatPublicVerifiedDocument(doc: any): PublicVerifiedDocument {
   const isIssued = doc.status === "issued" || doc.status === "APPROVED" || doc.status === "ISSUED";
   const isRevoked = doc.status === "revoked" || doc.status === "cancelled" || doc.status === "REJECTED";
+  const isExpired = Boolean(doc.validityDate && new Date(doc.validityDate).getTime() < Date.now());
 
+  let verificationStatus: VerificationStatus = "VALID";
   let statusText: DocumentLifecycleStatus = "draft";
   let statusBangla = "খসড়া / অপেক্ষমাণ";
 
-  if (isIssued) {
+  if (isRevoked) {
+    verificationStatus = "REVOKED";
+    statusText = "revoked";
+    statusBangla = "বাতিলকৃত বা অকার্যকর (Revoked)";
+  } else if (isExpired) {
+    verificationStatus = "EXPIRED";
+    statusText = "cancelled";
+    statusBangla = "মেয়াদোত্তীর্ণ (Expired)";
+  } else if (isIssued) {
+    verificationStatus = "VALID";
     statusText = "issued";
     statusBangla = "অনুমোদিত ও ইস্যুকৃত (বৈধ)";
-  } else if (isRevoked) {
-    statusText = "revoked";
-    statusBangla = "বাতিলকৃত বা অকার্যকর";
   }
 
   const docNumber = doc.docNumber || doc.docId || "PTSC/DOC/2026/000";
@@ -127,10 +140,11 @@ export function formatPublicVerifiedDocument(doc: any): PublicVerifiedDocument {
     docTypeBangla: doc.docTypeBangla || doc.titleBangla || "প্রশংসাপত্র / সনদ",
     status: statusText,
     statusBangla,
-    isAuthentic: isIssued,
+    verificationStatus,
+    isAuthentic: isIssued && !isRevoked && !isExpired,
     issueDate,
     issueDateBangla: doc.issueDateBangla || "১০ সেপ্টেম্বর, ২০২৬",
-    issuedBy: doc.generatedBy || doc.signedBy || "প্রকৌ. মো. রফিকুল ইসলাম (ভারপ্রাপ্ত অধ্যক্ষ)",
+    issuedBy: doc.generatedBy || doc.signedBy || "প্রকৌঃ মোঃ আমিনুল ইসলাম (অধ্যক্ষ)",
     student: {
       studentId: studentCode,
       admissionNo: doc.admissionNo || doc.student?.admissionNo || "ADM-2026-0001",
@@ -150,7 +164,7 @@ export function formatPublicVerifiedDocument(doc: any): PublicVerifiedDocument {
         doc.student?.photoUrl ||
         "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&auto=format&fit=crop&q=80",
       maskedBirthRegNo: maskSensitiveInfo(doc.birthRegNo || doc.student?.birthRegNo || "20095217712345678", 5, 3),
-      maskedMobile: maskSensitiveInfo(doc.student?.guardianMobile || "01712-345678", 3, 2),
+      maskedMobile: maskSensitiveInfo(doc.student?.guardianMobile || doc.student?.studentMobile || "01712-345678", 3, 2),
     },
     security: {
       verificationHash: generateVerificationHash(docNumber, studentCode, issueDate),
@@ -167,10 +181,23 @@ export function formatPublicVerifiedDocument(doc: any): PublicVerifiedDocument {
 export async function verifyDocumentRecord(
   rawQuery: string
 ): Promise<VerificationResult> {
-  const query = (rawQuery || "").trim();
+  // Safe decode of URI components (supports slashes, %2F, hyphens)
+  let query = rawQuery || "";
+  for (let i = 0; i < 2; i++) {
+    try {
+      if (query.includes("%")) {
+        query = decodeURIComponent(query);
+      }
+    } catch {
+      break;
+    }
+  }
+  query = query.trim();
+
   if (!query) {
     return {
       verified: false,
+      verificationStatus: "NOT_FOUND",
       message: "Document memo number is required",
       messageBangla: "অনুগ্রহ করে সনদের স্মারক বা ট্র্যাকিং নম্বর প্রদান করুন।",
       errorCode: "NOT_FOUND",
@@ -201,18 +228,31 @@ export async function verifyDocumentRecord(
 
       if (dbDoc) {
         const publicDoc = formatPublicVerifiedDocument(dbDoc);
-        if (!publicDoc.isAuthentic) {
+        if (publicDoc.verificationStatus === "REVOKED") {
           return {
             verified: false,
-            message: "Document has been revoked or is in draft state",
+            verificationStatus: "REVOKED",
+            message: "Document has been revoked by institutional authority",
             messageBangla: "সনদটি প্রাতিষ্ঠানিক রেকর্ড অনুযায়ী বাতিল বা অকার্যকর করা হয়েছে।",
             document: publicDoc,
             errorCode: "REVOKED",
           };
         }
 
+        if (publicDoc.verificationStatus === "EXPIRED") {
+          return {
+            verified: false,
+            verificationStatus: "EXPIRED",
+            message: "Document validity period has expired",
+            messageBangla: "সনদটির নির্ধারিত মেয়াদের সময়সীমা অতিক্রান্ত হয়েছে।",
+            document: publicDoc,
+            errorCode: "EXPIRED",
+          };
+        }
+
         return {
           verified: true,
+          verificationStatus: "VALID",
           message: "Document verified successfully",
           messageBangla: "সনদটি বাংলাদেশ কারিগরি শিক্ষা অধিদপ্তর কর্তৃক অনুমোদিত ও সঠিক।",
           document: publicDoc,
@@ -240,6 +280,7 @@ export async function verifyDocumentRecord(
   if (!matched) {
     return {
       verified: false,
+      verificationStatus: "NOT_FOUND",
       message: "No registered document matches the provided tracking number",
       messageBangla: "প্রদত্ত স্মারক বা ট্র্যাকিং নম্বরের কোনো নথি ডাটাবেসে নিবন্ধিত পাওয়া যায়নি।",
       errorCode: "NOT_FOUND",
@@ -248,20 +289,45 @@ export async function verifyDocumentRecord(
 
   const publicDoc = formatPublicVerifiedDocument(matched);
 
-  if (!publicDoc.isAuthentic) {
+  if (publicDoc.verificationStatus === "REVOKED") {
     return {
       verified: false,
-      message: "Document is currently revoked or not yet issued",
-      messageBangla: "সনদটি বাতিলকৃত বা প্রাতিষ্ঠানিক অনুমোদনের অপেক্ষায় রয়েছে।",
+      verificationStatus: "REVOKED",
+      message: "Document is currently revoked or cancelled",
+      messageBangla: "সনদটি প্রাতিষ্ঠানিক রেকর্ড অনুসারে বাতিল করা হয়েছে।",
       document: publicDoc,
       errorCode: "REVOKED",
     };
   }
 
+  if (publicDoc.verificationStatus === "EXPIRED") {
+    return {
+      verified: false,
+      verificationStatus: "EXPIRED",
+      message: "Document has expired",
+      messageBangla: "সনদটির মেয়াদোত্তীর্ণ হয়েছে।",
+      document: publicDoc,
+      errorCode: "EXPIRED",
+    };
+  }
+
+  if (!publicDoc.isAuthentic) {
+    return {
+      verified: false,
+      verificationStatus: "REVOKED",
+      message: "Document is in draft state or not yet officially issued",
+      messageBangla: "সনদটি এখনও খসড়া অবস্থায় রয়েছে বা অফিশিয়ালি ইস্যু করা হয়নি।",
+      document: publicDoc,
+      errorCode: "DRAFT",
+    };
+  }
+
   return {
     verified: true,
+    verificationStatus: "VALID",
     message: "Document successfully verified from authoritative record",
     messageBangla: "সনদটি পঞ্চগড় সরকারি টিএসসি ও বিটিইবি কর্তৃক অনুমোদিত ও শতভাগ সঠিক।",
     document: publicDoc,
   };
 }
+

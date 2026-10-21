@@ -285,7 +285,9 @@ export interface SecurityAuditLog {
     | "STUDENT_ACCESS_BLOCKED"
     | "CLEARANCE_DENIED"
     | "SECURITY_POLICY_OVERRIDE"
-    | "BACKEND_ACCESS_INTERCEPTED";
+    | "BACKEND_ACCESS_INTERCEPTED"
+    | "PASSWORD_RESET_REQUESTED"
+    | "PASSWORD_RESET_SUCCESS";
   actorRole: string;
   actorName: string;
   actorEmail?: string;

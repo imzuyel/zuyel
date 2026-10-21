@@ -182,7 +182,7 @@ export default function PublicFooter() {
 
           <div className="flex items-center gap-4">
             <Link
-              href="/admin/login"
+              href="/login?role=admin"
               className="text-slate-400 hover:text-cyan-400 flex items-center gap-1 font-mono transition-colors"
             >
               <Lock className="w-3 h-3 text-indigo-400" />

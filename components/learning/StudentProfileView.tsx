@@ -117,14 +117,22 @@ export default function StudentProfileView({
             </div>
           </div>
 
-          {/* Logout & Action Button */}
-          <div className="shrink-0 space-y-2 w-full md:w-auto text-center">
+          {/* Action Buttons */}
+          <div className="shrink-0 flex flex-col sm:flex-row md:flex-col gap-2 w-full md:w-auto text-center">
+            <a
+              href="/student/profile"
+              className="w-full md:w-auto px-5 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-600/30 cursor-pointer transition-all"
+            >
+              <User className="w-4 h-4" />
+              <span>প্রোফাইল তথ্য সম্পাদনা</span>
+            </a>
+
             <button
               onClick={() => {
                 onLogout();
                 if (onClose) onClose();
               }}
-              className="w-full md:w-auto px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 cursor-pointer transition-all"
+              className="w-full md:w-auto px-5 py-2.5 rounded-2xl bg-rose-600/90 hover:bg-rose-600 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 cursor-pointer transition-all"
             >
               <LogOut className="w-4 h-4" />
               <span>লগআউট করুন</span>
@@ -134,15 +142,15 @@ export default function StudentProfileView({
         </div>
       </div>
 
-      {/* Read-Only Photo Upload Restriction Notice */}
-      <div className="p-4 bg-amber-500/10 dark:bg-amber-950/30 rounded-2xl border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
-        <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+      {/* Student Self-Service Guidance Notice */}
+      <div className="p-4 bg-cyan-500/10 dark:bg-cyan-950/30 rounded-2xl border border-cyan-500/30 text-cyan-950 dark:text-cyan-200 text-xs flex items-start gap-3">
+        <Sparkles className="w-5 h-5 text-cyan-500 shrink-0 mt-0.5" />
         <div className="space-y-1">
           <strong className="font-black block">
-            প্রোফাইল ছবি সংক্রান্ত সিকিউরিটি নীতি (Profile Photo Policy):
+            শিক্ষার্থী সেলফ-সার্ভিস পোর্টাল সক্রিয়:
           </strong>
           <p className="text-[11px] leading-relaxed">
-            বিটিইবি সরকারি রেজিস্ট্রেশন নিয়ম অনুযায়ী, শিক্ষার্থীরা ফ্রন্টএন্ড থেকে প্রোফাইল ছবি সরাসরি আপলোড বা পরিবর্তন করতে পারবেন না। আপনার ছবি পরিবর্তন করতে ইনস্টিটিউটের অ্যাডমিন/শিক্ষক প্যানেলে সরাসরি যোগাযোগ করুন।
+            শিক্ষার্থীরা তাদের নিজস্ব নাম, মোবাইল নম্বর, বর্তমান ও স্থায়ী ঠিকানা এবং প্রোফাইল ছবি সরাসরি শিক্ষার্থী সেলফ-সার্ভিস পোর্টাল থেকে হালনাগাদ করতে পারবেন। রোল নম্বর বা একাডেমিক রেজাল্ট কেবল দায়িত্বপ্রাপ্ত শিক্ষক বা অ্যাডমিন প্যানেল থেকে নিয়ন্ত্রিত হয়।
           </p>
         </div>
       </div>

@@ -542,6 +542,57 @@ export function requireStaffOrAdmin(req: Request, endpointName?: string): AuthGu
 }
 
 /**
+ * Requires Student access strictly.
+ * Blocks unauthenticated users (401) and staff/teachers/admins (403) from student self-service.
+ */
+export function requireStudentAuth(req: Request, endpointName?: string): AuthGuardResult {
+  const identity = extractRequestIdentity(req);
+  const routePath = endpointName || new URL(req.url).pathname;
+
+  if (!identity.isAuthenticated) {
+    return {
+      authorized: false,
+      identity,
+      errorResponse: NextResponse.json(
+        {
+          success: false,
+          status: 401,
+          error: "Unauthorized",
+          code: "AUTH_REQUIRED",
+          message: "এই শিক্ষার্থী পোর্টালে প্রবেশের জন্য লগইন করা আবশ্যক।",
+          endpoint: routePath,
+          timestamp: new Date().toISOString(),
+        },
+        { status: 401 }
+      ),
+    };
+  }
+
+  // Ensure caller is a student
+  if (!isStudent(identity.userRole)) {
+    return {
+      authorized: false,
+      identity,
+      errorResponse: NextResponse.json(
+        {
+          success: false,
+          status: 403,
+          error: "Forbidden",
+          code: "STUDENT_ONLY_ENDPOINT",
+          message:
+            "এই এন্ডপয়েন্টটি শুধুমাত্র শিক্ষার্থীদের নিজস্ব প্রোফাইল সংক্রান্ত কার্যক্রমের জন্য নির্ধারিত। শিক্ষক বা প্রশাসনিক কর্মকর্তা হিসেবে ব্যাকএন্ড প্যানেল (/api/auth/profile) ব্যবহার করুন।",
+          endpoint: routePath,
+          timestamp: new Date().toISOString(),
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { authorized: true, identity };
+}
+
+/**
  * Requires a specific permission key or legacy tag.
  */
 export function requirePermission(

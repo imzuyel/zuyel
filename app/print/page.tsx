@@ -11,7 +11,7 @@ export default function UniversalPrintPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex h-screen max-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen max-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans print:h-auto print:max-h-none print:overflow-visible print:bg-white print:text-black">
       {/* Desktop Sidebar */}
       <div className="hidden lg:block shrink-0 h-screen sticky top-0 overflow-hidden no-print">
         <HierarchicalSidebar />
@@ -31,12 +31,12 @@ export default function UniversalPrintPage() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 min-h-0 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col min-w-0 h-screen overflow-hidden print:h-auto print:max-h-none print:overflow-visible">
         <div className="no-print">
           <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} onNavigate={() => {}} />
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 lg:p-8 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-800">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 lg:p-8 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-800 print:overflow-visible print:p-0 print:m-0">
           {/* Breadcrumb & Navigation Bar */}
           <div className="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -57,7 +57,7 @@ export default function UniversalPrintPage() {
             </div>
           </div>
 
-          <div className="max-w-7xl mx-auto">
+          <div className="max-w-7xl mx-auto print:max-w-none print:w-full print:m-0 print:p-0">
             <UniversalPrintExportHub />
           </div>
         </div>

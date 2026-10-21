@@ -36,6 +36,10 @@ export interface UserProfile {
   avatarUrl: string;
   trade?: string;
   department?: string;
+  roll?: number | string;
+  studentId?: string;
+  className?: string;
+  address?: string;
 }
 
 export const PRESET_USERS: Record<string, UserProfile> = {
@@ -228,6 +232,8 @@ interface AuthContextType {
   loginModalReason: string;
   openLoginModal: (reason?: string) => void;
   closeLoginModal: () => void;
+  // Live Profile Mutation Sync
+  updateCurrentUser: (updates: Partial<UserProfile>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -271,6 +277,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const currentUser = currentUserProfile || PRESET_USERS[activeRole] || PRESET_USERS.student;
+
+  const updateCurrentUser = (updates: Partial<UserProfile>) => {
+    setCurrentUserProfile((prev) => {
+      const base = prev || PRESET_USERS[activeRole] || PRESET_USERS.student;
+      const merged: UserProfile = {
+        ...base,
+        ...updates,
+      };
+      try {
+        localStorage.setItem("pgtsc_user_profile", JSON.stringify(merged));
+        if (updates.fullName) {
+          localStorage.setItem("pgtsc_user_name", updates.fullName);
+          document.cookie = `pgtsc_user_name=${encodeURIComponent(updates.fullName)}; path=/; max-age=86400; SameSite=Lax`;
+        }
+      } catch {}
+      return merged;
+    });
+  };
 
   const syncIdentityCookies = (role: string, user: UserProfile) => {
     try {
@@ -320,19 +344,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     showToast(`লগইন সফল হয়েছে! (${user.nameBangla || user.fullName})`, "success");
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      // Invalidate HTTP-only cookies and server tokens
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (e) {
+      console.warn("Server logout request failed:", e);
+    }
+
     setIsLoggedIn(false);
     setCurrentUserProfile(null);
     setActiveRole("student");
     try {
       localStorage.removeItem("pgtsc_is_logged_in");
       localStorage.removeItem("pgtsc_user_profile");
+      localStorage.removeItem("pgtsc_user_id");
+      localStorage.removeItem("pgtsc_user_name");
+      localStorage.removeItem("ptsc_active_student_session");
       localStorage.setItem("pgtsc_user_role", "student");
-      document.cookie = `pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax`;
+      document.cookie = `pgtsc_user_role=student; path=/; max-age=0; SameSite=Lax`;
+      document.cookie = `ptsc_user_role=student; path=/; max-age=0; SameSite=Lax`;
       document.cookie = `pgtsc_user_id=; path=/; max-age=0; SameSite=Lax`;
+      document.cookie = `ptsc_user_id=; path=/; max-age=0; SameSite=Lax`;
       document.cookie = `pgtsc_user_name=; path=/; max-age=0; SameSite=Lax`;
+      document.cookie = `ptsc_user_name=; path=/; max-age=0; SameSite=Lax`;
+      document.cookie = `ptsc_student_roll=; path=/; max-age=0; SameSite=Lax`;
+      document.cookie = `pgtsc_student_roll=; path=/; max-age=0; SameSite=Lax`;
     } catch {}
-    showToast("লগআউট করা হয়েছে। আপনি এখন গেস্ট মোডে আছেন।", "info");
+    showToast("সফলভাবে লগআউট করা হয়েছে।", "info");
   };
 
   const [activeChildId, setActiveChildId] = useState<number>(1);
@@ -633,6 +672,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loginModalReason,
         openLoginModal,
         closeLoginModal,
+        updateCurrentUser,
       }}
     >
       {children}

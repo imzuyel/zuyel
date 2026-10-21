@@ -89,3 +89,46 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  const auth = verifyBackendAuthorization(req, {
+    requiredPermission: "issue_certificates",
+    endpointName: "/api/documents/repository (DELETE)",
+  });
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: "ডকুমেন্ট আইডি প্রদান করা আবশ্যক।" },
+        { status: 400 }
+      );
+    }
+
+    const { removeDocumentFromRepository } = await import("@/lib/documentRepository");
+    const removed = removeDocumentFromRepository(id);
+
+    if (!removed) {
+      return NextResponse.json(
+        { success: false, error: "ডকুমেন্ট রিপোজিটরিতে পাওয়া যায়নি।" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "ডকুমেন্ট সেন্ট্রাল রিপোজিটরি থেকে সফলভাবে অপসারিত হয়েছে।"
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error.message || "ডিলিট করার সময় সমস্যা হয়েছে।" },
+      { status: 500 }
+    );
+  }
+}
+

@@ -1,11 +1,23 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import Header from "@/components/layout/Header";
 import HierarchicalSidebar from "@/components/navigation/HierarchicalSidebar";
-import AIQuestionGenerator from "@/components/quiz/AIQuestionGenerator";
+import { TableSkeleton } from "@/components/ui/SkeletonScreens";
 import Link from "next/link";
 import { FileText, Sparkles, Radio } from "lucide-react";
+
+const AIQuestionGenerator = dynamic(
+  () => import("@/components/quiz/AIQuestionGenerator"),
+  {
+    loading: () => (
+      <div className="p-8 bg-slate-900 rounded-3xl border border-slate-800">
+        <TableSkeleton rows={6} cols={4} />
+      </div>
+    ),
+  }
+);
 
 export default function AiPdfManagerPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

@@ -1,12 +1,24 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import Header from "@/components/layout/Header";
 import HierarchicalSidebar from "@/components/navigation/HierarchicalSidebar";
-import PtscMasterRoutineStudio from "@/components/routine/PtscMasterRoutineStudio";
+import { TableSkeleton } from "@/components/ui/SkeletonScreens";
 import ErrorBoundary from "@/components/common/ErrorBoundary";
 import Link from "next/link";
 import { Calendar } from "lucide-react";
+
+const PtscMasterRoutineStudio = dynamic(
+  () => import("@/components/routine/PtscMasterRoutineStudio"),
+  {
+    loading: () => (
+      <div className="p-6 bg-slate-900 rounded-3xl border border-slate-800 shadow-xs">
+        <TableSkeleton rows={6} cols={7} />
+      </div>
+    ),
+  }
+);
 
 export default function RoutineMasterPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

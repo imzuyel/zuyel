@@ -2,6 +2,7 @@ import { prisma, isPrismaAvailable } from "@/lib/prisma";
 import { institutionalDb, PdfDocument, PdfPage, PdfChunk, AIGenerationJob, AIGeneratedQuestion } from "@/lib/database";
 import { StorageService } from "@/lib/storageService";
 import { COMMON_SUBJECTS_9_12, PRE_VOCATIONAL_SUBJECTS } from "@/lib/academicStructure";
+import { AIService } from "@/lib/aiService";
 
 export interface PdfDocumentFilter {
   search?: string;
@@ -846,5 +847,126 @@ export class PdfDocumentService {
         createdAt: j.createdAt,
         questionsCount: institutionalDb.aiGeneratedQuestions.filter((q) => q.generationJobId === j.id).length || j.questionCount,
       }));
+  }
+
+  /**
+   * Unified question generation engine from PDF source pages
+   */
+  static async generateQuestionsFromDocument(params: {
+    documentId: string;
+    selectedPages?: number[];
+    topic: string;
+    count?: number;
+    difficulty?: "easy" | "medium" | "hard" | "mixed";
+    language?: "Bangla" | "English";
+    questionType?: string;
+    additionalInstructions?: string;
+    userId?: number;
+  }): Promise<{
+    success: boolean;
+    job: AIGenerationJob;
+    questions: AIGeneratedQuestion[];
+    message: string;
+  }> {
+    const {
+      documentId,
+      selectedPages,
+      topic,
+      count = 5,
+      difficulty = "medium",
+      language = "Bangla",
+      questionType = "mcq_single",
+      additionalInstructions = "",
+      userId = 1,
+    } = params;
+
+    const doc = await this.getDocumentById(documentId);
+    if (!doc) {
+      throw new Error("ডকুমেন্টটি পাওয়া যায়নি।");
+    }
+
+    if (!topic || !topic.trim()) {
+      throw new Error("প্রশ্ন তৈরির বিষয়বস্তু বা টপিক নির্ধারণ করা আবশ্যক।");
+    }
+
+    const allPages = await this.getPages(documentId);
+    if (allPages.length === 0) {
+      throw new Error("এই ডকুমেন্টে কোনো প্রসেস করা পৃষ্ঠা পাওয়া যায়নি।");
+    }
+
+    let targetPages = allPages;
+    if (Array.isArray(selectedPages) && selectedPages.length > 0) {
+      targetPages = allPages.filter((p) => selectedPages.includes(p.pageNumber));
+    }
+
+    const validPages = targetPages.filter(
+      (p) => p.extractionStatus === "completed" && p.extractedText.trim().length > 0
+    );
+
+    if (validPages.length === 0) {
+      throw new Error("নির্বাচিত কোনো পৃষ্ঠায় পাঠযোগ্য টেক্সট পাওয়া যায়নি। স্ক্যানড ডকুমেন্টের ক্ষেত্রে OCR প্রয়োজন।");
+    }
+
+    const jobId = `job-${Date.now()}`;
+    const nowStr = new Date().toISOString();
+
+    const job: AIGenerationJob & { documentId?: string; groundedPagesJson?: string } = {
+      id: jobId,
+      documentId,
+      userId,
+      subjectId: doc.subjectId || 1,
+      classId: doc.classId || 4,
+      topic: topic.trim(),
+      chapter: doc.chapter || "",
+      lesson: "",
+      learningObjective: `Grounded generation from ${doc.title}`,
+      language,
+      difficulty,
+      questionType,
+      questionCount: count,
+      groundedPagesJson: JSON.stringify(validPages.map((p) => p.pageNumber)),
+      provider: "Google Gemini (PTSC Failover)",
+      model: process.env.AI_MODEL || "gemini-3.8-flash",
+      status: "processing",
+      createdAt: nowStr,
+      updatedAt: nowStr,
+    };
+
+    const pdfPagesInput = validPages.map((p) => ({
+      pageNumber: p.pageNumber,
+      text: p.extractedText,
+    }));
+
+    const generated = await AIService.generateQuestionsFromPdf({
+      pdfPages: pdfPagesInput,
+      topic: topic.trim(),
+      questionType,
+      count,
+      difficulty,
+      language,
+      additionalInstructions,
+    });
+
+    const questionsToSave: AIGeneratedQuestion[] = generated.map((q, idx) => ({
+      ...q,
+      id: `aiq-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
+      generationJobId: jobId,
+      status: "generated",
+      reviewedBy: userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+
+    job.status = "completed";
+    job.updatedAt = new Date().toISOString();
+
+    await this.recordGenerationJob(job, questionsToSave);
+
+    return {
+      success: true,
+      job,
+      questions: questionsToSave,
+      message: `সফলভাবে ${questionsToSave.length}টি প্রশ্ন তৈরি করা হয়েছে।`,
+    };
   }
 }

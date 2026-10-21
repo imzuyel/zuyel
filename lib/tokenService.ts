@@ -87,3 +87,12 @@ export function verifySessionToken(token?: string | null): SessionTokenPayload |
     return null;
   }
 }
+
+export {
+  hashPassword,
+  verifyPassword,
+  createPasswordResetToken,
+  verifyPasswordResetToken,
+  consumePasswordResetToken,
+  updateUserPassword,
+} from "./passwordService";

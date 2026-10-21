@@ -164,9 +164,11 @@ export default function StudentLoginModal({
           </div>
 
           <button
+            type="button"
             onClick={onClose}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
             title="বন্ধ করুন"
+            aria-label="বন্ধ করুন"
           >
             <X className="w-4 h-4" />
           </button>
@@ -200,11 +202,15 @@ export default function StudentLoginModal({
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               
               <div className="space-y-1.5">
-                <label className="text-xs font-black text-slate-800 dark:text-slate-200 block">
+                <label htmlFor="student-login-roll" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
                   রোল নম্বর (Roll Number):
                 </label>
                 <input
                   type="text"
+                  id="student-login-roll"
+                  name="studentRoll"
+                  autoComplete="username"
+                  aria-label="রোল নম্বর"
                   required
                   placeholder="যেমন: 101, 102, 1"
                   value={loginRoll}
@@ -215,7 +221,7 @@ export default function StudentLoginModal({
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-slate-800 dark:text-slate-200 block">
+                  <label htmlFor="student-login-password" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
                     পাসওয়ার্ড (Password):
                   </label>
                   <span className="text-[10px] text-indigo-500 dark:text-cyan-400 font-bold">
@@ -224,6 +230,10 @@ export default function StudentLoginModal({
                 </div>
                 <input
                   type="password"
+                  id="student-login-password"
+                  name="studentPassword"
+                  autoComplete="current-password"
+                  aria-label="পাসওয়ার্ড"
                   required
                   placeholder="প্রথমবার লগইনে '1234' দিন"
                   value={loginPassword}

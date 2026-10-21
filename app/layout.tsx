@@ -7,20 +7,36 @@ import { LoadingProvider } from "@/context/LoadingContext";
 import { ToastProvider } from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
-  title: "Panchagarh Government Technical School & College ERP",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://ptsc.gov.bd"),
+  title: {
+    default: "পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC) | Institutional ERP & Smart Campus",
+    template: "%s | পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ",
+  },
   description:
-    "Comprehensive institutional ERP and smart campus portal for Panchagarh Government Technical School and College (PTSC), Directorate of Technical Education, Bangladesh.",
+    "কারিগরি শিক্ষা অধিদপ্তর ও বিটিইবি (BTEB) অনুমোদিত পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC)-এর সার্বিক একাডেমিক ইআরপি, অটোমেশন পোর্টাল ও লাইভ লার্নিং হাব। EIIN: 132244, Institute Code: 18017.",
+  keywords: [
+    "Panchagarh Government Technical School and College",
+    "PTSC",
+    "পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ",
+    "BTEB Vocational",
+    "DTE Technical Education",
+    "Institutional ERP Bangladesh",
+    "Live Quiz Arena",
+    "Student Portal",
+  ],
+  authors: [{ name: "Panchagarh Govt. Technical School & College" }],
   openGraph: {
-    title: "Panchagarh Government Technical School & College ERP",
+    title: "পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC) | Institutional ERP & Smart Campus",
     description:
-      "Comprehensive institutional ERP and smart campus portal for Panchagarh Government Technical School and College (PTSC), Directorate of Technical Education, Bangladesh.",
+      "কারিগরি শিক্ষা অধিদপ্তর ও বিটিইবি (BTEB) অনুমোদিত পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC)-এর সার্বিক একাডেমিক ইআরপি ও স্মার্ট ক্যাম্পাস পোর্টাল।",
     type: "website",
+    locale: "bn_BD",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Panchagarh Government Technical School & College ERP",
+    title: "Panchagarh Government Technical School & College (PTSC) ERP",
     description:
-      "Comprehensive institutional ERP and smart campus portal for Panchagarh Government Technical School and College (PTSC), Directorate of Technical Education, Bangladesh.",
+      "Comprehensive institutional ERP, live quiz arena and smart campus portal for Panchagarh Govt Technical School and College (EIIN 132244).",
   },
 };
 

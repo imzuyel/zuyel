@@ -507,38 +507,114 @@ export const initialGeneratedDocuments: GeneratedDocument[] = [
   }
 ];
 
-// Helper: Replace dynamic tokens in body template
-export function replaceDocumentTokens(templateText: string, student: any, extraFields?: { memoNo?: string; issueDate?: string; leavingReason?: string; passingYear?: string }): string {
+// Helper: Replace dynamic tokens in body template with safe fallbacks
+export function replaceDocumentTokens(
+  templateText: string,
+  student: any,
+  extraFields?: {
+    memoNo?: string;
+    issueDate?: string;
+    leavingReason?: string;
+    passingYear?: string;
+    conductStatement?: string;
+  }
+): string {
+  if (!templateText) return "";
   if (!student) return templateText;
   const s = student;
   const hasTrade = doesClassHaveTrade(s.classId || s.className);
 
+  const studentNameBn = s.nameBangla || s.name || "শিক্ষার্থীর নাম";
+  const studentNameEn = s.name || s.nameBangla || "Student Name";
+  const fatherName = s.fatherName || "মোঃ রফিকুল ইসলাম";
+  const motherName = s.motherName || "মোছাঃ রোকেয়া বেগম";
+  const roll = String(s.roll || "১");
+  const studentId = s.studentId || s.studentCode || "PTSC-2026-000001";
+  const regNo = s.registrationNo || s.regNo || s.studentId || "—";
+  const session = s.session || "2026";
+  const className = s.classNameBangla || s.className || "নবম শ্রেণি";
+  const section = s.section || "A";
+  const gpa = s.gpa || "5.00";
+  const dobStr = s.dobBangla || (s.dob ? toBanglaDateString(s.dob) : "০১ জানুয়ারি, ২০১০");
+  const birthRegNo = s.birthRegNo || "—";
+  const leavingReason = extraFields?.leavingReason || "উচ্চতর কারিগরি শিক্ষায় ভর্তির সুবিধার্থে";
+  const passingYear = extraFields?.passingYear || session;
+  const memoNo = extraFields?.memoNo || "PTSC/DOC/2026/001";
+  const issueDateStr = extraFields?.issueDate
+    ? toBanglaDateString(extraFields.issueDate)
+    : toBanglaDateString(new Date().toISOString().slice(0, 10));
+
   let text = templateText
-    .replace(/{STUDENT_NAME}/g, s.nameBangla || s.name)
-    .replace(/{STUDENT_NAME_EN}/g, s.name || s.nameBangla)
-    .replace(/{FATHER_NAME}/g, s.fatherName || "মোঃ রফিকুল ইসলাম")
-    .replace(/{MOTHER_NAME}/g, s.motherName || "মোছাঃ রোকেয়া বেগম")
-    .replace(/{ROLL}/g, String(s.roll || "১"))
-    .replace(/{STUDENT_ID}/g, s.studentId || s.studentCode || "PTSC-2026-000001")
-    .replace(/{CLASS_NAME}/g, s.className || "Class 9")
-    .replace(/{SECTION}/g, s.section || "A")
-    .replace(/{SESSION}/g, s.session || "2026")
-    .replace(/{GPA}/g, s.gpa || "5.00")
-    .replace(/{DOB}/g, s.dobBangla || (s.dob ? toBanglaDateString(s.dob) : "০১ জানুয়ারি, ২০১০"))
-    .replace(/{BIRTH_REG_NO}/g, s.birthRegNo || "—")
-    .replace(/{LEAVING_REASON}/g, extraFields?.leavingReason || "উচ্চতর কারিগরি শিক্ষায় ভর্তির সুবিধার্থে")
-    .replace(/{PASSING_YEAR}/g, extraFields?.passingYear || s.session || "2026")
-    .replace(/{MEMO_NO}/g, extraFields?.memoNo || "PTSC/DOC/2026/001")
-    .replace(/{ISSUE_DATE}/g, extraFields?.issueDate ? toBanglaDateString(extraFields.issueDate) : toBanglaDateString(new Date().toISOString().slice(0, 10)));
+    .replace(/{STUDENT_NAME}/g, studentNameBn)
+    .replace(/{STUDENT_NAME_EN}/g, studentNameEn)
+    .replace(/{FATHER_NAME}/g, fatherName)
+    .replace(/{MOTHER_NAME}/g, motherName)
+    .replace(/{ROLL}/g, roll)
+    .replace(/{STUDENT_ID}/g, studentId)
+    .replace(/{REGISTRATION}/g, regNo)
+    .replace(/{REG_NO}/g, regNo)
+    .replace(/{REG}/g, regNo)
+    .replace(/{BOARD_ROLL}/g, s.boardRoll || roll)
+    .replace(/{CLASS_NAME}/g, className)
+    .replace(/{SECTION}/g, section)
+    .replace(/{SESSION}/g, session)
+    .replace(/{GPA}/g, gpa)
+    .replace(/{DOB}/g, dobStr)
+    .replace(/{BIRTH_REG_NO}/g, birthRegNo)
+    .replace(/{LEAVING_REASON}/g, leavingReason)
+    .replace(/{PASSING_YEAR}/g, passingYear)
+    .replace(/{MEMO_NO}/g, memoNo)
+    .replace(/{ISSUE_DATE}/g, issueDateStr);
 
   if (hasTrade) {
-    text = text.replace(/{TRADE_NAME}/g, s.tradeNameBangla || s.tradeName || "ভোকেশনাল ট্রেড");
+    text = text
+      .replace(/{TRADE_NAME}/g, s.tradeNameBangla || s.tradeName || "ভোকেশনাল ট্রেড")
+      .replace(/{TRADE_CODE}/g, s.tradeCode || "—");
   } else {
     text = text
       .replace(/,\s*ট্রেড:\s*\{TRADE_NAME\}/g, "")
       .replace(/ট্রেড:\s*\{TRADE_NAME\}/g, "")
-      .replace(/\{TRADE_NAME\}/g, "");
+      .replace(/\{TRADE_NAME\}/g, "")
+      .replace(/\{TRADE_CODE\}/g, "");
   }
 
   return text;
 }
+
+/**
+ * Generate a guaranteed unique, tamper-proof document reference serial number
+ * Format: PTSC/{TYPE_CODE}/{YEAR}/{5-DIGIT SERIAL}
+ */
+export function generateTamperProofDocNumber(
+  docTypeCode: string,
+  sessionYear: string | number,
+  existingDocuments: { docNumber: string }[] = []
+): string {
+  const code = (docTypeCode || "DOC").toUpperCase();
+  const year = String(sessionYear || new Date().getFullYear());
+  const prefix = `PTSC/${code}/${year}/`;
+  
+  let maxSerial = 100;
+  for (const doc of existingDocuments) {
+    if (doc.docNumber && doc.docNumber.toUpperCase().startsWith(prefix.toUpperCase())) {
+      const parts = doc.docNumber.split("/");
+      const last = parts[parts.length - 1];
+      const parsed = parseInt(last, 10);
+      if (!isNaN(parsed) && parsed > maxSerial) {
+        maxSerial = parsed;
+      }
+    }
+  }
+
+  const existingSet = new Set(existingDocuments.map((d) => d.docNumber.toLowerCase()));
+  let nextSerial = maxSerial + 1;
+  let candidate = `PTSC/${code}/${year}/${String(nextSerial).padStart(5, "0")}`;
+
+  while (existingSet.has(candidate.toLowerCase())) {
+    nextSerial++;
+    candidate = `PTSC/${code}/${year}/${String(nextSerial).padStart(5, "0")}`;
+  }
+
+  return candidate;
+}
+

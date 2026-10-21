@@ -37,8 +37,7 @@ export function useAcademySettings() {
     // Reuse in-flight request if another component triggered it simultaneously
     if (!inFlightFetch) {
       inFlightFetch = safeFetchJson<{ mappings: AcademyClassTradeMapping[] }>(
-        "/api/academic/academy-settings",
-        { timeoutMs: 8000 }
+        "/api/academic/academy-settings"
       )
         .then((res) => {
           if (res.ok && res.data?.mappings && Array.isArray(res.data.mappings)) {
@@ -61,6 +60,8 @@ export function useAcademySettings() {
       if (active) {
         if (data && data.length > 0) {
           setMappings(data);
+        } else if (!cachedMappings) {
+          setMappings(DEFAULT_ACADEMY_CLASS_TRADE_MAPPINGS);
         }
         setLoading(false);
       }

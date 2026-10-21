@@ -470,7 +470,7 @@ export default function LiveQuizJoinHeroView() {
                         onClick={() => setSelectedAvatar(av)}
                         whileHover={{ scale: 1.2 }}
                         whileTap={{ scale: 0.9 }}
-                        animate={isSel ? { scale: [1, 1.25, 1.15], y: -2 } : { scale: 1, y: 0 }}
+                        animate={isSel ? { scale: 1.15, y: -2 } : { scale: 1, y: 0 }}
                         transition={{ type: "spring", stiffness: 400, damping: 15 }}
                         className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl text-lg sm:text-xl flex items-center justify-center shrink-0 border transition-all cursor-pointer ${
                           isSel

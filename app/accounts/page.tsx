@@ -1,7 +1,19 @@
 "use client";
 
 import React from "react";
-import FeeCollectionStudio from "@/components/accounts/FeeCollectionStudio";
+import dynamic from "next/dynamic";
+import { TableSkeleton } from "@/components/ui/SkeletonScreens";
+
+const FeeCollectionStudio = dynamic(
+  () => import("@/components/accounts/FeeCollectionStudio"),
+  {
+    loading: () => (
+      <div className="p-8 bg-slate-900 rounded-3xl border border-slate-800">
+        <TableSkeleton rows={5} cols={5} />
+      </div>
+    ),
+  }
+);
 
 export default function AccountsPage() {
   return (

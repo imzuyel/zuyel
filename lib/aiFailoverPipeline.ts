@@ -397,6 +397,8 @@ async function executeSingleAIRequest(item: KeyPoolItem, options: GenerationOpti
   }
 }
 
+import { safeParseAiObject, cleanJsonString, repairJsonString } from "./safeJsonParser";
+
 /**
  * Convenience helper to generate and parse structured JSON responses safely with multi-key failover
  */
@@ -406,19 +408,31 @@ export async function generateJsonWithFailover<T>(options: GenerationOptions): P
     responseMimeType: "application/json",
   });
 
-  const text = result.text.trim();
+  const text = (result.text || "").trim();
   let parsed: any = null;
 
   try {
     parsed = JSON.parse(text);
   } catch {
-    // Clean markdown code blocks if present
-    const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-    if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[0]);
-    } else {
+    try {
+      const cleaned = cleanJsonString(text);
       parsed = JSON.parse(cleaned);
+    } catch {
+      try {
+        const repaired = repairJsonString(text);
+        parsed = JSON.parse(repaired);
+      } catch {
+        const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (jsonMatch) {
+          try {
+            parsed = JSON.parse(repairJsonString(jsonMatch[0]));
+          } catch {
+            parsed = safeParseAiObject<T>(text, {} as T);
+          }
+        } else {
+          parsed = safeParseAiObject<T>(text, {} as T);
+        }
+      }
     }
   }
 

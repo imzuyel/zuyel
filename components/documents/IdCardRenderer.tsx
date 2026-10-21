@@ -259,7 +259,7 @@ export default function IdCardRenderer({
           </div>
           <div className="flex justify-between">
             <span className="opacity-70">রক্তের গ্রুপ:</span>
-            <span className="font-bold text-rose-400 font-mono">{student.bloodGroup}</span>
+            <span className="font-bold text-rose-400 font-mono">{student.bloodGroup || "O+"}</span>
           </div>
         </div>
 
@@ -267,7 +267,7 @@ export default function IdCardRenderer({
         <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between border-t border-white/20 pt-1.5">
           <div className="text-center">
             <div className="h-4 font-serif italic text-[9px] opacity-80">
-              {student.name.split(" ")[0]}
+              {student.name ? student.name.split(" ")[0] : "Student"}
             </div>
             <span className="text-[7px] uppercase tracking-wider opacity-60 block">
               শিক্ষার্থীর স্বাক্ষর
@@ -276,13 +276,14 @@ export default function IdCardRenderer({
 
           <div className="text-center">
             <div className="h-4 font-serif italic font-bold text-[9px] text-amber-300">
-              Md. Rafiqul
+              Engr. Md. Aminul Islam
             </div>
             <span className="text-[7px] uppercase tracking-wider opacity-60 block">
               অধ্যক্ষের স্বাক্ষর
             </span>
           </div>
         </div>
+
       </div>
     );
   }
@@ -329,11 +330,11 @@ export default function IdCardRenderer({
       <div className="space-y-1 text-[9px] bg-black/35 p-2.5 rounded-xl border border-white/10 font-mono">
         <div className="flex justify-between">
           <span className="opacity-70">পিতার নাম:</span>
-          <span className="font-bold text-white truncate max-w-[160px]">{student.fatherName}</span>
+          <span className="font-bold text-white truncate max-w-[160px]">{student.fatherName || "মোঃ রফিকুল ইসলাম"}</span>
         </div>
         <div className="flex justify-between">
           <span className="opacity-70">অভিভাবকের মোবাইল:</span>
-          <span className="font-bold text-amber-300">{student.guardianMobile}</span>
+          <span className="font-bold text-amber-300">{student.guardianMobile || student.emergencyContact || student.studentMobile || "০১৭১১-XXXXXX"}</span>
         </div>
         <div className="flex justify-between">
           <span className="opacity-70">মেয়াদ উত্তীর্ণ:</span>
@@ -342,6 +343,7 @@ export default function IdCardRenderer({
           </span>
         </div>
       </div>
+
 
       {/* QR Code Verification Section */}
       <div className="flex items-center justify-between gap-3 bg-black/40 p-2 rounded-xl border border-white/20">

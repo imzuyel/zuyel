@@ -77,9 +77,24 @@ export default function BanglaDocumentGenerator() {
   // Students list from API / DB
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+
+  const displayedStudents = useMemo(() => {
+    if (!studentSearchQuery.trim()) return students;
+    const q = studentSearchQuery.toLowerCase().trim();
+    return students.filter(
+      (s) =>
+        String(s.roll).includes(q) ||
+        (s.studentId && s.studentId.toLowerCase().includes(q)) ||
+        (s.name && s.name.toLowerCase().includes(q)) ||
+        (s.nameBangla && s.nameBangla.includes(q)) ||
+        ((s as any).registrationNo && String((s as any).registrationNo).toLowerCase().includes(q))
+    );
+  }, [students, studentSearchQuery]);
 
   // Single Generator States
   const [documentType, setDocumentType] = useState<string>("testimonial");
+
   const [selectedThemeId, setSelectedThemeId] = useState<string>("gov_classic");
   const [customMemoNo, setCustomMemoNo] = useState<string>("");
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -626,13 +641,24 @@ export default function BanglaDocumentGenerator() {
               <h3 className="font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
                 <span className="flex items-center gap-2">
                   <User className="w-4 h-4 text-indigo-600" />
-                  <span>১. শিক্ষার্থী নির্বাচন ({students.length})</span>
+                  <span>১. শিক্ষার্থী নির্বাচন ({displayedStudents.length}/{students.length})</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">Roll Sorted</span>
               </h3>
 
-              <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                {students.map((stu) => (
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="রোল, আইডি বা নাম লিখুন..."
+                  value={studentSearchQuery}
+                  onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+                />
+              </div>
+
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                {displayedStudents.map((stu) => (
                   <div
                     key={stu.id}
                     onClick={() => {
@@ -654,8 +680,14 @@ export default function BanglaDocumentGenerator() {
                     <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate">{stu.studentId}</div>
                   </div>
                 ))}
+                {displayedStudents.length === 0 && (
+                  <div className="text-center py-4 text-xs text-slate-400">
+                    কোনো শিক্ষার্থী পাওয়া যায়নি
+                  </div>
+                )}
               </div>
             </div>
+
 
             {/* Column 2: Document Type */}
             <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-3">
@@ -849,7 +881,23 @@ export default function BanglaDocumentGenerator() {
               {/* Digital Verified Seal */}
               {docStatus === "issued" && (
                 <div className="absolute bottom-10 right-10 z-50">
-                  <DigitalSeal />
+                  <DigitalSeal
+                    color={
+                      currentTheme.sealColor.includes("emerald")
+                        ? "#047857"
+                        : currentTheme.sealColor.includes("indigo")
+                        ? "#3730a3"
+                        : currentTheme.sealColor.includes("amber")
+                        ? "#b45309"
+                        : currentTheme.sealColor.includes("teal")
+                        ? "#0f766e"
+                        : currentTheme.sealColor.includes("rose")
+                        ? "#9f1239"
+                        : "#dc2626"
+                    }
+                    text="PTSC OFFICIAL VERIFIED"
+                    subText="GOVT OF BANGLADESH"
+                  />
                 </div>
               )}
 
@@ -921,7 +969,13 @@ export default function BanglaDocumentGenerator() {
                   <div>
                     <span className="font-bold text-slate-600 dark:text-slate-400">স্টুডেন্ট আইডি:</span>{" "}
                     <span className="font-mono font-bold text-indigo-900">{selectedStudent.studentId}</span>
+                    {Boolean((selectedStudent as any).registrationNo || (selectedStudent as any).regNo) && (
+                      <span className="ml-2 text-slate-500 font-mono text-[11px]">
+                        (রেজি: {(selectedStudent as any).registrationNo || (selectedStudent as any).regNo})
+                      </span>
+                    )}
                   </div>
+
                   <div>
                     <span className="font-bold text-slate-600 dark:text-slate-400">পিতার নাম:</span>{" "}
                     <span className="font-medium text-slate-800 dark:text-slate-200">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, GeneratedDocument, DocumentType, DocumentStatus, DocumentAuditLog } from "@/lib/database";
 import { formatDocumentNo, toBanglaDateString } from "@/lib/utils";
-import { DOCUMENT_TYPE_LABELS, replaceDocumentTokens, DEFAULT_SIGNATORIES } from "@/lib/documentsData";
+import { DOCUMENT_TYPE_LABELS, replaceDocumentTokens, DEFAULT_SIGNATORIES, generateTamperProofDocNumber } from "@/lib/documentsData";
 import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
@@ -134,18 +134,16 @@ export async function POST(req: NextRequest) {
     const typeConfig = DOCUMENT_TYPE_LABELS[docType] || DOCUMENT_TYPE_LABELS.testimonial;
     const session = student.session || "2026";
     
-    // Check if customMemoNo provided and is unique, else generate sequential unique number
+    // Generate unique, tamper-proof document number
     let docNumber = customMemoNo?.trim();
     if (!docNumber) {
-      const serial = institutionalDb.documents.length + 101;
-      docNumber = formatDocumentNo(typeConfig.code, session, serial);
-    }
-
-    // Prevent Duplicate Active Document Number
-    const existing = institutionalDb.documents.find((d) => d.docNumber.toLowerCase() === docNumber.toLowerCase());
-    if (existing) {
-      const uniqueSerial = institutionalDb.documents.length + 1000 + Math.floor(Math.random() * 900);
-      docNumber = formatDocumentNo(typeConfig.code, session, uniqueSerial);
+      docNumber = generateTamperProofDocNumber(typeConfig.code, session, institutionalDb.documents);
+    } else {
+      // Prevent Duplicate Active Document Number if custom number already exists
+      const existing = institutionalDb.documents.find((d) => d.docNumber.toLowerCase() === docNumber!.toLowerCase());
+      if (existing) {
+        docNumber = generateTamperProofDocNumber(typeConfig.code, session, institutionalDb.documents);
+      }
     }
 
     const todayStr = issueDate || new Date().toISOString().slice(0, 10);
@@ -181,22 +179,22 @@ export async function POST(req: NextRequest) {
       docTypeBangla: typeConfig.bn,
       theme: theme || "gov_classic",
       studentId: student.id,
-      studentCode: student.studentId,
-      studentName: student.name,
-      studentNameBangla: student.nameBangla || student.name,
-      roll: student.roll,
-      classId: student.classId,
-      className: student.className,
+      studentCode: student.studentId || `PTSC-${session}-${student.id}`,
+      studentName: student.name || "শিক্ষার্থী",
+      studentNameBangla: student.nameBangla || student.name || "শিক্ষার্থী",
+      roll: student.roll || 1,
+      classId: student.classId || 4,
+      className: student.className || "Class 9 (SSC Vocational)",
       tradeId: student.tradeId,
-      tradeName: student.tradeName,
-      tradeNameBangla: student.tradeNameBangla,
-      section: student.section,
-      session: student.session || "2026",
-      admissionNo: student.admissionNo || `ADM-${student.studentId}`,
+      tradeName: student.tradeName || "",
+      tradeNameBangla: student.tradeNameBangla || student.tradeName || "",
+      section: student.section || "A",
+      session: student.session || session || "2026",
+      admissionNo: student.admissionNo || `ADM-${student.studentId || student.id}`,
       fatherName: student.fatherName || "মোঃ রফিকুল ইসলাম",
       motherName: student.motherName || "মোছাঃ রোকেয়া বেগম",
-      dob: student.dob,
-      dobBangla: student.dobBangla || toBanglaDateString(student.dob),
+      dob: student.dob || "2009-01-01",
+      dobBangla: student.dobBangla || (student.dob ? toBanglaDateString(student.dob) : "০১ জানুয়ারি, ২০০৯"),
       birthRegNo: student.birthRegNo || "—",
       gpa: student.gpa || "5.00",
       resultStatus: student.resultStatus || "Passed",
@@ -205,7 +203,7 @@ export async function POST(req: NextRequest) {
       issueDate: todayStr,
       issueDateBangla: todayBangla,
       generatedBy,
-      qrCodeData: `https://tsc.panchagarh.gov.bd/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId}`,
+      qrCodeData: `https://tsc.panchagarh.gov.bd/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId || student.id}`,
       customBodyText: finalBodyText,
       remarks: remarks || "অফিসিয়াল রেকর্ড অনুসারে যাচাইকৃত ও অনুমোদিত",
       status: (status as DocumentStatus) || "issued",
@@ -219,6 +217,7 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
 
     institutionalDb.documents.unshift(newDoc);
 

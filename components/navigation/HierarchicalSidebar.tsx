@@ -31,6 +31,7 @@ import {
   Layers,
   BarChart3,
   Edit3,
+  User,
 } from "lucide-react";
 
 export interface HierarchicalSidebarProps {
@@ -410,6 +411,21 @@ export default function HierarchicalSidebar({
               activeText: "text-rose-200",
               indicatorColor: "bg-rose-400 shadow-[0_0_8px_#fb7185]",
               glowShadow: "group-hover:shadow-[0_0_15px_rgba(244,63,94,0.4)]",
+            },
+          },
+          {
+            href: "/admin/profile",
+            label: "আমার প্রোফাইল ও ক্রেডেনশিয়াল",
+            icon: User,
+            keywords: ["profile", "account", "settings", "password", "ক্রেডেনশিয়াল"],
+            theme: {
+              iconText: "text-amber-400",
+              iconBg: "bg-amber-500/15 border-amber-500/30",
+              activeBg: "bg-amber-950/80 text-white border-amber-500/40 shadow-amber-950/50",
+              activeBorder: "border-amber-400/40",
+              activeText: "text-amber-200",
+              indicatorColor: "bg-amber-400 shadow-[0_0_8px_#f59e0b]",
+              glowShadow: "group-hover:shadow-[0_0_15px_rgba(245,158,11,0.4)]",
             },
           },
         ],

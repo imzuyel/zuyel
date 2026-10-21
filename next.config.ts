@@ -21,6 +21,7 @@ const nextConfig: NextConfig = {
   experimental: {
     cpus: 1,
     workerThreads: false,
+    optimizePackageImports: ['lucide-react', 'motion/react'],
   },
   env: {
     AI_MODEL: process.env.AI_MODEL || 'gemini-3.8-flash',

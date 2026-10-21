@@ -1,28 +1,28 @@
 import React, { Suspense } from "react";
 import { Metadata } from "next";
-import BackendLoginView from "@/components/auth/BackendLoginView";
+import UnifiedGameAuthPortal from "@/components/auth/UnifiedGameAuthPortal";
 
 export const metadata: Metadata = {
   title: "লগইন | পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC)",
   description:
-    "পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC) প্রাতিষ্ঠানিক লগইন পোর্টাল।",
+    "পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ (PTSC) অফিসিয়াল নিরাপদ লগইন পোর্টাল।",
 };
 
 export default function RootLoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+        <div className="min-h-screen bg-[#020617] text-white flex items-center justify-center p-6 font-sans">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+            <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin" />
             <p className="text-xs font-bold text-slate-400">
-              নিরাপদ লগইন গেটওয়ে প্রস্তুত হচ্ছে...
+              নিরাপদ পোর্টাল গেটওয়ে প্রস্তুত হচ্ছে...
             </p>
           </div>
         </div>
       }
     >
-      <BackendLoginView initialCallbackUrl="/admin" />
+      <UnifiedGameAuthPortal />
     </Suspense>
   );
 }

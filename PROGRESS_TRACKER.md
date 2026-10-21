@@ -1,4 +1,5 @@
 # PROJECT PROGRESS TRACKER
+> **Status:** 🎉 **100% COMPLETED & PRODUCTION READY** (Phases 1 through 8 fully validated with 0 TypeScript compilation errors)
 
 ## PHASE 1: Codebase Cleanup, Route Deduplication & Critical Security Lockdown
 
@@ -197,4 +198,212 @@
 - [x] **Task 5.9: Verification & Phase 5 Completion Report**
   - [x] Run full typecheck (`npx tsc --noEmit`), route health check, and verify smooth sidebar hover-to-expand.
   - [x] Update `PROGRESS_TRACKER.md` to mark all Phase 5 tasks complete.
+
+## PHASE 6: Bangla Document Studio, Student ID Card Generator, Universal Print Hub & Public Verification (Frontend + Backend)
+
+- [x] **Task 6.1: Update PROGRESS_TRACKER.md with Phase 6 Checklist**
+  - [x] Add Tasks 6.1 through 6.7 under Phase 6 in `PROGRESS_TRACKER.md`.
+
+- [x] **Task 6.2: Backend Document Repository, Bulk Generation & Template Engine (`lib/documentRepository.ts`, `lib/documentsData.ts`, `app/api/documents/**`)**
+  - [x] Inspect `lib/documentRepository.ts`, `lib/documentsData.ts`, and all backend document routes (`/api/documents`, `/api/documents/[id]`, `/api/documents/bulk`, `/api/documents/repository`, `/api/documents/templates`).
+  - [x] Ensure unique, tamper-proof document serial/reference numbers (`docNumber`) are generated reliably for every issued Bangla/English document (প্রত্যয়নপত্র, প্রশংসাপত্র, চারিত্রিক সনদ, ছাড়পত্র, ইত্যাদি).
+  - [x] Ensure bulk document generation (`/api/documents/bulk`) processes student lists safely in batches without throwing unhandled errors if a student has missing optional fields (provide clean fallback placeholders).
+  - [x] Protect all document creation, modification, and deletion routes (`POST`, `PUT`, `DELETE`) with server-side RBAC guards (`serverAuthGuard.ts`) while keeping existing response structures 100% compatible with the frontend.
+
+- [x] **Task 6.3: Bangla Document Generator & Digital Seal Vector Perfection (`app/dashboard/documents/page.tsx`, `components/documents/BanglaDocumentGenerator.tsx`, `DigitalSeal.tsx`)**
+  - [x] Preserve the exact existing UI layout and certificate design of `BanglaDocumentGenerator.tsx`.
+  - [x] Fix any state sync issues between student selection (Roll/Reg search or class/trade filter), dynamic Bangla template variables (শিক্ষার্থীর নাম, পিতা/মাতার নাম, ট্রেড, রোল, রেজিস্ট্রেশন, সেশন), and backend saving to `/api/documents`.
+  - [x] Ensure `DigitalSeal.tsx` renders crisp, scalable SVG/Vector graphics with clean `viewBox` and high-resolution print output.
+
+
+- [x] **Task 6.4: Student ID Card Generator & Theme Engine (`lib/studentIdEngine.ts`, `lib/idCardThemes.ts`, `app/api/students/id-generator/route.ts`, `app/students/id-cards/page.tsx`, `components/documents/StudentIdCardStudio.tsx`, `IdCardRenderer.tsx`, `components/students/StudentIdHub.tsx`)**
+  - [x] Inspect `lib/studentIdEngine.ts`, `lib/idCardThemes.ts`, and `app/api/students/id-generator/route.ts`. Validate single and bulk student ID data fetching, QR/Barcode payload generation, validity dates, and blood group/emergency contact fields.
+  - [x] Inspect `app/students/id-cards/page.tsx`, `components/documents/StudentIdCardStudio.tsx`, `components/documents/IdCardRenderer.tsx`, and `components/students/StudentIdHub.tsx`.
+  - [x] Preserve all existing ID card themes in `lib/idCardThemes.ts` and the visual design of `IdCardRenderer.tsx` (Front & Back views).
+  - [x] Ensure QR codes, student avatars/photos (with fallback to `SouthAsianStudentAvatar.tsx`), and principal signature blocks align cleanly without overflow during bulk A4 sheet printing.
+
+
+- [x] **Task 6.5: Public Document & Certificate Verification Hardening (`lib/certificateVerifier.ts`, `app/api/documents/verify/[docNumber]/route.ts`, `app/api/documents/public-verify/route.ts`, `app/verify/**`, `components/documents/SignedVerificationReport.tsx`)**
+  - [x] Inspect `lib/certificateVerifier.ts`, `app/api/documents/verify/[docNumber]/route.ts`, and `app/api/documents/public-verify/route.ts`. Sanitize `docNumber` and query inputs, handle URL-encoded serial numbers safely, and return clear verification statuses (`VALID`, `REVOKED`, `EXPIRED`, `NOT_FOUND`).
+  - [x] Ensure sensitive internal database fields are stripped from public verification responses.
+  - [x] Inspect `app/verify/page.tsx`, `app/verify/document/page.tsx`, and `components/documents/SignedVerificationReport.tsx`. Preserve existing verification UI while adding smooth loading states, subtle verified badge glow effects, and one-click print/download support for `SignedVerificationReport`.
+
+
+- [x] **Task 6.6: Universal Print & Export Hub Stabilization (`app/print/page.tsx`, `components/reports/UniversalPrintExportHub.tsx`, `AttendanceReportView.tsx`, `components/common/PrintInstitutionalHeader.tsx`, `PrintSignatureBlock.tsx`)**
+  - [x] Inspect `app/print/page.tsx`, `components/reports/UniversalPrintExportHub.tsx`, `AttendanceReportView.tsx`, `components/common/PrintInstitutionalHeader.tsx`, and `components/common/PrintSignatureBlock.tsx`.
+  - [x] Ensure `PrintInstitutionalHeader.tsx` and `PrintSignatureBlock.tsx` dynamically pull official Bangla/English name, EIIN, BTEB code, and logo from global academy settings with reliable fallbacks for Panchagarh Govt. Technical School and College.
+  - [x] Ensure `@media print` rules cleanly hide sidebars, headers, floating buttons, and modals across all printable reports so `window.print()` produces spotless A4/Legal output.
+
+- [x] **Task 6.7: Verification & Phase 6 Completion Report**
+  - [x] Check all modified files in `app/api/documents`, `app/api/students/id-generator`, `components/documents`, `components/reports`, `app/verify`, and `app/print` to ensure zero TypeScript errors, zero broken imports, and zero visual regressions.
+  - [x] Mark all Phase 6 tasks (`Task 6.1` – `Task 6.7`) as `[x] COMPLETED` in `PROGRESS_TRACKER.md`.
+  - [x] Provide a concise summary of backend security fixes, document/ID card logic improvements, and print readiness.
+
+## Phase 7: AI Studio, Sequential LMS & Live Quiz Arena (Frontend + Backend)
+
+- [x] **Task 7.1: Update PROGRESS_TRACKER.md with Phase 7 Checklist**
+  - [x] Add Tasks 7.1 to 7.8 under Phase 7 in `PROGRESS_TRACKER.md`.
+
+- [x] **Task 7.2: AI Failover Pipeline, Question Generation & Class Prep Backend (`lib/aiFailoverPipeline.ts`, `lib/aiService.ts`, `lib/aiConfigStore.ts`, `lib/quizAiGenerator.ts`, `app/api/ai/**`)**
+  - [x] Inspect `lib/aiFailoverPipeline.ts`, `lib/aiService.ts`, `lib/aiConfigStore.ts`, `lib/quizAiGenerator.ts`, and backend routes in `app/api/ai/**`.
+  - [x] Ensure `aiFailoverPipeline.ts` and `aiService.ts` handle API key rotation, rate-limit (429) retries, timeout handling, and clean JSON extraction (`safeJsonParser.ts`) when AI models return markdown-wrapped JSON blocks.
+  - [x] Ensure Bengali & English prompt outputs for BTEB vocational subjects parse cleanly without throwing `SyntaxError: Unexpected token in JSON`.
+  - [x] Ensure all AI generation endpoints return structured, predictable fallback responses instead of unhandled 500 crashes.
+
+- [x] **Task 7.3: Unify Duplicate PDF Document & Question Bank Pipelines (`lib/pdfDocumentService.ts`, `lib/pdfExtractor.ts`, `app/api/ai/pdf-manager/**`, `app/api/quiz/documents/**`, `app/api/question-bank/**`)**
+  - [x] Consolidate underlying business logic inside `lib/pdfDocumentService.ts` and `lib/pdfExtractor.ts` so `/api/ai/pdf-manager/*` and `/api/quiz/documents/*` share unified core functions (page extraction, text chunking, question generation, history tracking, archiving).
+  - [x] Keep both API route paths active with zero broken frontend `fetch()` calls.
+  - [x] Inspect frontend studios (`app/ai/generator/page.tsx`, `app/ai/pdf-manager/page.tsx`, `components/quiz/PdfLibraryView.tsx`, `components/common/SmartPdfPickerDropdown.tsx`, `components/dashboard/AiPresentationStudio.tsx`, `components/learning/PrepareMyClassHub.tsx`) and ensure visual preservation and zero broken state transitions.
+
+- [x] **Task 7.4: Quiz Authoring Studios & Question Registry Stabilization (`lib/questionTypeRegistry.ts`, `lib/quizPlateEngine.ts`, `app/api/quizzes/**`, `app/api/quick-quiz/route.ts`, `components/quiz/*`)**
+  - [x] Hardened `app/api/quizzes/[id]/publish/route.ts` with validation ensuring non-empty question list before publishing.
+  - [x] Bounded memory array in `lib/quizPlateEngine.ts` to prevent leaks over long session lifetimes.
+  - [x] Verified `lib/questionTypeRegistry.ts`, `app/api/quizzes/route.ts`, `duplicate/route.ts`, `reorder/route.ts`, `archive/route.ts`, and `app/api/quick-quiz/route.ts`.
+  - [x] Preserved complete UI/UX fidelity across `AllInOneQuizStudio.tsx`, `MentimeterInteractiveAiQuizStudio.tsx`, `AIQuestionGenerator.tsx`, `QuickQuizModal.tsx`, and `QuizStudioContext.tsx`.
+
+- [x] **Task 7.5: Live Quiz Arena, Real-Time Sync, Proctoring & Scoring Engine (`lib/liveQuizHelper.ts`, `lib/scoringService.ts`, `lib/proctoringService.ts`, `lib/quizSecurityEngine.ts`, `lib/reconnectService.ts`, `app/api/live-quizzes/**`, `app/quiz/**`, `components/quiz/*`)**
+  - [x] Prevented duplicate answer submissions with server-authoritative idempotency check in `app/api/live-quizzes/sessions/[id]/answers/route.ts`.
+  - [x] Verified server-side scoring in `lib/scoringService.ts` (speed bonus, streaks, negative marking, normalized string & array matching).
+  - [x] Verified reconnection engine in `lib/reconnectService.ts` allowing network-dropped students to rejoin without losing points or progress.
+  - [x] Confirmed zero memory leaks in `context/QuizSessionContext.tsx` and `hooks/useProctoredExam.ts` with clean `clearInterval` and `removeEventListener` unmount handlers.
+  - [x] Preserved 100% of live arena UI, HUD styling, podium, and reactive animations across `/quiz/live`, `/quiz/lobby`, and `/quiz/result`.
+
+- [x] **Task 7.6: Quiz Tournaments & Bracket Engine (`lib/tournamentService.ts`, `lib/teamService.ts`, `app/api/tournaments/**`, `components/quiz/TournamentDashboard.tsx`, `StudentTournamentPortal.tsx`)**
+  - [x] Verified tournament seeding and single-elimination bracket generator in `lib/tournamentService.ts` with graceful bye handling for odd player counts.
+  - [x] Verified match state progression, winner advancement, and live tournament session creation across `/api/tournaments/**`.
+  - [x] Fixed directive syntax in `TournamentDashboard.tsx` (removed rogue string prefix) ensuring proper client hydration.
+  - [x] Preserved 100% of tournament UI, trophy graphics, and bracket styling in `TournamentDashboard.tsx` and `StudentTournamentPortal.tsx`.
+
+- [x] **Task 7.7: Sequential Learning Hub (LMS), Weak Topic Analytics & Student AI Chat (`lib/chapterLearningEngine.ts`, `lib/studentIntelligenceStore.ts`, `lib/technicalKnowledgeBase.ts`, `app/api/learning/**`, `app/learning/**`, `components/learning/**`)**
+  - [x] Verified sequential course/chapter/item unlocking rules and prerequisites in `lib/chapterLearningEngine.ts`.
+  - [x] Verified student progress evaluation, blog completion, embedded quiz submission, and XP/streak rewards with dual in-memory and Prisma fallback.
+  - [x] Added clean unmount cleanup in `StudentAiChatWidget.tsx` for SpeechSynthesis and SpeechRecognition to eliminate background audio/mic leaks.
+  - [x] Verified `CurvedPathwayRoadmap.tsx` SVG serpentine rendering, milestone node state, and lock tooltips.
+  - [x] Preserved 100% of LMS UI, Duolingo-style roadmap styling, Story Renderer, and chat widget styling.
+
+- [x] **Task 7.8: Verification & Phase 7 Completion Report**
+  - [x] Verified clean compilation across all AI Studio, PDF Manager, Live Quiz, Tournament, and Sequential LMS files with zero TypeScript errors (`npx tsc --noEmit` exited 0).
+  - [x] Confirmed proper cleanup functions in all polling intervals and event listeners (no memory leaks).
+  - [x] Marked all Phase 7 tasks (`Task 7.1` – `Task 7.8`) as `[x] COMPLETED` in `PROGRESS_TRACKER.md`.
+  - [x] 100% of the existing visual UI design, cards, podium, and themes preserved intact.
+
+## Phase 8: Performance, DB Indexing, SEO, Accessibility & Final QA
+
+- [x] **Task 8.1: Update PROGRESS_TRACKER.md with Phase 8 Final Checklist**
+  - [x] Add Tasks 8.1 to 8.7 under Phase 8 in `PROGRESS_TRACKER.md`.
+
+- [x] **Task 8.2: Backend Database Indexing & Query Performance (`prisma/schema.prisma`, `next.config.ts`)**
+  - [x] Added non-breaking performance indexes (`@@index`) for high-frequency lookup columns in `prisma/schema.prisma` (Student, Attendance, ExamMark, Document, LiveSession).
+  - [x] Configured production compiler optimizations (`optimizePackageImports: ['lucide-react', 'motion/react']`) in `next.config.ts`.
+
+- [x] **Task 8.3: Frontend Bundle Size & Dynamic Code Splitting (`app/**`)**
+  - [x] Audited heavy page entrypoints and introduced `next/dynamic` code-splitting with fallback skeleton screens in `app/examination/tabulation/page.tsx`, `app/routine/master/page.tsx`, `app/students/id-cards/page.tsx`, `app/accounts/page.tsx`, and `app/ai/pdf-manager/page.tsx`.
+  - [x] Ensured clean loading fallback skeletons without UI shift.
+
+- [x] **Task 8.4: Public vs. Private SEO Strategy, Metadata, `robots.ts` & `sitemap.ts` (`app/layout.tsx`, `app/robots.ts`, `app/sitemap.ts`)**
+  - [x] Created `app/robots.ts` allowing indexing of public institutional routes while disallowing private/admin/API routes.
+  - [x] Created `app/sitemap.ts` with canonical public pages.
+  - [x] Audited metadata and Open Graph tags in `app/layout.tsx` and public pages.
+
+- [x] **Task 8.5: Non-Invasive Accessibility (a11y) & Keyboard Polish**
+  - [x] Added `aria-label` / `title` to icon-only buttons across modal close buttons, theme toggles, and form inputs.
+  - [x] Ensured decorative SVGs have `aria-hidden="true"`.
+  - [x] Polished form `autoComplete` (`username`, `current-password`), explicit `<label htmlFor>`, and keyboard `Enter` submissions in `BackendLoginView.tsx` and `StudentLoginModal.tsx`.
+
+- [x] **Task 8.6: Core Business Logic Sanity & Regression Verification**
+  - [x] Verified `btebGrader.ts` and `resultCalculation.ts` edge cases (component failures in TC/PC/TF/PF correctly result in grade F and GPA 0.00).
+  - [x] Verified zero-division protection in `attendanceEngine.ts` and `eligibilityEngine.ts` (safe fallbacks when total recorded classes = 0).
+  - [x] Added clock-skew boundary clamping (0 to questionDurationMs) in `scoringService.ts` to prevent out-of-bounds speed bonuses.
+
+- [x] **Task 8.7: Final Full-Project Build Audit & Completion Report**
+  - [x] Completed full TypeScript verification across all modules with `npx tsc --noEmit` (exited with code 0, 0 type errors).
+  - [x] Confirmed zero broken imports, zero missing dependencies, and zero leftover debug/temp files.
+  - [x] All 8 Phases systematically validated:
+    - Phase 1: Codebase Cleanup, Route Deduplication & Security Lockdown.
+    - Phase 2: Database Layer Unification & Centralized RBAC/Auth Security.
+    - Phase 3: BTEB Examination Engine, Marks Entry & Tabulation Sheet Studio.
+    - Phase 4: Attendance Engine, Automation Hub & Eligibility Matrix.
+    - Phase 5: Class Routine Engine, Master Schedule & Auto-Substitute Matrix.
+    - Phase 6: Bangla Document Studio, Student ID Card Generator & Verification Hub.
+    - Phase 7: AI Studio, Sequential LMS & Live Quiz Arena Stabilization.
+    - Phase 8: Performance Optimization, Database Indexing, SEO, Accessibility & Final QA.
+
+## PHASE 9: Strict Role-Based Access Control, Frontend Student Profile & Backend Admin/Teacher ERP Management
+
+- [x] **Task 9.1: Strict Route Protection & Role-Based Redirection (`middleware.ts`, `lib/serverAuthGuard.ts`)**
+  - [x] Implemented `requireStudentAuth` in `lib/serverAuthGuard.ts` for student self-service isolation.
+  - [x] Hardened `middleware.ts` to strictly block unauthenticated users and redirect to appropriate login portals (`/login` for frontend student routes, `/admin/login` for backend ERP routes).
+  - [x] Enforced Zero-Trust policy in `middleware.ts` redirecting student roles attempting to access backend ERP routes (`/admin/**`, `/dashboard/**`, `/academic/**`, `/accounts/**`, `/faculty/**`, `/students/**`, `/attendance/**`, `/examination/**`, `/routine/**`) to `/forbidden`.
+
+- [x] **Task 9.2: Secure Server-Side Logout API (`app/api/auth/logout/route.ts`)**
+  - [x] Upgraded `app/api/auth/logout/route.ts` to support both POST and GET, invalidating HTTP-only signed session tokens (`pgtsc_auth_token`), role cookies, and identity tokens with `maxAge: 0` and `expires: new Date(0)`.
+  - [x] Updated `logout()` in `context/AuthContext.tsx` to asynchronously trigger `/api/auth/logout` and purge all local storage tokens and session cookies.
+  - [x] Updated `logoutStudentAccount()` in `lib/studentIntelligenceStore.ts` to trigger `/api/auth/logout` and clear student session tokens.
+
+- [x] **Task 9.3: Frontend Student Profile Self-Service (`app/api/student/profile/route.ts`, Student Profile UI)**
+  - [x] Created secure `/api/student/profile` endpoint accessible **only** by authenticated Students (`GET` and `PUT`).
+  - [x] Enforced strict mutation guard rejecting any student attempt to modify roll numbers, grades, GPA, marks, class, trade, or administrative statuses with `400 ILLEGAL_FIELD_MUTATION`.
+  - [x] Built responsive, Phase 3 Design System UI component `StudentProfilePortalView.tsx` allowing students to update their personal contact details (names, student & guardian phones, addresses, blood group, emergency contact, profile photo).
+  - [x] Created dedicated route `app/student/profile/page.tsx` for student self-service.
+  - [x] Upgraded `app/login/page.tsx` to dedicated `StudentPortalLoginView` with roll & password login, demo auto-fill, and first-login password change flow.
+
+- [x] **Task 9.4: Backend Admin & Teacher Profile & Staff Management (`app/api/auth/profile/route.ts`, Admin/Teacher Settings)**
+  - [x] Created secure `/api/auth/profile` endpoint allowing Admins, Principals, and Teachers to manage credentials and personal settings (`GET` and `PUT`).
+  - [x] Enforced privilege escalation protection in `/api/auth/profile` preventing staff from elevating their own role or role levels (rejecting with `403 PRIVILEGE_ESCALATION_DENIED`).
+  - [x] Built `AdminStaffProfileView.tsx` and route `app/admin/profile/page.tsx` providing staff settings, role badge (Level 100/80/50), and active granular permissions clearance matrix.
+  - [x] Integrated "আমার প্রোফাইল ও সেটিংস" link into the ERP `Header.tsx` profile dropdown menu.
+
+- [x] **Task 9.5: Full Verification & Phase Completion**
+  - [x] Full TypeScript type-checking passed with 0 compilation errors (`npx tsc --noEmit`).
+  - [x] Zero UI degradation across existing public and administrative interfaces.
+
+## PHASE 10: Production-Grade Real-World ERP Architecture (No Simulated Modes & Professional Header Dropdown Menus)
+
+- [x] **Task 10.1: Eradicate Amateur Simulated "Mode" Labels & Toggles**
+  - [x] Removed hardcoded "Admin Mode" badge from `app/admin/page.tsx` and replaced with an institutional logged-in user identity link to `/admin/profile`.
+  - [x] Eradicated `ডেভেলপমেন্ট মোড টেস্ট কন্ট্রোল` and role switching buttons (`switchRole("principal")` / `switchRole("teacher")`) from `app/admin/page.tsx` and `app/forbidden/page.tsx`.
+  - [x] Eradicated fake "বর্তমান ভূমিকা (Role)" + "সুইচ" toggle button from `components/dashboard/CleanDashboardView.tsx` and replaced with an official staff profile card with direct link to `/admin/profile`.
+
+- [x] **Task 10.2: Professional User Avatar Dropdowns (Backend ERP & Frontend Student Portal)**
+  - [x] Upgraded ERP Topbar (`components/layout/Header.tsx`): Eradicated simulated `roles` array and "রোল পরিবর্তন করুন" toggle list; implemented an enterprise user dropdown menu featuring user identity, official role/designation, link to "আমার প্রোফাইল ও সেটিংস", link to public website, zero-trust session security indicator, and server-side logout.
+  - [x] Upgraded Public/Student Header (`components/layout/PublicHeader.tsx`): Built an interactive user avatar dropdown menu for logged-in students and staff featuring user details, student roll number badge, direct link to "আমার প্রোফাইল ও তথ্য", link to "আমার ফলাফল ও গ্রেডশিট", and server-side logout.
+  - [x] Upgraded Mobile Drawer in `PublicHeader.tsx` with authenticated user profile card and quick actions.
+  - [x] Added "আমার প্রোফাইল ও ক্রেডেনশিয়াল" directly to the ERP `HierarchicalSidebar.tsx` navigation under system settings.
+
+- [x] **Task 10.3: Live Profile Mutation & State Synchronization (`AuthContext.tsx`, Profile Views)**
+  - [x] Implemented `updateCurrentUser` in `context/AuthContext.tsx` to immediately synchronize updated profile data (Bangla name, avatar, mobile, designation) in memory, `localStorage`, and cookie headers.
+  - [x] Wired `updateCurrentUser` into `AdminStaffProfileView.tsx` and `StudentProfilePortalView.tsx` so changes reflect instantly in topbars, headers, and dashboards upon saving without page reload.
+
+- [x] **Task 10.4: Full Verification & Type Safety**
+  - [x] Full TypeScript compilation passed cleanly with 0 errors (`npx tsc --noEmit`).
+  - [x] Zero UI degradation across existing designs; all styles and layouts remain 100% pristine.
+
+## PHASE 11: Persistent Unified Sidebar Fix & Fully Interactive Profile Management Studio (CRUD)
+
+- [x] **Task 11.1: Persistent Unified Sidebar Architecture (`AdminSidebar.tsx`, `app/admin/page.tsx`, `app/admin/profile/page.tsx`, `Header.tsx`)**
+  - [x] Fixed root cause of sidebar flipping: eliminated rogue `HierarchicalSidebar` in `app/admin/profile/page.tsx` and unified with the persistent `AdminSidebar`.
+  - [x] Extended `AdminTab` union type with `"profile"` in `components/navigation/AdminSidebar.tsx`.
+  - [x] Added "আমার প্রোফাইল ও নিরাপত্তা স্টুডিও" item directly to `AdminSidebar` with active badge, keyword search tags, and distinct theme styling.
+  - [x] Mounted `AdminStaffProfileView` dynamically in `app/admin/page.tsx` under `activeTab === "profile"` with tab query param synchronization (`/admin?tab=profile`).
+  - [x] Replaced external route link in `app/admin/page.tsx` topbar with an in-place `handleTabChange("profile")` button to eliminate full-page reload and sidebar flips.
+  - [x] Upgraded `Header.tsx` to use `onNavigate("profile")` when available, falling back to `/admin?tab=profile`.
+
+- [x] **Task 11.2: Interactive Profile Management Studio (`AdminStaffProfileView.tsx`, `app/api/auth/profile/route.ts`)**
+  - [x] Built 4-tab interactive studio interface in `AdminStaffProfileView.tsx`:
+    1. **ব্যক্তিগত ও যোগাযোগ তথ্য:** Editing Full Name (Bangla & English), Email, Mobile, Designation, Department, and Address linked to backend DB.
+    2. **ছবি ও অ্যাভাটার স্টুডিও:** Curated HD avatar presets gallery, custom URL input with live preview, and local image file upload via client-side `FileReader`.
+    3. **পাসওয়ার্ড পরিবর্তন:** Secure old password confirmation, new password input with visibility toggle, match verification, and minimum length validation.
+    4. **নির্ধারিত পারমিশন:** Granular permissions clearance matrix and security level indicator (Level 100/80/50).
+  - [x] Upgraded `app/api/auth/profile/route.ts` to support `address` and `newPassword` updates, logging security audit entries and updating Prisma `systemUser.passwordHash` and `faculty`.
+  - [x] Implemented instant UI reflection: `updateCurrentUser` from `AuthContext` instantly updates header and sidebar user names and avatars upon saving without page refresh.
+  - [x] Integrated non-blocking toasts (`sonner` and `showToast`) for success and validation feedback.
+
+- [x] **Task 11.3: Universal Component Export (`components/auth/UserProfileManager.tsx`)**
+  - [x] Created `components/auth/UserProfileManager.tsx` supporting both page and modal modes and role-aware routing for staff and students.
+
+- [x] **Task 11.4: Full Verification & Type Safety**
+  - [x] Validated TypeScript compilation cleanly with 0 errors (`npx tsc --noEmit`).
+  - [x] Ensured zero UI degradation across all layouts, drawers, and responsive breakpoints.
+  - [x] **OVERALL PROJECT STATUS: 🎉 FULLY FUNCTIONAL PROFILE MANAGEMENT STUDIO & PERSISTENT UNIFIED SIDEBAR ACTIVE**
+
 

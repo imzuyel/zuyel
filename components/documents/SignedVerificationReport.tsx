@@ -459,10 +459,11 @@ export default function SignedVerificationReport({
               <div className="space-y-1">
                 <div className="h-10 flex items-center justify-center">
                   <div className="font-serif italic text-slate-900 dark:text-slate-100 text-sm font-bold border-b border-slate-400 px-4">
-                    Engr. Md. Abdur Rashid
+                    Engr. Md. Aminul Islam
                   </div>
                 </div>
                 <p className="text-xs font-black text-slate-900 dark:text-slate-100">অধ্যক্ষ / পরীক্ষা নিয়ন্ত্রক</p>
+
                 <p className="text-[10px] text-slate-600 dark:text-slate-400">পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ</p>
               </div>
             </div>
@@ -610,9 +611,10 @@ export default function SignedVerificationReport({
                   <DigitalSeal className="w-16 h-16" text="PTSC OFFICIAL VERIFIED" />
 
                   <div className="text-right">
-                    <p className="font-serif italic font-bold text-slate-900 dark:text-slate-100">Engr. Md. Abdur Rashid</p>
+                    <p className="font-serif italic font-bold text-slate-900 dark:text-slate-100">Engr. Md. Aminul Islam</p>
                     <p className="text-[10px] text-slate-500 dark:text-slate-400">অধ্যক্ষ / পরীক্ষা নিয়ন্ত্রক</p>
                   </div>
+
                 </div>
               </div>
             </div>

@@ -379,6 +379,9 @@ model Student {
   @@index([classId, session])
   @@index([tradeId])
   @@index([status])
+  @@index([roll])
+  @@index([session, status])
+  @@index([birthRegNo])
   @@index([guardianMobile])
   @@map("students")
 }
@@ -446,6 +449,7 @@ model AttendanceRecord {
 
   @@unique([date, classId, tradeId, shift, section, session], name: "unique_attendance_sheet")
   @@index([date, classId])
+  @@index([classId, session, section])
   @@map("attendance_records")
 }
 
@@ -464,6 +468,7 @@ model AttendanceEntry {
 
   @@unique([recordId, studentId], name: "unique_record_student_entry")
   @@index([studentId, status])
+  @@index([recordId, status])
   @@map("attendance_entries")
 }
 
@@ -491,6 +496,8 @@ model ExamMark {
 
   @@index([studentId, examName])
   @@index([classId, session])
+  @@index([subjectCode, session])
+  @@index([isPassed, grade])
   @@map("exam_marks")
 }
 
@@ -571,6 +578,8 @@ model Document {
 
   @@index([docId])
   @@index([studentId, status])
+  @@index([type, status])
+  @@index([issuedDate])
   @@map("documents")
 }
 
@@ -665,6 +674,7 @@ model LiveSession {
 
   @@index([pin])
   @@index([status])
+  @@index([quizId, status])
   @@map("live_sessions")
 }
 

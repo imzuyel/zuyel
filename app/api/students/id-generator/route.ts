@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, Student, StudentIdAuditLog, StudentIdConfig } from "@/lib/database";
 import {
   previewBatchStudentIds,
@@ -7,6 +7,8 @@ import {
   getPatternPreview,
 } from "@/lib/studentIdEngine";
 import { doesClassHaveTrade, parseClassNumeric } from "@/lib/academicStructure";
+import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+
 
 // GET: Institutional ID System Status, Integrity Scan, Config, and Audit Logs
 export async function GET(req: Request) {
@@ -65,10 +67,19 @@ export async function GET(req: Request) {
 }
 
 // POST: Actions for Preview, Bulk Generation, Single Generation, Config Update, and Duplicate Auto-fix
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const auth = verifyBackendAuthorization(req, {
+    requiredPermission: "manage_students",
+    endpointName: "/api/students/id-generator (POST)",
+  });
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const action = body.action;
+
 
     // 1. PREVIEW: Pre-flight dry-run generation
     if (action === "preview") {

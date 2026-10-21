@@ -121,3 +121,13 @@ export function addDocumentToRepository(newDoc: DocumentRepoItem): DocumentRepoI
   documentRepository.unshift(newDoc);
   return newDoc;
 }
+
+export function removeDocumentFromRepository(id: string): boolean {
+  const index = documentRepository.findIndex((doc) => doc.id === id);
+  if (index !== -1) {
+    documentRepository.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
