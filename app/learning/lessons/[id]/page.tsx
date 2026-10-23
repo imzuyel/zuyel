@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect, useMemo, useRef, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { buildChapterUrl, buildLessonUrl } from "@/lib/learningSlugService";
+
 import {
   BookOpen,
   Award,
@@ -54,11 +57,61 @@ import { InternationalStoryLessonRenderer } from "@/components/learning/Internat
 import { CurvedPathwayRoadmap } from "@/components/learning/CurvedPathwayRoadmap";
 import StudentLearningLeaderboard from "@/components/learning/StudentLearningLeaderboard";
 
+// Dynamic Themes for Quiz Questions (cycling per question with distinct glow, badges & accents)
+const QUESTION_THEMES = [
+  {
+    themeName: "সাইবার ব্লু",
+    badgeBg: "bg-cyan-50 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800",
+    glowCard: "border-cyan-500/40 shadow-[0_0_25px_rgba(6,182,212,0.12)]",
+    stepActive: "bg-cyan-500 text-slate-950 border-cyan-400 ring-2 ring-cyan-500/40 shadow-cyan-500/30",
+    optHover: "hover:border-cyan-400 hover:bg-cyan-50/50 dark:hover:bg-cyan-950/30",
+    optSelected: "bg-cyan-50 dark:bg-cyan-950/70 border-cyan-500 text-cyan-950 dark:text-cyan-100 ring-2 ring-cyan-500/40 shadow-cyan-500/20",
+    indicatorSelected: "bg-cyan-500 text-slate-950 border-cyan-400 font-black",
+  },
+  {
+    themeName: "রয়্যাল পার্পল",
+    badgeBg: "bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800",
+    glowCard: "border-purple-500/40 shadow-[0_0_25px_rgba(168,85,247,0.12)]",
+    stepActive: "bg-purple-500 text-white border-purple-400 ring-2 ring-purple-500/40 shadow-purple-500/30",
+    optHover: "hover:border-purple-400 hover:bg-purple-50/50 dark:hover:bg-purple-950/30",
+    optSelected: "bg-purple-50 dark:bg-purple-950/70 border-purple-500 text-purple-950 dark:text-purple-100 ring-2 ring-purple-500/40 shadow-purple-500/20",
+    indicatorSelected: "bg-purple-500 text-white border-purple-400 font-black",
+  },
+  {
+    themeName: "গোল্ডেন সানসেট",
+    badgeBg: "bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800",
+    glowCard: "border-amber-500/40 shadow-[0_0_25px_rgba(245,158,11,0.12)]",
+    stepActive: "bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 shadow-amber-500/30",
+    optHover: "hover:border-amber-400 hover:bg-amber-50/50 dark:hover:bg-amber-950/30",
+    optSelected: "bg-amber-50 dark:bg-amber-950/70 border-amber-500 text-amber-950 dark:text-amber-100 ring-2 ring-amber-500/40 shadow-amber-500/20",
+    indicatorSelected: "bg-amber-500 text-slate-950 border-amber-400 font-black",
+  },
+  {
+    themeName: "এমারেল্ড ম্যাট্রিক্স",
+    badgeBg: "bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800",
+    glowCard: "border-emerald-500/40 shadow-[0_0_25px_rgba(16,185,129,0.12)]",
+    stepActive: "bg-emerald-500 text-white border-emerald-400 ring-2 ring-emerald-500/40 shadow-emerald-500/30",
+    optHover: "hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30",
+    optSelected: "bg-emerald-50 dark:bg-emerald-950/70 border-emerald-500 text-emerald-950 dark:text-emerald-100 ring-2 ring-emerald-500/40 shadow-emerald-500/20",
+    indicatorSelected: "bg-emerald-500 text-white border-emerald-400 font-black",
+  },
+  {
+    themeName: "রুবি এনার্জি",
+    badgeBg: "bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800",
+    glowCard: "border-rose-500/40 shadow-[0_0_25px_rgba(244,63,94,0.12)]",
+    stepActive: "bg-rose-500 text-white border-rose-400 ring-2 ring-rose-500/40 shadow-rose-500/30",
+    optHover: "hover:border-rose-400 hover:bg-rose-50/50 dark:hover:bg-rose-950/30",
+    optSelected: "bg-rose-50 dark:bg-rose-950/70 border-rose-500 text-rose-950 dark:text-rose-100 ring-2 ring-rose-500/40 shadow-rose-500/20",
+    indicatorSelected: "bg-rose-500 text-white border-rose-400 font-black",
+  },
+];
+
 interface LessonPageProps {
   params: Promise<{ id: string }>;
 }
 
 export default function LessonDetailsPage({ params }: LessonPageProps) {
+  const router = useRouter();
   const { id } = use(params);
   const [chapter, setChapter] = useState<CourseChapterItem | null>(null);
   const [courseInfo, setCourseInfo] = useState<any>(null);
@@ -82,6 +135,12 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
   const [timeLeft, setTimeLeft] = useState(300);
   const [quizSubmitting, setQuizSubmitting] = useState(false);
   const [quizResult, setQuizResult] = useState<any>(null);
+
+  // Shuffled options map for anti-memorization randomization on quiz starts/retakes
+  // Key: question ID, Value: array of { text: string; originalIndex: number }
+  const [shuffledOptionsMap, setShuffledOptionsMap] = useState<
+    Record<string, { text: string; originalIndex: number }[]>
+  >({});
 
   // ANTI-CHEAT TAB SWITCH TRACKING
   // Question IDs where student switched browser tab during quiz
@@ -135,6 +194,22 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
       if (data.success && data.chapter) {
         setChapter(data.chapter);
         setCourseInfo(data.course);
+
+        if (data.course && data.chapter) {
+          const activeItem =
+            data.chapter.items?.find(
+              (it: any) => !it.isLocked && !it.progress?.isPassed && it.progress?.status !== "COMPLETED"
+            ) ||
+            data.chapter.items?.find((it: any) => !it.isLocked) ||
+            data.chapter.items?.[0];
+
+          if (activeItem) {
+            router.replace(buildLessonUrl(data.course, data.chapter, activeItem));
+          } else {
+            router.replace(buildChapterUrl(data.course, data.chapter));
+          }
+          return;
+        }
 
         // Set default active item if not set
         if (data.chapter.items && data.chapter.items.length > 0) {
@@ -342,9 +417,27 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
     }));
   };
 
-  // Start Quiz (Supports both logged-in students and guest users with instant button loader)
+  // Start Quiz (Strict student login enforcement & Anti-Memorization Option Shuffling)
   const handleStartQuiz = () => {
+    if (!activeStudent) {
+      setLoginModalOpen(true);
+      return;
+    }
     setStartingQuiz(true);
+
+    // Dynamic Option Randomization / Shuffling on every start or retake
+    const newShuffled: Record<string, { text: string; originalIndex: number }[]> = {};
+    (activeItem?.quizQuestions || []).forEach((q) => {
+      const indexed = q.options.map((opt, i) => ({ text: opt, originalIndex: i }));
+      // Fisher-Yates modern shuffle algorithm
+      for (let i = indexed.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indexed[i], indexed[j]] = [indexed[j], indexed[i]];
+      }
+      newShuffled[q.id] = indexed;
+    });
+    setShuffledOptionsMap(newShuffled);
+
     setTimeout(() => {
       setQuizStarted(true);
       setCurrentQuestionIndex(0);
@@ -358,11 +451,15 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
   // Submit Quiz to Backend with Student & Guest Persistence
   const handleSubmitQuiz = async () => {
     if (!activeItem) return;
+    if (!activeStudent) {
+      setLoginModalOpen(true);
+      return;
+    }
     try {
       setQuizSubmitting(true);
       const guestId = getGuestSessionId();
-      const roll = activeStudent?.rollNumber || guestId;
-      const name = activeStudent?.studentName || "অতিথি শিক্ষার্থী (Guest)";
+      const roll = activeStudent.rollNumber;
+      const name = activeStudent.studentName;
 
       const data = await safeFetchJson(`/api/learning/items/${activeItem.id}/submit-quiz`, {
         method: "POST",
@@ -449,21 +546,23 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
     handleSubmitQuiz();
   };
 
-  // Complete Blog Part handler (Student & Guest persistent progression)
+  // Complete Blog Part handler (Student persistent progression)
   const handleCompleteBlog = async () => {
     if (!activeItem) return;
+    if (!activeStudent) {
+      setLoginModalOpen(true);
+      return;
+    }
     try {
       setCompletingBlog(true);
-      const guestId = getGuestSessionId();
-      const roll = activeStudent?.rollNumber || guestId;
-      const name = activeStudent?.studentName || "অতিথি শিক্ষার্থী (Guest)";
+      const roll = activeStudent.rollNumber;
+      const name = activeStudent.studentName;
 
       await safeFetchJson(`/api/learning/items/${activeItem.id}/complete-blog`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           studentRoll: roll,
-          guestSessionId: guestId,
           studentName: name,
         }),
       });
@@ -555,7 +654,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-white transition-colors duration-200 overflow-x-hidden">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-white transition-colors duration-200 overflow-x-clip">
       <PublicHeader />
 
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-5 animate-fade-in">
@@ -669,27 +768,10 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
 
             {/* DUAL-COLUMN SPLIT LAYOUT: FIXED STICKY PATHWAY (LEFT) + INDEPENDENT SCROLLING STORY/QUIZ (RIGHT) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pt-1">
-              {/* LEFT COLUMN: Fixed Sticky Curving Road Map Panel (sticky top-4 with independent scroll if tall) */}
+              {/* LEFT COLUMN: Fixed Sticky Curving Road Map Panel */}
               <div className="lg:col-span-4 xl:col-span-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)] lg:overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                {/* Mobile Roadmap Toggle */}
-                <div className="lg:hidden flex items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-cyan-500" />
-                    <span className="text-xs font-black text-slate-900 dark:text-white">
-                      কার্ভড পাথওয়ে ({chapter.items.length} ধাপ)
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowMobileRoadmap((prev) => !prev)}
-                    className="px-2.5 py-1 rounded-lg bg-cyan-50 dark:bg-cyan-950/80 border border-cyan-200 dark:border-cyan-800 text-cyan-700 dark:text-cyan-300 text-[11px] font-bold cursor-pointer"
-                  >
-                    {showMobileRoadmap ? "ম্যাপ লুকান ▲" : "ম্যাপ দেখুন ▼"}
-                  </button>
-                </div>
-
                 {/* Animated Serpentine Road Map */}
-                <div className={`${showMobileRoadmap ? "block" : "hidden"} lg:block`}>
+                <div className="block">
                   <CurvedPathwayRoadmap
                     items={chapter.items}
                     activeItemId={activeItem?.id || null}
@@ -746,7 +828,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                           >
                             {activeItem.itemType === "BLOG_PART"
                               ? `ব্লগ পার্ট ${activeItem.blogPartNumber || activeItemIndex + 1}`
-                              : "ঐচ্ছিক কুইজ পরীক্ষা"}
+                              : "বাধ্যতামূলক কুইজ পরীক্ষা"}
                           </span>
                           {activeItem.durationMinutes && (
                             <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 font-mono">
@@ -867,7 +949,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                                     ) : (
                                       <>
                                         <Award className="w-3.5 h-3.5" />
-                                        <span>পাঠ সমাপ্ত ও বাধ্যতামূলক কুইজ দিন ➔</span>
+                                        <span>কুইজে অংশ নিন ➔</span>
                                       </>
                                     )}
                                   </button>
@@ -892,7 +974,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                                     ) : (
                                       <>
                                         <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                                        <span>পাঠ সমাপ্ত ও পরবর্তী ধাপ আনলক ➔</span>
+                                        <span>পরবর্তী পার্ট ➔</span>
                                       </>
                                     )}
                                   </button>
@@ -912,7 +994,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                       </div>
                     )}
 
-                {/* 2. MANDATORY QUIZ VIEW */}
+                {/* 2. QUIZ VIEW */}
                 {activeItem.itemType === "QUIZ" && (
                   <div className="space-y-5">
                     {/* MANDATORY LOGIN WARNING IF NOT LOGGED IN */}
@@ -940,7 +1022,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                       <div className="bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-5">
                         <div className="space-y-2">
                           <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/40 text-indigo-800 dark:text-indigo-300 text-xs font-black inline-block">
-                            বাধ্যতামূলক কুইজ অ্যাসেসমেন্ট
+                            কুইজ মূল্যায়ন
                           </span>
                           <h3 className="text-lg font-black text-slate-900 dark:text-white">
                             {activeItem.titleBangla}
@@ -954,7 +1036,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                         <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/40 space-y-1.5 text-xs">
                           <span className="font-black text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
                             <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                            <span>ট্যাব পরিবর্তন প্রতিরোধ নিয়ম (Tab Switch Anti-Cheat Rules):</span>
+                            <span>ট্যাব পরিবর্তন প্রতিরোধ নিয়ম:</span>
                           </span>
                           <ul className="list-disc list-inside text-rose-700 dark:text-rose-200/90 space-y-1 leading-relaxed font-sans">
                             <li>কুইজ চলাকালে ব্রাউজারের অন্য কোনো ট্যাবে গেলে সেই নির্দিষ্ট প্রশ্নের নম্বর ০ (শূন্য) হবে।</li>
@@ -1004,28 +1086,6 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                               </>
                             )}
                           </button>
-
-                          {/* Skip optional quiz to next item */}
-                          {nextItem && (
-                            <button
-                              onClick={() => {
-                                setNavigatingItemId(nextItem.id);
-                                handleSelectSequenceItem(nextItem);
-                                setTimeout(() => setNavigatingItemId(null), 300);
-                              }}
-                              disabled={navigatingItemId === nextItem.id}
-                              className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-60"
-                            >
-                              {navigatingItemId === nextItem.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <>
-                                  <span>কুইজ ছাড়াই পরবর্তীতে যান</span>
-                                  <ArrowRight className="w-3.5 h-3.5" />
-                                </>
-                              )}
-                            </button>
-                          )}
                         </div>
                       </div>
                     ) : quizResult ? (
@@ -1208,7 +1268,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                           </div>
                         </div>
 
-                        {/* Question Step Circles with Forward Locking */}
+                        {/* Question Step Circles with Forward Locking & Dynamic Theming */}
                         <div className="flex flex-wrap items-center gap-1.5">
                           {activeItem.quizQuestions?.map((q, idx) => {
                             const isAnswered = selectedAnswers[q.id] !== undefined;
@@ -1216,6 +1276,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                             const isDisqualified = tabSwitchedQuestionIds.includes(q.id);
                             const prevQ = activeItem.quizQuestions?.[idx - 1];
                             const isLocked = idx > currentQuestionIndex && (!prevQ || selectedAnswers[prevQ.id] === undefined);
+                            const qTheme = QUESTION_THEMES[idx % QUESTION_THEMES.length];
 
                             return (
                               <button
@@ -1231,7 +1292,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                                     : "cursor-pointer"
                                 } ${
                                   isCurrent
-                                    ? "bg-cyan-500 text-slate-950 border-cyan-400 ring-2 ring-cyan-500/40"
+                                    ? qTheme.stepActive
                                     : isDisqualified
                                     ? "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800"
                                     : isAnswered
@@ -1245,16 +1306,31 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                           })}
                         </div>
 
-                        {/* Current Question Box */}
+                        {/* Current Question Box with Dynamic Theme and Option Randomization */}
                         {(() => {
                           const questions = activeItem.quizQuestions || [];
                           const currentQ = questions[currentQuestionIndex];
                           if (!currentQ) return null;
                           const currentSelected = selectedAnswers[currentQ.id];
                           const isCurrentDisqualified = tabSwitchedQuestionIds.includes(currentQ.id);
+                          const currentTheme = QUESTION_THEMES[currentQuestionIndex % QUESTION_THEMES.length];
+
+                          // Retrieve randomized options (shuffled upon each quiz start/retake)
+                          const displayedOptions =
+                            shuffledOptionsMap[currentQ.id] ||
+                            currentQ.options.map((opt, i) => ({ text: opt, originalIndex: i }));
 
                           return (
-                            <div className="space-y-4 pt-1">
+                            <div className={`space-y-4 pt-1 p-4 sm:p-5 rounded-2xl bg-white/70 dark:bg-slate-900/80 border transition-all ${currentTheme.glowCard}`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-slate-200/60 dark:border-slate-800/80">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border shadow-xs ${currentTheme.badgeBg}`}>
+                                  থিম: {currentTheme.themeName}
+                                </span>
+                                <span className="text-[11px] font-mono text-slate-400">
+                                  প্রশ্ন {currentQuestionIndex + 1} / {questions.length}
+                                </span>
+                              </div>
+
                               <div className="space-y-1.5">
                                 {isCurrentDisqualified && (
                                   <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/80 text-rose-800 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5">
@@ -1269,39 +1345,38 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                                 </h3>
                               </div>
 
-                              {/* Options List with Immediate Feedback */}
+                              {/* Options List with Dynamic Theming and Shuffled Anti-Memorization Order */}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                {currentQ.options.map((option, oIdx) => {
-                                  const isSelected = currentSelected === oIdx;
+                                {displayedOptions.map((optItem, displayIdx) => {
+                                  const isSelected = currentSelected === optItem.originalIndex;
                                   const isAnswered = currentSelected !== undefined;
-                                  const isCorrect = oIdx === currentQ.correctOptionIndex;
+                                  const isCorrect = optItem.originalIndex === currentQ.correctOptionIndex;
 
                                   let optionClass =
-                                    "bg-white dark:bg-slate-900/80 hover:bg-slate-50 dark:hover:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-300";
+                                    `bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-300 ${currentTheme.optHover}`;
 
                                   if (isAnswered) {
                                     if (isCorrect) {
                                       optionClass =
-                                        "bg-emerald-50 dark:bg-emerald-950/80 border-emerald-500 text-emerald-900 dark:text-emerald-100 ring-1 ring-emerald-500/40";
+                                        "bg-emerald-50 dark:bg-emerald-950/80 border-emerald-500 text-emerald-900 dark:text-emerald-100 ring-2 ring-emerald-500/40 shadow-emerald-500/20";
                                     } else if (isSelected && !isCorrect) {
                                       optionClass =
-                                        "bg-rose-50 dark:bg-rose-950/80 border-rose-500 text-rose-900 dark:text-rose-100 ring-1 ring-rose-500/40";
+                                        "bg-rose-50 dark:bg-rose-950/80 border-rose-500 text-rose-900 dark:text-rose-100 ring-2 ring-rose-500/40 shadow-rose-500/20";
                                     } else {
                                       optionClass =
                                         "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/80 text-slate-400 opacity-60";
                                     }
                                   } else if (isSelected) {
-                                    optionClass =
-                                      "bg-cyan-50 dark:bg-cyan-950/60 border-cyan-500 text-cyan-900 dark:text-white ring-1 ring-cyan-500";
+                                    optionClass = currentTheme.optSelected;
                                   }
 
                                   return (
                                     <button
-                                      key={oIdx}
-                                      onClick={() => handleSelectOption(currentQ.id, oIdx)}
+                                      key={displayIdx}
+                                      onClick={() => handleSelectOption(currentQ.id, optItem.originalIndex)}
                                       disabled={isAnswered}
                                       className={`p-3 rounded-xl text-left text-xs sm:text-sm font-semibold flex items-center justify-between transition-all border ${
-                                        !isAnswered ? "cursor-pointer" : "cursor-default"
+                                        !isAnswered ? "cursor-pointer active:scale-[0.99]" : "cursor-default"
                                       } ${optionClass}`}
                                     >
                                       <div className="flex items-center gap-2.5">
@@ -1314,13 +1389,13 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                                                 ? "bg-rose-500 text-white border-rose-400 font-black"
                                                 : "bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700"
                                               : isSelected
-                                              ? "bg-cyan-500 text-white border-cyan-400"
+                                              ? currentTheme.indicatorSelected
                                               : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700"
                                           }`}
                                         >
-                                          {String.fromCharCode(65 + oIdx)}
+                                          {String.fromCharCode(65 + displayIdx)}
                                         </span>
-                                        <span className="leading-snug">{option}</span>
+                                        <span className="leading-snug">{optItem.text}</span>
                                       </div>
 
                                       {isAnswered && (
@@ -1361,9 +1436,7 @@ export default function LessonDetailsPage({ params }: LessonPageProps) {
                                     <p className="font-extrabold text-xs sm:text-sm">
                                       {currentSelected === currentQ.correctOptionIndex
                                         ? "অভিনন্দন! আপনার উত্তরটি সঠিক হয়েছে।"
-                                        : `ভুল উত্তর। সঠিক উত্তর হলো: (${String.fromCharCode(
-                                            65 + currentQ.correctOptionIndex
-                                          )}) ${currentQ.options[currentQ.correctOptionIndex]}`}
+                                        : `ভুল উত্তর। সঠিক উত্তর হলো: ${currentQ.options[currentQ.correctOptionIndex]}`}
                                     </p>
                                     {currentQ.explanation && (
                                       <p className="text-slate-600 dark:text-slate-300 text-[11px] font-sans">

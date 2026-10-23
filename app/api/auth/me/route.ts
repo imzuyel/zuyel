@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PRESET_USERS } from "@/context/AuthContext";
+import { PRESET_USERS } from "@/lib/presetUsers";
 import { normalizeRole } from "@/lib/rbac";
 
 export async function GET(request: NextRequest) {

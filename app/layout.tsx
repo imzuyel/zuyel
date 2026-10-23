@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { LoadingProvider } from "@/context/LoadingContext";
 import { ToastProvider } from "@/components/ui/Toast";
+import { GlobalAcademicProvider } from "@/context/GlobalAcademicContext";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://ptsc.gov.bd"),
@@ -55,14 +56,16 @@ export default function RootLayout({
         />
       </head>
       <body
-        className="min-h-screen max-w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-500 selection:text-white transition-colors duration-200"
+        className="min-h-screen max-w-full overflow-x-clip bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-500 selection:text-white transition-colors duration-200"
         suppressHydrationWarning
       >
         <LoadingProvider>
           <AuthProvider>
             <ThemeProvider>
               <LanguageProvider>
-                <ToastProvider>{children}</ToastProvider>
+                <GlobalAcademicProvider>
+                  <ToastProvider>{children}</ToastProvider>
+                </GlobalAcademicProvider>
               </LanguageProvider>
             </ThemeProvider>
           </AuthProvider>

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
-import { Filter, Layers, BookOpen, Building2, Calendar, Users, ShieldAlert } from "lucide-react";
+import React, { useEffect, useMemo, useCallback } from "react";
+import { Filter, Layers, BookOpen, Building2, Calendar, Users, ShieldAlert, Sparkles, RefreshCw } from "lucide-react";
 import { 
   ACADEMIC_CLASSES, 
   ALL_TRADES as ACADEMIC_TRADES,
@@ -9,6 +9,7 @@ import {
   getApplicableTradesForClass,
   parseClassNumeric
 } from "@/lib/academicStructure";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
 
 export { 
   ACADEMIC_CLASSES, 
@@ -35,6 +36,7 @@ interface AcademicFilterBarProps {
   showSession?: boolean;
   showAllOption?: boolean;
   compact?: boolean;
+  autoSyncWithGlobal?: boolean;
 }
 
 export const ACADEMIC_DEPARTMENTS = [
@@ -54,7 +56,16 @@ export default function AcademicFilterBar({
   showSession = true,
   showAllOption = false,
   compact = false,
+  autoSyncWithGlobal = false,
 }: AcademicFilterBarProps) {
+  let globalCtx: ReturnType<typeof useGlobalAcademic> | null = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    globalCtx = useGlobalAcademic();
+  } catch {
+    globalCtx = null;
+  }
+
   const tradeAllowed = useMemo(() => {
     return doesClassHaveTrade(filter.classId);
   }, [filter.classId]);
@@ -62,6 +73,26 @@ export default function AcademicFilterBar({
   const applicableTrades = useMemo(() => {
     return getApplicableTradesForClass(filter.classId);
   }, [filter.classId]);
+
+  const syncFromGlobal = useCallback(() => {
+    if (!globalCtx) return;
+    const isApplicable = doesClassHaveTrade(globalCtx.selectedClassId);
+    const matched = ACADEMIC_TRADES.find((t) => String(t.id) === String(globalCtx.selectedTradeId));
+    onChange({
+      ...filter,
+      classId: globalCtx.selectedClassId,
+      session: globalCtx.academicYear,
+      section: globalCtx.selectedSection,
+      tradeId: isApplicable ? String(globalCtx.selectedTradeId) : "",
+      tradeCode: isApplicable && matched ? matched.code : "",
+    });
+  }, [globalCtx, filter, onChange]);
+
+  useEffect(() => {
+    if (autoSyncWithGlobal && globalCtx) {
+      syncFromGlobal();
+    }
+  }, [autoSyncWithGlobal]);
 
   // Enforce structural rule: If Class changes to 6, 7, 8 -> Reset trade Id and Code to ""
   useEffect(() => {
@@ -122,9 +153,24 @@ export default function AcademicFilterBar({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-700/50 text-[10px] font-mono text-slate-400 self-start sm:self-auto">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-          <span>শিক্ষা বর্ষ: ২০২৬ • EIIN: ১৩২২৪৪</span>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {globalCtx && (
+            <button
+              type="button"
+              onClick={syncFromGlobal}
+              title="গ্লোবাল একাডেমিক কন্ট্রোলের সাথে তাৎক্ষণিক সিঙ্ক করুন"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-indigo-500/10 to-cyan-500/10 hover:from-indigo-500/20 hover:to-cyan-500/20 border border-indigo-500/30 text-[10px] font-bold text-indigo-600 dark:text-cyan-400 cursor-pointer transition-all hover:scale-105 active:scale-95 shadow-xs"
+            >
+              <Sparkles className="w-3 h-3 text-cyan-500 animate-pulse" />
+              <span>গ্লোবাল সিঙ্ক ({globalCtx.academicYear} • {globalCtx.activeClassName.split(" ")[0]} • শাখা {globalCtx.selectedSection})</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-700/50 text-[10px] font-mono text-slate-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+            <span>সেশন: ২০২৬ • BTEB</span>
+          </div>
         </div>
       </div>
 

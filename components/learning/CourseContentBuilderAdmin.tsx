@@ -68,9 +68,10 @@ import {
 } from "@/lib/academicStructure";
 import { useAcademySettings } from "@/lib/useAcademySettings";
 import { saveCustomLessonQuiz, StudentQuizQuestion } from "@/lib/studentIntelligenceStore";
+import { TWENTY_QUIZ_TEMPLATES, QuizTemplateTheme } from "@/lib/quizEngineTypes";
 
 interface CourseContentBuilderAdminProps {
-  initialSubTab?: "builder" | "ai_prep" | "preview";
+  initialSubTab?: "builder" | "ai_prep" | "preview" | "template_gallery";
 }
 
 interface GeneratedClassPackage {
@@ -141,9 +142,14 @@ export default function CourseContentBuilderAdmin({
   initialSubTab = "builder",
 }: CourseContentBuilderAdminProps) {
   // Top Sub-Tab State
-  const [activeSubTab, setActiveSubTab] = useState<"builder" | "ai_prep" | "preview">(
-    initialSubTab
-  );
+  const [activeSubTab, setActiveSubTab] = useState<
+    "builder" | "ai_prep" | "preview" | "template_gallery"
+  >(initialSubTab);
+
+  // Quiz Template Gallery Admin States
+  const [galleryPreviewTheme, setGalleryPreviewTheme] = useState<"dark" | "light">("dark");
+  const [selectedGalleryTemplateId, setSelectedGalleryTemplateId] = useState<string>("template-01");
+  const [gallerySelectedOption, setGallerySelectedOption] = useState<number | null>(null);
 
   // Courses state
   const [courses, setCourses] = useState<CourseItem[]>([]);
@@ -185,6 +191,7 @@ export default function CourseContentBuilderAdmin({
   const [showItemModal, setShowItemModal] = useState(false);
   const [itemModalType, setItemModalType] = useState<ContentItemType>("BLOG_PART");
   const [editingItem, setEditingItem] = useState<ChapterContentItemData | null>(null);
+  const [editingChapter, setEditingChapter] = useState<CourseChapterItem | null>(null);
   const [targetChapterId, setTargetChapterId] = useState<number | null>(null);
 
   // New Course Form State
@@ -230,6 +237,7 @@ export default function CourseContentBuilderAdmin({
   });
 
   // Question editing sub-state for quiz builder
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [newQuestion, setNewQuestion] = useState({
     questionText: "",
     optionA: "",
@@ -646,14 +654,43 @@ export default function CourseContentBuilderAdmin({
     }
   };
 
-  // Create Chapter
-  const handleCreateChapter = async (e: React.FormEvent) => {
+  // Open Add Chapter Modal
+  const openAddChapterModal = () => {
+    setEditingChapter(null);
+    setNewChapterForm({
+      title: "",
+      titleBangla: "",
+      description: "",
+      unlockRule: "PREVIOUS_COMPLETED",
+    });
+    setShowChapterModal(true);
+  };
+
+  // Open Edit Chapter Modal
+  const openEditChapterModal = (chapter: CourseChapterItem) => {
+    setEditingChapter(chapter);
+    setNewChapterForm({
+      title: chapter.title || "",
+      titleBangla: chapter.titleBangla || "",
+      description: chapter.description || "",
+      unlockRule: chapter.unlockRule || "PREVIOUS_COMPLETED",
+    });
+    setShowChapterModal(true);
+  };
+
+  // Create or Update Chapter (PUT if editing, POST if creating)
+  const handleSaveChapter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCourseId) return;
 
     try {
-      const res = await fetch("/api/learning/chapters", {
-        method: "POST",
+      const url = editingChapter
+        ? `/api/learning/chapters/${editingChapter.id}`
+        : "/api/learning/chapters";
+      const method = editingChapter ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           courseId: selectedCourseId,
@@ -662,8 +699,13 @@ export default function CourseContentBuilderAdmin({
       });
       const data = await res.json();
       if (data.success) {
-        toast.success("অধ্যায় সফলভাবে যুক্ত করা হয়েছে!");
+        toast.success(
+          editingChapter
+            ? "অধ্যায় সফলভাবে আপডেট করা হয়েছে!"
+            : "অধ্যায় সফলভাবে যুক্ত করা হয়েছে!"
+        );
         setShowChapterModal(false);
+        setEditingChapter(null);
         setNewChapterForm({
           title: "",
           titleBangla: "",
@@ -672,7 +714,7 @@ export default function CourseContentBuilderAdmin({
         });
         fetchCourses();
       } else {
-        toast.error(data.error || "অধ্যায় তৈরি করা যায়নি");
+        toast.error(data.error || "অধ্যায় সংরক্ষণ করা যায়নি");
       }
     } catch {
       toast.error("নেটওয়ার্ক ত্রুটি");
@@ -752,6 +794,33 @@ export default function CourseContentBuilderAdmin({
     setShowItemModal(true);
   };
 
+  // Open Item Editor Modal (Pre-populate with existing block part or quiz data)
+  const openEditItemModal = (chapterId: number, item: ChapterContentItemData) => {
+    setTargetChapterId(chapterId);
+    setItemModalType(item.itemType);
+    setEditingItem(item);
+
+    setItemForm({
+      title: item.title || "",
+      titleBangla: item.titleBangla || "",
+      isMandatory: item.isMandatory !== undefined ? item.isMandatory : true,
+      isPublished: item.isPublished !== undefined ? item.isPublished : true,
+      xpReward: item.xpReward || (item.itemType === "BLOG_PART" ? 50 : 75),
+      passingScore: item.passingScore || 60,
+      minScoreToUnlockNext: item.minScoreToUnlockNext || 60,
+      attemptLimit: item.attemptLimit || (item.itemType === "QUIZ" ? 3 : 0),
+      durationMinutes: item.durationMinutes || (item.itemType === "BLOG_PART" ? 6 : 5),
+      blogPartNumber: item.blogPartNumber || 1,
+      contentMarkdown: item.contentMarkdown || "",
+      summary: item.summary || "",
+      keyTakeawaysText: Array.isArray(item.keyTakeaways) ? item.keyTakeaways.join("\n") : "",
+      timeLimitSeconds: item.timeLimitSeconds || 300,
+      quizQuestions: item.quizQuestions || [],
+    });
+
+    setShowItemModal(true);
+  };
+
   // Save Item
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -812,7 +881,7 @@ export default function CourseContentBuilderAdmin({
     }
   };
 
-  // Add question to quiz form
+  // Add or update question in quiz form
   const handleAddQuestionToQuiz = () => {
     if (!newQuestion.questionText || !newQuestion.optionA || !newQuestion.optionB) {
       toast.error("প্রশ্ন ও অন্তত ২টি অপশন পূরণ করুন");
@@ -823,19 +892,39 @@ export default function CourseContentBuilderAdmin({
     if (newQuestion.optionC) options.push(newQuestion.optionC);
     if (newQuestion.optionD) options.push(newQuestion.optionD);
 
-    const questionItem: QuizQuestionItem = {
-      id: `q-${Date.now()}`,
-      questionText: newQuestion.questionText,
-      options,
-      correctOptionIndex: Number(newQuestion.correctOptionIndex),
-      explanation: newQuestion.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
-      marks: 1,
-    };
+    if (editingQuestionId) {
+      setItemForm((prev) => ({
+        ...prev,
+        quizQuestions: prev.quizQuestions.map((q) =>
+          q.id === editingQuestionId
+            ? {
+                ...q,
+                questionText: newQuestion.questionText,
+                options,
+                correctOptionIndex: Number(newQuestion.correctOptionIndex),
+                explanation: newQuestion.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
+              }
+            : q
+        ),
+      }));
+      setEditingQuestionId(null);
+      toast.success("প্রশ্নটি আপডেট করা হয়েছে!");
+    } else {
+      const questionItem: QuizQuestionItem = {
+        id: `q-${Date.now()}`,
+        questionText: newQuestion.questionText,
+        options,
+        correctOptionIndex: Number(newQuestion.correctOptionIndex),
+        explanation: newQuestion.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
+        marks: 1,
+      };
 
-    setItemForm((prev) => ({
-      ...prev,
-      quizQuestions: [...prev.quizQuestions, questionItem],
-    }));
+      setItemForm((prev) => ({
+        ...prev,
+        quizQuestions: [...prev.quizQuestions, questionItem],
+      }));
+      toast.success("প্রশ্ন কুইজে যোগ হয়েছে!");
+    }
 
     setNewQuestion({
       questionText: "",
@@ -846,11 +935,34 @@ export default function CourseContentBuilderAdmin({
       correctOptionIndex: 0,
       explanation: "",
     });
+  };
 
-    toast.success("প্রশ্ন কুইজে যোগ হয়েছে!");
+  const handleEditQuestionInQuiz = (q: QuizQuestionItem) => {
+    setEditingQuestionId(q.id);
+    setNewQuestion({
+      questionText: q.questionText,
+      optionA: q.options[0] || "",
+      optionB: q.options[1] || "",
+      optionC: q.options[2] || "",
+      optionD: q.options[3] || "",
+      correctOptionIndex: q.correctOptionIndex,
+      explanation: q.explanation || "",
+    });
   };
 
   const handleRemoveQuestion = (qId: string) => {
+    if (editingQuestionId === qId) {
+      setEditingQuestionId(null);
+      setNewQuestion({
+        questionText: "",
+        optionA: "",
+        optionB: "",
+        optionC: "",
+        optionD: "",
+        correctOptionIndex: 0,
+        explanation: "",
+      });
+    }
     setItemForm((prev) => ({
       ...prev,
       quizQuestions: prev.quizQuestions.filter((q) => q.id !== qId),
@@ -974,6 +1086,18 @@ export default function CourseContentBuilderAdmin({
             >
               <Play className="w-4 h-4" />
               <span>৩. সিকোয়েন্সিয়াল ফ্লো প্রিভিউ</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab("template_gallery")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeSubTab === "template_gallery"
+                  ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/20 scale-102"
+                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+              }`}
+            >
+              <Award className="w-4 h-4" />
+              <span>৪. কুইজ টেমপ্লেট গ্যালারি (Admin Preview)</span>
             </button>
           </div>
         </div>
@@ -1133,7 +1257,7 @@ export default function CourseContentBuilderAdmin({
                       <span>AI দিয়ে স্লাইড থেকে ব্লক বানান</span>
                     </button>
                     <button
-                      onClick={() => setShowChapterModal(true)}
+                      onClick={openAddChapterModal}
                       className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
@@ -1149,8 +1273,8 @@ export default function CourseContentBuilderAdmin({
                   <BookOpen className="w-8 h-8 text-slate-400 mx-auto" />
                   <p className="text-xs text-slate-500 font-bold">এই কোর্সে এখনও কোনো অধ্যায় নেই।</p>
                   <button
-                    onClick={() => setShowChapterModal(true)}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
+                    onClick={openAddChapterModal}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
                   >
                     প্রথম অধ্যায় যোগ করুন
                   </button>
@@ -1177,7 +1301,7 @@ export default function CourseContentBuilderAdmin({
                                 <span>{chapter.items.length} টি কনটেন্ট ব্লক</span>
                                 <span>·</span>
                                 <span className="text-emerald-600 dark:text-cyan-400 font-bold">
-                                  {chapter.unlockRule === "PREVIOUS_COMPLETED"
+                                   {chapter.unlockRule === "PREVIOUS_COMPLETED"
                                     ? "🔒 পূর্ববর্তী অধ্যায় সম্পন্নে আনলক"
                                     : "তাৎক্ষণিক উন্মুক্ত"}
                                 </span>
@@ -1188,7 +1312,7 @@ export default function CourseContentBuilderAdmin({
                             </div>
                           </div>
 
-                          {/* Chapter Actions: Add Blog, Add Quiz, Delete Chapter */}
+                          {/* Chapter Actions: Add Blog, Add Quiz, Edit Chapter, Delete Chapter */}
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
                               onClick={() => openAddItemModal(chapter.id, "BLOG_PART")}
@@ -1203,6 +1327,15 @@ export default function CourseContentBuilderAdmin({
                             >
                               <Award className="w-3.5 h-3.5" />
                               <span>+ চেকপয়েন্ট কুইজ</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditChapterModal(chapter)}
+                              className="px-3 py-1.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95"
+                              title="অধ্যায় তথ্য এডিট করুন"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                              <span>অধ্যায় এডিট ✏️</span>
                             </button>
                             <button
                               onClick={() => handleDeleteChapter(chapter.id)}
@@ -1335,8 +1468,17 @@ export default function CourseContentBuilderAdmin({
                                           <ArrowDown className="w-3.5 h-3.5" />
                                         </button>
                                         <button
+                                          type="button"
+                                          onClick={() => openEditItemModal(chapter.id, item)}
+                                          className="px-2.5 py-1 rounded-lg bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95"
+                                          title="ব্লক পার্ট এডিট ও আপডেট করুন (Edit)"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                                          <span>এডিট ✏️</span>
+                                        </button>
+                                        <button
                                           onClick={() => handleDeleteItem(item.id)}
-                                          className="p-1 text-slate-400 hover:text-rose-500 rounded-lg cursor-pointer"
+                                          className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition"
                                           title="মুছুন"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2106,6 +2248,311 @@ export default function CourseContentBuilderAdmin({
       )}
 
       {/* ========================================================================= */}
+      {/* SUB-TAB 4: QUIZ TEMPLATE GALLERY (ADMIN-ONLY PREVIEW & AUDIT)             */}
+      {/* ========================================================================= */}
+      {activeSubTab === "template_gallery" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="space-y-6"
+        >
+          {/* Studio Header */}
+          <div className="bg-slate-900 text-white p-6 sm:p-7 rounded-3xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  অ্যাডমিন-অনলি ডিজাইন স্টুডিও
+                </span>
+                <span className="text-xs text-slate-400 font-bold">
+                  (শিক্ষার্থীদের ইন্টারফেসে সম্পূর্ণ গোপন)
+                </span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-white">
+                ২০টি স্বতন্ত্র কুইজ টেমপ্লেট ও লাইভ থিম গ্যালারি
+              </h2>
+              <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                প্রতিটি টেমপ্লেট আলাদা লেআউট আইডেন্টিটি, টাইমার স্টাইল এবং কালারফুল ডার্ক ও লাইট মোড সমর্থন করে।
+                ডেস্কটপ ও ট্যাবলেটে বাধ্যতামূলক ২×২ গ্রিড বজায় রেখে ডিজাইন করা হয়েছে।
+              </p>
+            </div>
+
+            {/* Light / Dark Mode Toggle for Preview */}
+            <div className="flex items-center gap-2 p-1.5 bg-slate-800/90 rounded-2xl border border-slate-700/80 shrink-0 self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setGalleryPreviewTheme("light")}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                  galleryPreviewTheme === "light"
+                    ? "bg-amber-400 text-slate-950 shadow-md"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <span>☀️ Light Mode</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setGalleryPreviewTheme("dark")}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                  galleryPreviewTheme === "dark"
+                    ? "bg-indigo-600 text-white shadow-md"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <span>🌙 Dark Mode</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Template Selector List (4 cols) */}
+            <div className="lg:col-span-4 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 space-y-2.5 max-h-[750px] overflow-y-auto">
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2 pb-1 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <span>টেমপ্লেট তালিকা ({TWENTY_QUIZ_TEMPLATES.length} টি)</span>
+                <span className="text-[10px] text-emerald-600 font-mono">2x2 Grid Standard</span>
+              </div>
+
+              {TWENTY_QUIZ_TEMPLATES.map((tmpl, idx) => {
+                const isSelected = tmpl.id === selectedGalleryTemplateId;
+                return (
+                  <button
+                    key={tmpl.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedGalleryTemplateId(tmpl.id);
+                      setGallerySelectedOption(null);
+                    }}
+                    className={`w-full text-left p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                      isSelected
+                        ? "bg-purple-50 dark:bg-purple-950/40 border-purple-500 shadow-md ring-2 ring-purple-500/20"
+                        : "bg-slate-50/60 dark:bg-slate-850 border-slate-200/80 dark:border-slate-750 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <span
+                      className={`w-8 h-8 rounded-xl text-xs font-mono font-black flex items-center justify-center shrink-0 ${
+                        isSelected
+                          ? "bg-purple-600 text-white shadow-xs"
+                          : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
+                      }`}
+                    >
+                      {String(idx + 1).padStart(2, "0")}
+                    </span>
+
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+                          {tmpl.nameBangla}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 text-slate-600 dark:text-slate-400 shrink-0">
+                          {tmpl.timerStyle}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 leading-snug">
+                        {tmpl.tagline}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right Column: Live Interactive Template Stage (8 cols) */}
+            <div className="lg:col-span-8 space-y-4">
+              {(() => {
+                const currentTmpl =
+                  TWENTY_QUIZ_TEMPLATES.find((t) => t.id === selectedGalleryTemplateId) ||
+                  TWENTY_QUIZ_TEMPLATES[0];
+
+                const sampleQuestion = {
+                  id: "sample_q1",
+                  questionText:
+                    "কম্পিউটার মাদারবোর্ডে মাইক্রোপ্রসেসর ও হাই-স্পিড মেমোরির মধ্যে ডেটা আদান-প্রদান নিয়ন্ত্রণ করে নিচের কোনটি?",
+                  conceptTopic: "মাদারবোর্ড ও চিপসেট আর্কিটেকচার",
+                  options: [
+                    "নর্থব্রিজ (Northbridge) চিপসেট আর্কিটেকচার",
+                    "সাউথব্রিজ (Southbridge) আই/ও কন্ট্রোলার",
+                    "পাওয়ার সাপ্লাই ইউনিট (SMPS) রেগুলেটর",
+                    "সিডি/ডিভিডি ড্রাইভ ইন্টারফেস কন্ট্রোলার",
+                  ],
+                  correctIndex: 0,
+                  explanation:
+                    "নর্থব্রিজ চিপসেট সিপিইউ, র্যা ম ও গ্রাফিক্স কার্ডের মতো দ্রুতগতির বাসের ডেটা আদান-প্রদান সরাসরি নিয়ন্ত্রণ করে।",
+                };
+
+                return (
+                  <div
+                    className={`rounded-3xl p-6 sm:p-8 transition-all border shadow-2xl ${
+                      galleryPreviewTheme === "dark"
+                        ? "dark bg-[#0a0f1d] border-slate-800 text-slate-100"
+                        : "bg-slate-100 border-slate-300 text-slate-900"
+                    }`}
+                  >
+                    {/* Live Preview Bar */}
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-300/60 dark:border-slate-800 mb-6 text-xs font-bold text-slate-500 dark:text-slate-400">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>লাইভ প্রিভিউ স্টেজ: {currentTmpl.nameBangla}</span>
+                      </div>
+                      <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
+                        {galleryPreviewTheme.toUpperCase()} MODE
+                      </span>
+                    </div>
+
+                    {/* Template Canvas */}
+                    <div className={`p-5 sm:p-7 transition-all ${currentTmpl.containerCard}`}>
+                      {/* Question Header & Timer */}
+                      <div className="flex items-center justify-between gap-3 pb-3 border-b border-current/20 mb-4">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-black uppercase ${currentTmpl.badgeStyle}`}
+                          >
+                            প্রশ্ন ১ / ৫
+                          </span>
+                          <span className={`text-xs font-bold ${currentTmpl.headerAccent}`}>
+                            বিষয়: {sampleQuestion.conceptTopic}
+                          </span>
+                        </div>
+
+                        {/* Simulated Timer Badge */}
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-200/80 dark:bg-slate-800 text-xs font-mono font-bold">
+                          <Clock className="w-3.5 h-3.5 text-amber-500" />
+                          <span>30s CLOCK</span>
+                        </div>
+                      </div>
+
+                      {/* Question Text */}
+                      <h3 className="text-base sm:text-xl font-black leading-relaxed break-words mb-5">
+                        {sampleQuestion.questionText}
+                      </h3>
+
+                      {/* 2x2 Option Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full">
+                        {sampleQuestion.options.map((optText, optIdx) => {
+                          const letter = String.fromCharCode(65 + optIdx);
+                          const isSelected = gallerySelectedOption === optIdx;
+                          const isCorrect = optIdx === sampleQuestion.correctIndex;
+                          const hasAnswered = gallerySelectedOption !== null;
+
+                          let cardClass = currentTmpl.optionCardBase;
+                          if (hasAnswered) {
+                            if (isSelected) {
+                              cardClass = isCorrect
+                                ? currentTmpl.correctCard
+                                : currentTmpl.incorrectCard;
+                            } else if (isCorrect) {
+                              cardClass = currentTmpl.correctCard;
+                            } else {
+                              cardClass += " opacity-40";
+                            }
+                          }
+
+                          return (
+                            <button
+                              key={optIdx}
+                              type="button"
+                              onClick={() => setGallerySelectedOption(optIdx)}
+                              className={`w-full min-h-[4rem] p-3.5 sm:p-4 rounded-2xl border text-left flex items-start justify-between gap-3 text-xs sm:text-sm font-bold transition-all cursor-pointer ${cardClass}`}
+                            >
+                              <div className="flex items-start gap-3 min-w-0 flex-1">
+                                <span
+                                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${currentTmpl.optionLetterBadge}`}
+                                >
+                                  {letter}
+                                </span>
+                                <span className="leading-snug break-words text-wrap flex-1 pt-0.5">
+                                  {optText}
+                                </span>
+                              </div>
+
+                              {hasAnswered && isCorrect && (
+                                <span className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shrink-0">
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                </span>
+                              )}
+                              {hasAnswered && isSelected && !isCorrect && (
+                                <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0">
+                                  <X className="w-3.5 h-3.5 stroke-[3]" />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Simulated Feedback Banner */}
+                      {gallerySelectedOption !== null && (
+                        <div
+                          className={`p-4 rounded-2xl border transition-all mt-5 space-y-1 ${currentTmpl.feedbackBanner}`}
+                        >
+                          <div className="flex items-center gap-2 font-black text-xs sm:text-sm">
+                            {gallerySelectedOption === sampleQuestion.correctIndex ? (
+                              <>
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                <span>চমৎকার! আপনার উত্তরটি সঠিক হয়েছে।</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                                <span>উত্তরটি ভুল হয়েছে। সঠিক উত্তরটি দেখে নিন।</span>
+                              </>
+                            )}
+                          </div>
+                          <p className="text-xs leading-relaxed opacity-90 pt-1 border-t border-current/20">
+                            <strong>ব্যাখ্যা:</strong> {sampleQuestion.explanation}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Reset simulation button */}
+                      <div className="pt-4 mt-4 border-t border-current/20 flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-bold">
+                          ক্লিক করে বিকল্প বেছে দেখুন (Interactive Test)
+                        </span>
+                        {gallerySelectedOption !== null && (
+                          <button
+                            type="button"
+                            onClick={() => setGallerySelectedOption(null)}
+                            className="px-3 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold cursor-pointer hover:bg-slate-300"
+                          >
+                            পুনরায় নির্বাচন করুন 🔄
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Technical Specs Card */}
+                    <div className="mt-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                      <div className="font-mono font-bold text-slate-500 uppercase tracking-wider text-[11px]">
+                        টেকনিক্যাল স্পেসিফিকেশন ও টোকেন মেটাডাটা
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700 dark:text-slate-300">
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">লেআউট ডিরেকশন:</span>
+                          <span className="font-mono font-bold">{currentTmpl.layoutDirection}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">টাইমার স্টাইল:</span>
+                          <span className="font-mono font-bold">{currentTmpl.timerStyle}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">অপশন ম্যাট্রিক্স:</span>
+                          <span className="font-mono font-bold">2×2 MCQ Grid</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">স্টুডেন্ট এক্সপোজার:</span>
+                          <span className="font-bold text-emerald-600">গোপন (Hidden 🔒)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ========================================================================= */}
       {/* MODALS: CREATE COURSE, CREATE CHAPTER, ADD ITEM                           */}
       {/* ========================================================================= */}
       {/* Create Course Modal */}
@@ -2188,17 +2635,20 @@ export default function CourseContentBuilderAdmin({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
-                নতুন অধ্যায় যোগ করুন
+                {editingChapter ? "অধ্যায় এডিট ও আপডেট ✏️" : "নতুন অধ্যায় যোগ করুন"}
               </h3>
               <button
-                onClick={() => setShowChapterModal(false)}
+                onClick={() => {
+                  setShowChapterModal(false);
+                  setEditingChapter(null);
+                }}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateChapter} className="space-y-3 text-xs">
+            <form onSubmit={handleSaveChapter} className="space-y-3 text-xs">
               <div className="space-y-1">
                 <label className="font-bold text-slate-500">অধ্যায়ের নাম (বাংলায়)</label>
                 <input
@@ -2213,7 +2663,7 @@ export default function CourseContentBuilderAdmin({
                       title: e.target.value,
                     })
                   }
-                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold"
                 />
               </div>
 
@@ -2233,16 +2683,20 @@ export default function CourseContentBuilderAdmin({
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowChapterModal(false)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                  onClick={() => {
+                    setShowChapterModal(false);
+                    setEditingChapter(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer"
                 >
                   বাতিল
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  অধ্যায় যোগ করুন
+                  <Save className="w-4 h-4" />
+                  <span>{editingChapter ? "অধ্যায় আপডেট করুন ✏️" : "অধ্যায় যোগ করুন"}</span>
                 </button>
               </div>
             </form>
@@ -2256,11 +2710,17 @@ export default function CourseContentBuilderAdmin({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
-                {itemModalType === "BLOG_PART" ? "নতুন ব্লগ পার্ট যোগ" : "নতুন চেকপয়েন্ট কুইজ যোগ"}
+                {itemModalType === "BLOG_PART"
+                  ? (editingItem ? "ব্লগ পার্ট এডিট ও আপডেট ✏️" : "নতুন ব্লগ পার্ট যোগ")
+                  : (editingItem ? "চেকপয়েন্ট কুইজ এডিট ও আপডেট ✏️" : "নতুন চেকপয়েন্ট কুইজ যোগ")}
               </h3>
               <button
-                onClick={() => setShowItemModal(false)}
-                className="text-slate-400 hover:text-slate-600"
+                onClick={() => {
+                  setShowItemModal(false);
+                  setEditingItem(null);
+                  setEditingQuestionId(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2281,7 +2741,7 @@ export default function CourseContentBuilderAdmin({
                         title: e.target.value,
                       })
                     }
-                    className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold"
                   />
                 </div>
 
@@ -2353,25 +2813,36 @@ export default function CourseContentBuilderAdmin({
                             <p className="font-bold text-slate-800 dark:text-white">
                               {idx + 1}. {q.questionText}
                             </p>
-                            <span className="text-[10px] text-emerald-600 font-bold">
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
                               সঠিক উত্তর: {q.options[q.correctOptionIndex]}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveQuestion(q.id)}
-                            className="text-slate-400 hover:text-rose-500"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleEditQuestionInQuiz(q)}
+                              className="p-1 text-slate-400 hover:text-cyan-500 rounded-lg cursor-pointer transition"
+                              title="প্রশ্ন এডিট করুন"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQuestion(q.id)}
+                              className="p-1 text-slate-400 hover:text-rose-500 rounded-lg cursor-pointer transition"
+                              title="প্রশ্ন মুছুন"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
 
                     {/* New Question Form */}
                     <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-                      <span className="font-bold text-indigo-600 block text-[11px]">
-                        + নতুন প্রশ্ন যোগ করুন
+                      <span className="font-bold text-indigo-600 dark:text-indigo-400 block text-[11px]">
+                        {editingQuestionId ? "✏️ প্রশ্নটি সংশোধন / এডিট করুন" : "+ নতুন প্রশ্ন যোগ করুন"}
                       </span>
                       <input
                         type="text"
@@ -2446,14 +2917,36 @@ export default function CourseContentBuilderAdmin({
                           className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
                         />
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleAddQuestionToQuiz}
-                        className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>প্রশ্নটি যোগ করুন</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleAddQuestionToQuiz}
+                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer transition shadow-xs active:scale-95"
+                        >
+                          {editingQuestionId ? <Save className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                          <span>{editingQuestionId ? "প্রশ্ন আপডেট সংরক্ষণ" : "প্রশ্নটি যোগ করুন"}</span>
+                        </button>
+                        {editingQuestionId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingQuestionId(null);
+                              setNewQuestion({
+                                questionText: "",
+                                optionA: "",
+                                optionB: "",
+                                optionC: "",
+                                optionD: "",
+                                correctOptionIndex: 0,
+                                explanation: "",
+                              });
+                            }}
+                            className="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer transition"
+                          >
+                            বাতিল
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2462,16 +2955,21 @@ export default function CourseContentBuilderAdmin({
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowItemModal(false)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                  onClick={() => {
+                    setShowItemModal(false);
+                    setEditingItem(null);
+                    setEditingQuestionId(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer transition"
                 >
                   বাতিল
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-xs cursor-pointer"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition active:scale-95"
                 >
-                  সংরক্ষণ করুন
+                  <Save className="w-4 h-4" />
+                  <span>{editingItem ? "আপডেট সংরক্ষণ করুন ✏️" : "ব্লক যোগ করুন"}</span>
                 </button>
               </div>
             </form>

@@ -10,11 +10,34 @@ import {
   Play,
   Sparkles,
   Zap,
+  Rocket,
+  Shield,
+  Gem,
+  Target,
+  Star,
+  Crown,
+  Trophy,
+  Flame,
+  Check,
 } from "lucide-react";
 import {
   ChapterContentItemData,
   EnrichedContentItem,
 } from "@/lib/chapterLearningEngine";
+import GamifiedEdTechBackground from "@/components/learning/GamifiedEdTechBackground";
+
+
+// Progressive Reward & Milestone Icon Sequence
+const PROGRESSIVE_ICONS = [
+  { icon: Rocket, name: "রকেট স্টার্ট", color: "text-amber-300", bg: "from-amber-500 to-rose-500", border: "border-b-rose-800", shadow: "#9f1239" },
+  { icon: Zap, name: "এনার্জি পাওয়ার", color: "text-yellow-300", bg: "from-yellow-400 to-amber-600", border: "border-b-amber-800", shadow: "#92400e" },
+  { icon: Shield, name: "গোল্ডেন শিল্ড", color: "text-emerald-300", bg: "from-emerald-400 to-teal-600", border: "border-b-teal-800", shadow: "#115e59" },
+  { icon: Gem, name: "ডায়মন্ড মাস্টার", color: "text-cyan-300", bg: "from-cyan-400 to-blue-600", border: "border-b-blue-800", shadow: "#1e40af" },
+  { icon: Target, name: "বুলসআই টার্গেট", color: "text-rose-300", bg: "from-rose-400 to-pink-600", border: "border-b-pink-800", shadow: "#9d174d" },
+  { icon: Star, name: "সুপার স্টার", color: "text-amber-200", bg: "from-amber-400 to-orange-600", border: "border-b-orange-800", shadow: "#9a3412" },
+  { icon: Crown, name: "মাস্টার ক্রাউন", color: "text-purple-300", bg: "from-purple-500 to-indigo-600", border: "border-b-indigo-800", shadow: "#3730a3" },
+  { icon: Trophy, name: "গ্র্যান্ড ট্রফি", color: "text-yellow-200", bg: "from-amber-400 to-yellow-600", border: "border-b-yellow-800", shadow: "#854d0e" },
+];
 
 interface CurvedPathwayRoadmapProps {
   items: (ChapterContentItemData | EnrichedContentItem)[];
@@ -35,46 +58,52 @@ export function CurvedPathwayRoadmap({
   completedCount = 0,
   totalCount = 0,
 }: CurvedPathwayRoadmapProps) {
-  // Find index of the currently active item
+  // Active milestone index tracking
   const activeIndex = items.findIndex((it) => it.id === activeItemId);
 
   return (
-    <div className="w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-6">
+    <div className="w-full rounded-3xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800/80 p-4 sm:p-6 shadow-xl space-y-6 relative overflow-hidden">
+      {/* Gamified EdTech Background: Floating Gadgets, Luminous Energy Grid & Quiz Formulas */}
+      <GamifiedEdTechBackground variant="roadmap" showGadgets={true} showQuizFormulas={true} />
+
+
       {/* Roadmap Header & Progress Bar */}
-      <div className="space-y-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+      <div className="space-y-2.5 pb-3.5 border-b border-slate-200 dark:border-slate-800 relative z-10">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-cyan-500" />
-            <span>কার্ভড লার্নিং রোডম্যাপ (Curved Pathway)</span>
+          <span className="font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <span className="p-1.5 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
+              <Sparkles className="w-4 h-4" />
+            </span>
+            <span>শিক্ষণ রোডম্যাপ</span>
           </span>
-          <span className="font-mono text-cyan-600 dark:text-cyan-400 font-bold text-[11px]">
+          <span className="font-mono text-emerald-600 dark:text-cyan-400 font-extrabold text-xs px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-cyan-950/50 border border-emerald-200 dark:border-cyan-800">
             {progressPercentage}% সম্পন্ন
           </span>
         </div>
 
         {/* Sleek Progress Track */}
-        <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+        <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800/80 rounded-full overflow-hidden p-0.5 border border-slate-200/60 dark:border-slate-700/60">
           <motion.div
-            className="h-full bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-500 rounded-full"
+            className="h-full bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-500 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.5)]"
             initial={{ width: 0 }}
             animate={{ width: `${progressPercentage}%` }}
             transition={{ duration: 0.8, ease: "easeOut" }}
           />
         </div>
 
-        <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+        <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-bold">
           <span>
             ধাপ {activeIndex >= 0 ? activeIndex + 1 : 1} / {items.length}
           </span>
-          <span>
-            {completedCount}/{totalCount || items.length} পাঠ শেষ
+          <span className="text-emerald-600 dark:text-emerald-400 font-black">
+            {completedCount}/{totalCount || items.length} পাঠ শেষ ✨
           </span>
         </div>
       </div>
 
       {/* Serpentine Zigzag SVG Road Container */}
-      <div className="py-2 px-1 relative">
-        <div className="max-w-[280px] sm:max-w-xs mx-auto space-y-8 relative">
+      <div className="py-2 px-1 relative z-10">
+        <div className="max-w-[280px] sm:max-w-xs mx-auto space-y-9 relative">
           {items.map((item, idx) => {
             const enriched = item as Partial<EnrichedContentItem>;
             const isQuiz = item.itemType === "QUIZ";
@@ -102,12 +131,16 @@ export function CurvedPathwayRoadmap({
             const isCurrentActive = item.id === activeItemId;
             const isCurrentNext = enriched.isCurrentNextStep || (!isPassed && !isLocked);
 
+            // Progressive icon for this step
+            const progressiveData = PROGRESSIVE_ICONS[idx % PROGRESSIVE_ICONS.length];
+            const MilestoneIcon = isQuiz ? Trophy : progressiveData.icon;
+
             // Serpentine Zigzag Horizontal Alternation: [Center, Left, Center, Right]
             const alignments = [
               "justify-center",
-              "justify-start pl-4 sm:pl-6",
+              "justify-start pl-3 sm:pl-5",
               "justify-center",
-              "justify-end pr-4 sm:pr-6",
+              "justify-end pr-3 sm:pr-5",
             ];
             const alignClass = alignments[idx % alignments.length];
 
@@ -136,9 +169,9 @@ export function CurvedPathwayRoadmap({
                     {isCurrentActive && (
                       <motion.div
                         initial={{ y: -4, opacity: 0 }}
-                        animate={{ y: [0, -4, 0], opacity: 1 }}
+                        animate={{ y: [0, -5, 0], opacity: 1 }}
                         transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                        className="mb-1.5 px-2.5 py-0.5 rounded-full bg-cyan-400 text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 z-20 cursor-pointer select-none"
+                        className="mb-2 px-3 py-1 rounded-full bg-gradient-to-r from-cyan-400 to-indigo-500 text-white text-[10px] font-black uppercase tracking-wider shadow-lg shadow-cyan-500/30 flex items-center gap-1.5 z-20 cursor-pointer select-none"
                         onClick={handleNodeClick}
                       >
                         <Play className="w-2.5 h-2.5 fill-current" />
@@ -146,46 +179,50 @@ export function CurvedPathwayRoadmap({
                       </motion.div>
                     )}
 
-                    {/* Subtle Micro-Pulse Ring (ring-2, sleek 6px pulse) */}
+                    {/* Subtle Micro-Pulse Ring (ring-4 pulse for active node) */}
                     {isCurrentActive && (
                       <motion.div
-                        className="absolute -inset-1 rounded-full pointer-events-none z-0 ring-2 ring-cyan-500/50"
+                        className="absolute -inset-1.5 rounded-full pointer-events-none z-0 ring-4 ring-cyan-400/60"
                         animate={{
-                          opacity: [0.4, 0.9, 0.4],
-                          scale: [1, 1.05, 1],
+                          opacity: [0.3, 0.9, 0.3],
+                          scale: [0.98, 1.08, 0.98],
                         }}
-                        transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+                        transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
                       />
                     )}
 
-                    {/* Milestone Button (w-12 h-12 sm:w-14 sm:h-14) */}
+                    {/* Milestone Button with Duolingo-style 3D Depth & Teasing Preview */}
                     <button
                       type="button"
                       onClick={handleNodeClick}
-                      disabled={isLocked}
-                      className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center font-black transition-all relative z-10 border-2 select-none ${
+                      className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center font-black transition-all relative z-10 select-none cursor-pointer ${
                         isLocked
-                          ? "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-300 dark:border-slate-700 cursor-not-allowed opacity-70"
+                          ? "bg-slate-100/90 dark:bg-slate-800/80 text-slate-400 border-2 border-slate-300 dark:border-slate-700 border-b-4 border-b-slate-400 dark:border-b-slate-700 hover:border-amber-400/60 transition-all shadow-xs"
                           : isPassed
-                          ? "bg-gradient-to-b from-emerald-400 to-emerald-600 text-white shadow-sm border-emerald-500 cursor-pointer hover:scale-105 active:scale-95"
+                          ? "bg-gradient-to-b from-emerald-400 to-emerald-600 text-white border-2 border-emerald-300 border-b-4 border-b-emerald-800 shadow-[0_4px_0_#065f46,0_0_20px_rgba(16,185,129,0.45)] hover:brightness-110 active:border-b-0 active:translate-y-1 active:shadow-none"
                           : isCurrentActive
-                          ? "bg-gradient-to-b from-cyan-500 to-indigo-600 text-white border-cyan-300 ring-2 ring-cyan-500/40 shadow-sm cursor-pointer hover:scale-105 active:scale-95"
-                          : "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border-indigo-400 shadow-xs cursor-pointer hover:scale-105 active:scale-95"
+                          ? `bg-gradient-to-b ${progressiveData.bg} text-white border-2 border-white/60 border-b-4 ${progressiveData.border} shadow-[0_4px_0_${progressiveData.shadow},0_0_25px_rgba(6,182,212,0.6)] ring-4 ring-cyan-400/40 hover:brightness-110 active:border-b-0 active:translate-y-1 active:shadow-none`
+                          : `bg-gradient-to-b from-indigo-500 to-purple-600 text-white border-2 border-indigo-300 border-b-4 border-b-purple-900 shadow-[0_4px_0_#581c87,0_0_15px_rgba(99,102,241,0.35)] hover:brightness-110 active:border-b-0 active:translate-y-1 active:shadow-none`
                       }`}
-                      title={isLocked ? `লক করা ধাপ (Locked 🔒)` : item.titleBangla}
+                      title={isLocked ? `লক করা ধাপ (পূর্ববর্তী পাঠ সম্পন্ন করে আনলক করুন 🔒): ${item.titleBangla}` : item.titleBangla}
                     >
                       {isPassed ? (
-                        <CheckCircle2 className="w-5 h-5 text-white filter drop-shadow-xs" />
-                      ) : isCurrentActive ? (
-                        isQuiz ? (
-                          <Award className="w-5 h-5 text-white filter drop-shadow-xs" />
-                        ) : (
-                          <BookOpen className="w-5 h-5 text-white filter drop-shadow-xs" />
-                        )
+                        <div className="relative flex items-center justify-center">
+                          <CheckCircle2 className="w-7 h-7 text-white filter drop-shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+                          <span className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-emerald-600 text-[8px] font-black shadow-xs">
+                            ✓
+                          </span>
+                        </div>
                       ) : isLocked ? (
-                        <Lock className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                        <div className="relative flex items-center justify-center">
+                          {/* Teasing Locked Milestone Icon with subtle opacity & blur */}
+                          <MilestoneIcon className="w-7 h-7 text-slate-400 dark:text-slate-500 opacity-50 blur-[0.5px] group-hover:opacity-75 transition-all" />
+                          <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-slate-900/90 text-amber-400 shadow-md border border-slate-700">
+                            <Lock className="w-2.5 h-2.5" />
+                          </div>
+                        </div>
                       ) : (
-                        <span className="text-xs font-black">{idx + 1}</span>
+                        <MilestoneIcon className={`w-7 h-7 ${isCurrentActive ? "text-white" : progressiveData.color} filter drop-shadow-[0_0_6px_rgba(255,255,255,0.5)]`} />
                       )}
                     </button>
 
@@ -194,29 +231,37 @@ export function CurvedPathwayRoadmap({
                       onClick={handleNodeClick}
                       className="mt-2 text-center max-w-[140px] sm:max-w-[160px] cursor-pointer group-hover:scale-102 transition-transform"
                     >
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
-                          isLocked
-                            ? "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500"
-                            : isCurrentActive
-                            ? "bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800"
-                            : isPassed
-                            ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                        }`}
-                      >
-                        {isQuiz
-                          ? "কুইজ"
-                          : `ব্লগ পার্ট ${item.blogPartNumber || idx + 1}`}
-                      </span>
+                      {/* Completed celebration badge */}
+                      {isPassed ? (
+                        <div className="mb-1 flex items-center justify-center">
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-black border border-emerald-500/30 flex items-center gap-1 shadow-xs">
+                            <span>✅ সম্পন্ন</span>
+                          </span>
+                        </div>
+                      ) : (
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
+                            isLocked
+                              ? "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500"
+                              : isCurrentActive
+                              ? "bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800"
+                              : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                          }`}
+                        >
+                          {isQuiz
+                            ? "🏆 কুইজ"
+                            : `${progressiveData.name} · পার্ট ${item.blogPartNumber || idx + 1}`}
+                        </span>
+                      )}
 
                       <p className="text-[11px] sm:text-xs font-black text-slate-900 dark:text-white truncate mt-0.5">
                         {item.titleBangla}
                       </p>
 
                       <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
-                        <span className="font-bold text-amber-500">
-                          +{item.xpReward} XP
+                        <span className="font-bold text-amber-500 flex items-center gap-0.5">
+                          <Flame className="w-3 h-3 fill-amber-500 text-amber-500" />
+                          <span>+{item.xpReward} XP</span>
                         </span>
                         {item.durationMinutes && (
                           <>

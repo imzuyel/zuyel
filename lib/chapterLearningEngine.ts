@@ -47,6 +47,7 @@ export interface ChapterContentItemData {
   shuffleQuestions?: boolean;
   showCorrectAnswersAfter?: boolean;
 
+  slug?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,6 +56,7 @@ export interface CourseChapterItem {
   id: number;
   courseId: number;
   chapterNumber: number;
+  slug?: string;
   title: string;
   titleBangla: string;
   description: string;
@@ -70,6 +72,7 @@ export interface CourseChapterItem {
 export interface CourseItem {
   id: number;
   code: string; // e.g. "CRS-VOC-EE-901"
+  slug?: string;
   title: string;
   titleBangla: string;
   description: string;
@@ -94,6 +97,7 @@ export interface CourseItem {
   updatedAt: string;
 }
 
+
 export type StudentItemStatus = "LOCKED" | "UNLOCKED" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
 
 export interface StudentItemProgressData {
@@ -109,7 +113,7 @@ export interface StudentItemProgressData {
   xpEarned: number;
   completedAt?: string;
   timeSpentSeconds: number;
-  answers?: Record<string, number>;
+  answers?: Record<string, number | string>;
 }
 
 export interface EnrichedContentItem extends ChapterContentItemData {
@@ -146,19 +150,19 @@ export interface EnrichedCourse extends Omit<CourseItem, "chapters"> {
 const INITIAL_COURSES: CourseItem[] = [
   {
     id: 1,
-    code: "CRS-EE-901",
+    code: "CRS-GEW-901",
     title: "Electrical Safety & Circuit Analysis (Ohm's Law)",
     titleBangla: "ইলেকট্রিক্যাল সেফটি, সার্কিট বিশ্লেষণ ও ওহমের সূত্র",
     description: "বাংলাদেশ কারিগরি শিক্ষা বোর্ডের নবম শ্রেণির শিক্ষার্থীদের জন্য ওহমের সূত্র, সার্কিট উপাদান, সিরিজ-প্যারালাল সংযোগ ও ল্যাব সেফটি প্রটোকলের পূর্ণাঙ্গ সিকোয়েন্সিয়াল লার্নিং পথ।",
     classId: 9,
     className: "Class 9 (Vocational)",
     numericClass: 9,
-    tradeId: 1,
-    tradeCode: "EE",
-    tradeName: "Electrical Works (ইলেকট্রিক্যাল)",
+    tradeId: 103,
+    tradeCode: "GEW",
+    tradeName: "General Electrical Workshop (জেনারেল ইলেকট্রিক্যাল ওয়ার্কশপ)",
     subjectId: 101,
-    subjectCode: "EE-101",
-    subjectName: "ইলেকট্রিক্যাল ওয়ার্কস ও সেফটি-১",
+    subjectCode: "GEW-101",
+    subjectName: "জেনারেল ইলেকট্রিক্যাল ওয়ার্কশপ-১",
     thumbnailUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=800&auto=format&fit=crop&q=80",
     badgeGradient: "from-amber-600 to-orange-700",
     isPublished: true,
@@ -494,12 +498,12 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
     classId: 10,
     className: "Class 10 (Vocational)",
     numericClass: 10,
-    tradeId: 2,
-    tradeCode: "IT-IoT",
-    tradeName: "Computer & IoT (কম্পিউটার ও আইওটি)",
+    tradeId: 102,
+    tradeCode: "IT-IOT",
+    tradeName: "IT Support & IoT Basics (আইটি সাপোর্ট এন্ড আইওটি বেসিক্স)",
     subjectId: 201,
-    subjectCode: "IT-201",
-    subjectName: "কম্পিউটার ও আইওটি অ্যাপ্লিকেশন-২",
+    subjectCode: "IT-IOT-201",
+    subjectName: "আইটি সাপোর্ট ও আইওটি বেসিক্স-২",
     thumbnailUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=80",
     badgeGradient: "from-cyan-600 to-blue-700",
     isPublished: true,
@@ -603,20 +607,20 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
   },
   {
     id: 3,
-    code: "CRS-AMB-901",
-    title: "Automobile Engine Mechanics & Internal Combustion Engines",
-    titleBangla: "অটোমোবাইল ইঞ্জিন মেকানিক্স ও লুব্রিকেশন সিস্টেম",
-    description: "নবম শ্রেণির অটোমোবাইল ট্রেডের শিক্ষার্থীদের জন্য ফোর-স্ট্রোক ও টু-স্ট্রোক ইন্টারনাল কম্বাশন ইঞ্জিন এবং লুব্রিকেশন সিস্টেমের অধ্যায়ভিত্তিক পাঠ্যক্রম।",
+    code: "CRS-CE-901",
+    title: "Consumer Electronics: Circuit Diagnostics & Home Appliances",
+    titleBangla: "কনজিউমার ইলেকট্রনিক্স: সার্কিট ডায়াগনোসিস ও হোম অ্যাপ্লায়েন্স",
+    description: "বাংলাদেশ কারিগরি শিক্ষা বোর্ডের নবম শ্রেণির শিক্ষার্থীদের জন্য সেমিকন্ডাক্টর ডায়োড, রেকটিফায়ার, ফিল্টার সার্কিট ও কনজিউমার অডিও-ভিডিও ডিভাইসের অধ্যায়ভিত্তিক পাঠ্যক্রম।",
     classId: 9,
     className: "Class 9 (Vocational)",
     numericClass: 9,
-    tradeId: 4,
-    tradeCode: "AMB",
-    tradeName: "Automobile (অটোমোবাইল)",
+    tradeId: 101,
+    tradeCode: "CE",
+    tradeName: "Consumer Electronics (কনজিউমার ইলেকট্রনিক্স)",
     subjectId: 301,
-    subjectCode: "AMB-101",
-    subjectName: "অটোমোবাইল বেসিক্স ও ইঞ্জিন-১",
-    thumbnailUrl: "https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=800&auto=format&fit=crop&q=80",
+    subjectCode: "CE-101",
+    subjectName: "কনজিউমার ইলেকট্রনিক্স ও সার্কিট-১",
+    thumbnailUrl: "https://images.unsplash.com/photo-1588508065123-287b28e013da?w=800&auto=format&fit=crop&q=80",
     badgeGradient: "from-rose-600 to-red-800",
     isPublished: true,
     orderIndex: 3,
@@ -630,9 +634,9 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
         id: 301,
         courseId: 3,
         chapterNumber: 1,
-        title: "Four-Stroke Internal Combustion Engine Operating Cycle",
-        titleBangla: "অধ্যায় ১: ফোর-স্ট্রোক আইসি ইঞ্জিন অপারেটিং সাইকেল",
-        description: "সাকশন, কম্প্রেশন, পাওয়ার ও এগজস্ট স্ট্রোকের ধারাবাহিক পর্যায়।",
+        title: "Semiconductor Diodes, Rectifiers & DC Power Supply Architecture",
+        titleBangla: "অধ্যায় ১: সেমিকন্ডাক্টর ডায়োড ও ডিসি পাওয়ার সাপ্লাই আর্কিটেকচার",
+        description: "পি-এন জংশন ডায়োড, হাফ-ওয়েভ ও ফুল-ওয়েভ ব্রিজ রেকটিফায়ার ও ফিল্টারিং সার্কিট।",
         orderIndex: 1,
         isPublished: true,
         unlockRule: "IMMEDIATE",
@@ -645,8 +649,8 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
             chapterId: 301,
             orderIndex: 1,
             itemType: "BLOG_PART",
-            title: "Part 1: The Four Strokes of an Internal Combustion Engine",
-            titleBangla: "১.১ ব্লগ পার্ট ১: ফোর-স্ট্রোক ইঞ্জিনের চারটি প্রধান ধাপ",
+            title: "Part 1: PN Junction Diode Principles & Bridge Rectifier Operation",
+            titleBangla: "১.১ ব্লগ পার্ট ১: পি-এন জংশন ডায়োড ও ব্রিজ রেকটিফায়ারের মূলনীতি",
             isPublished: true,
             isMandatory: true,
             xpReward: 50,
@@ -657,22 +661,24 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
             durationMinutes: 6,
             blogPartNumber: 1,
             readTimeMinutes: 5,
-            summary: "সাকশন, কম্প্রেশন, পাওয়ার এবং এগজস্ট—এই ৪টি স্ট্রোকে ক্র্যাঙ্কশ্যাফট দুইবার (৭২০ ডিগ্রি) ঘুরে একটি সাইকেল সম্পন্ন করে।",
+            summary: "ডায়োড একমুখী বিদ্যুৎ প্রবাহের অর্ধপরিবাহী ডিভাইস। ৪টি ডায়োড দিয়ে ব্রিজ রেকটিফায়ার তৈরি করা হয়।",
             keyTakeaways: [
-              "১. সাকশন স্ট্রোক: পিস্টন TDC থেকে BDC-তে নামে, ফুয়েল-এয়ার মিক্সচার সিলিন্ডারে প্রবেশ করে।",
-              "২. কম্প্রেশন স্ট্রোক: ভালভ বন্ধ থাকে, মিশ্রণকে সংকুচিত করা হয়।",
-              "৩. পাওয়ার স্ট্রোক: স্পার্ক প্লাগ স্পার্ক করে, উচ্চ চাপে পিস্টন নিচে নামে।",
-              "৪. এগজস্ট স্ট্রোক: পোড়া গ্যাস বের হয়ে যায়।"
+              "১. সিলিকন ডায়োডের ব্যারিয়ার পটেনশিয়াল প্রায় ০.৭ ভোল্ট (0.7V) এবং জার্মেনিয়ামের ০.৩ ভোল্ট।",
+              "২. ফরওয়ার্ড বায়াসে ডায়োড পরিবাহী এবং রিভার্স বায়াসে অপরিবাহী হিসেবে কাজ করে।",
+              "৩. এসি (AC) ভোল্টেজকে ডিসি (DC) ভোল্টেজে রূপান্তর করাকে রেকটিফিকেশন বলে।",
+              "৪. ফিল্টার ক্যাপাসিটর ডিসি আউটপুটের রিপল (Ripple) দূর করে মসৃণ ডিসি প্রদান করে।"
             ],
-            contentMarkdown: `# ১.১ ফোর-স্ট্রোক আইসি ইঞ্জিন সাইকেল
+            contentMarkdown: `# ১.১ সেমিকন্ডাক্টর ডায়োড ও ডিসি পাওয়ার সাপ্লাই
 
-ইন্টারনাল কম্বাশন (IC) ইঞ্জিনে রাসায়নিক শক্তি তাপ শক্তিতে এবং অতঃপর যান্ত্রিক শক্তিতে রূপান্তরিত হয়।
+কনজিউমার ইলেকট্রনিক্স পণ্যে যেমন টেলিভিশন, অডিও এমপ্লিফায়ার ও কম্পিউটার চার্জারে ডিসি পাওয়ার সাপ্লাই একটি অপরিহার্য অংশ।
 
-## ৪টি স্ট্রোকের বিবরণ
-1. **সাকশন স্ট্রোক (Suction Stroke):** পিস্টন TDC (Top Dead Center) হতে BDC (Bottom Dead Center)-এ আসে।
-2. **কম্প্রেশন স্ট্রোক (Compression Stroke):** উভয় ভালভ বন্ধ থাকে এবং গ্যাস সংকুচিত হয়।
-3. **পাওয়ার স্ট্রোক (Power Stroke):** কম্বাশন ঘটে পিস্টনকে প্রচণ্ড শক্তিতে ধাক্কা দেয়।
-4. **এগজস্ট স্ট্রোক (Exhaust Stroke):** পোড়া ধোঁয়া সিলিন্ডার ত্যাগ করে।`,
+## ১. পি-এন জংশন ডায়োডের বৈশিষ্ট্য
+ডায়োড হলো একটি দুই প্রান্তবিশিষ্ট (Anode ও Cathode) সেমিকন্ডাক্টর ডিভাইস।
+- **ফরওয়ার্ড বায়াস:** অ্যানোড পজিটিভ ও ক্যাথোড নেগেটিভ হলে ব্যারিয়ার অতিক্রম করে তড়িৎ প্রবাহিত হয়।
+- **রিভার্স বায়াস:** বিপরীত সংযোগে কেবল সামান্য লিকেজ কারেন্ট ছাড়া বিদ্যুৎ প্রবাহ বন্ধ থাকে।
+
+## ২. ব্রিজ রেকটিফায়ার
+একটি পূর্ণাঙ্গ ফুল-ওয়েভ ব্রিজ রেকটিফায়ারে ৪টি ডায়োড ডায়মন্ড ব্রিজের মতো সাজানো থাকে। এসি সিগন্যালের উভয় অর্ধ-চক্রেই আউটপুট লোডে একই দিকে কারেন্ট প্রবাহিত হয়।`,
             createdAt: "2026-01-15T00:00:00.000Z",
             updatedAt: "2026-02-01T00:00:00.000Z",
           },
@@ -681,8 +687,8 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
             chapterId: 301,
             orderIndex: 2,
             itemType: "QUIZ",
-            title: "Quiz 1: Engine Stroke Cycle Diagnostic",
-            titleBangla: "১.২ কুইজ ১: ইঞ্জিন স্ট্রোক ও পিস্টন মোশন যাচাই",
+            title: "Quiz 1: Diode Characteristics & Rectifier Circuit Diagnostic",
+            titleBangla: "১.২ কুইজ ১: ডায়োড ও ব্রিজ রেকটিফায়ার সার্কিট যাচাই",
             isPublished: true,
             isMandatory: true,
             xpReward: 60,
@@ -697,18 +703,18 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
             quizQuestions: [
               {
                 id: "q-3002-1",
-                questionText: "ফোর-স্ট্রোক ইঞ্জিনে পাওয়ার স্ট্রোকে পিস্টন কোন দিকে যায়?",
-                options: ["TDC হতে BDC এর দিকে (নিচে)", "BDC হতে TDC এর দিকে (উপরে)", "স্থির থাকে", "ডানে-বামে ঘোরে"],
-                correctOptionIndex: 0,
-                explanation: "জ্বালানি প্রজ্বলনের ফলে উচ্চ চাপে পিস্টন ওপর থেকে নিচের দিকে (TDC to BDC) নামে।",
+                questionText: "সাধারণ সিলিকন পি-এন জংশন ডায়োডের ব্যারিয়ার পটেনশিয়াল (Barrier Potential) কত?",
+                options: ["০.৩ ভোল্ট (0.3 V)", "০.৭ ভোল্ট (0.7 V)", "১.৫ ভোল্ট (1.5 V)", "২.০ ভোল্ট (2.0 V)"],
+                correctOptionIndex: 1,
+                explanation: "সিলিকন ডায়োডের অভ্যন্তরীণ ব্যারিয়ার পটেনশিয়াল প্রায় ০.৭ ভোল্ট এবং জার্মেনিয়ামের ০.৩ ভোল্ট।",
                 marks: 1
               },
               {
                 id: "q-3002-2",
-                questionText: "ফোর-স্ট্রোক সাইকেলে ক্র্যাঙ্কশ্যাফট কত ডিগ্রি ঘোরে?",
-                options: ["৩৬০ ডিগ্রি", "৭২০ ডিগ্রি", "১৮০ ডিগ্রি", "৫৪০ ডিগ্রি"],
-                correctOptionIndex: 1,
-                explanation: "৪টি স্ট্রোকে পিস্টন ৪ বার ওঠানামা করে এবং ক্র্যাঙ্কশ্যাফট ২ বার পূর্ণ আবর্তন (৭২০ ডিগ্রি) সম্পন্ন করে।",
+                questionText: "একটি আদর্শ ব্রিজ রেকটিফায়ার তৈরিতে কয়টি ডায়োড প্রয়োজন হয়?",
+                options: ["১টি", "২টি", "৪টি", "৬টি"],
+                correctOptionIndex: 2,
+                explanation: "ফুল-ওয়েভ ব্রিজ রেকটিফায়ারে ৪টি ডায়োড ব্রিজ আকারে সংযুক্ত থাকে।",
                 marks: 1
               }
             ],
@@ -1067,9 +1073,9 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
     classId: 11,
     className: "Class 11 (HSC Vocational)",
     numericClass: 11,
-    tradeId: 201,
-    tradeCode: "HSC-T1",
-    tradeName: "Computer & IoT System (কম্পিউটার অ্যান্ড আইওটি সিস্টেম)",
+    tradeId: 202,
+    tradeCode: "IT-IOT",
+    tradeName: "IT Support & IoT Basics (আইটি সাপোর্ট এন্ড আইওটি বেসিক্স)",
     subjectId: 701,
     subjectCode: "IOT-1101",
     subjectName: "এডভান্সড আইওটি ও এমবেডেড সিস্টেম",
@@ -1183,12 +1189,12 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
     classId: 12,
     className: "Class 12 (HSC Vocational)",
     numericClass: 12,
-    tradeId: 203,
-    tradeCode: "HSC-T3",
-    tradeName: "Electronic Control & Communication (ইলেকট্রনিক কন্ট্রোল)",
+    tradeId: 201,
+    tradeCode: "CE",
+    tradeName: "Consumer Electronics (কনজিউমার ইলেকট্রনিক্স)",
     subjectId: 801,
-    subjectCode: "PLC-1201",
-    subjectName: "ইন্ডাস্ট্রিয়াল কন্ট্রোল ও পিএলসি",
+    subjectCode: "CE-1201",
+    subjectName: "ইন্ডাস্ট্রিয়াল কন্ট্রোল ও ইলেকট্রনিক্স",
     thumbnailUrl: "https://images.unsplash.com/photo-1581092335397-9583fe92d232?w=800&auto=format&fit=crop&q=80",
     badgeGradient: "from-purple-600 to-indigo-900",
     isPublished: true,
@@ -1294,6 +1300,123 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
         ]
       }
     ]
+  },
+  {
+    id: 9,
+    code: "CRS-AMB-1001",
+    title: "Apparel Manufacturing Basics: Industrial Sewing & Pattern Technology",
+    titleBangla: "এপারেল ম্যানুফ্যাকচারিং বেসিক্স: প্যাটার্ন মেকিং ও সুইং টেকনোলজি",
+    description: "দশম শ্রেণির শিক্ষার্থীদের জন্য গার্মেন্টস প্যাটার্ন মেকিং, সিঙ্গেল নিডেল লকস্টিচ মেশিন অপারেশন ও কোয়ালিটি কন্ট্রোল সিকোয়েন্স।",
+    classId: 10,
+    className: "Class 10 (Vocational)",
+    numericClass: 10,
+    tradeId: 104,
+    tradeCode: "AMB",
+    tradeName: "Apparel Manufacturing Basics (এপারেল ম্যানুফ্যাকচারিং বেসিক্স)",
+    subjectId: 901,
+    subjectCode: "AMB-201",
+    subjectName: "এপারেল ম্যানুফ্যাকচারিং টেকনোলজি-২",
+    thumbnailUrl: "https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=800&auto=format&fit=crop&q=80",
+    badgeGradient: "from-pink-600 to-rose-700",
+    isPublished: true,
+    orderIndex: 9,
+    totalXp: 380,
+    estimatedHours: 8.0,
+    difficulty: "Intermediate",
+    createdAt: "2026-02-05T00:00:00.000Z",
+    updatedAt: "2026-02-05T00:00:00.000Z",
+    chapters: [
+      {
+        id: 901,
+        courseId: 9,
+        chapterNumber: 1,
+        title: "Industrial Lockstitch Sewing Machine Mechanism & Needle Systems",
+        titleBangla: "অধ্যায় ১: ইন্ডাস্ট্রিয়াল লকস্টিচ মেশিন মেকানিজম ও নিডেল সিস্টেম",
+        description: "সিঙ্গেল নিডেল লকস্টিচ (SNLS) মেশিনের পার্টস, ববিন কেস, থ্রেড টেনশন ও সেফটি।",
+        orderIndex: 1,
+        isPublished: true,
+        unlockRule: "IMMEDIATE",
+        requiredMinXp: 0,
+        createdAt: "2026-02-05T00:00:00.000Z",
+        updatedAt: "2026-02-05T00:00:00.000Z",
+        items: [
+          {
+            id: 9001,
+            chapterId: 901,
+            orderIndex: 1,
+            itemType: "BLOG_PART",
+            title: "Part 1: Industrial Lockstitch Machine Components & Thread Tension Control",
+            titleBangla: "১.১ ব্লগ পার্ট ১: ইন্ডাস্ট্রিয়াল লকস্টিচ মেশিনের মূল উপাদান ও থ্রেড টেনশন",
+            isPublished: true,
+            isMandatory: true,
+            xpReward: 50,
+            unlockRule: "UNLOCKED",
+            minScoreToUnlockNext: 0,
+            attemptLimit: 0,
+            passingScore: 100,
+            durationMinutes: 6,
+            blogPartNumber: 1,
+            readTimeMinutes: 5,
+            summary: "গার্মেন্টস কারখানায় সিঙ্গেল নিডেল লকস্টিচ (SNLS) সর্বাধিক ব্যবহৃত সেলাই মেশিন।",
+            keyTakeaways: [
+              "১. লকস্টিচ মেশিনে দুটি সুতা প্রয়োজন হয়: একটি নিডেল থ্রেড এবং অন্যটি ববিন থ্রেড।",
+              "২. স্টিচ টাইপ ৩০১ (Stitch Type 301) হলো লকস্টিচের আন্তর্জাতিক মান।",
+              "৩. সঠিক থ্রেড টেনশনে কাপড়ের উভয় পাশে সমান ও মসৃণ সেলাই তৈরি হয়।"
+            ],
+            contentMarkdown: `# ১.১ ইন্ডাস্ট্রিয়াল লকস্টিচ মেশিন ও সুইং মেকানিজম
+
+তৈরি পোশাক শিল্পে ১০ম শ্রেণির শিক্ষার্থীদের জন্য ইন্ডাস্ট্রিয়াল সুইং মেশিন অপারেশন জানা অত্যাবশ্যক।
+
+## ১. প্রধান উপাদানসমূহ
+- **নিডেল বার ও নিডেল ক্ল্যাম্প:** সুইকে ধরে রাখে ও উল্লম্ব গতি প্রদান করে।
+- **প্রেসার ফুট (Presser Foot):** কাপড়ের ওপর চাপ প্রয়োগ করে সমানভাবে এগিয়ে যেতে সাহায্য করে।
+- **ফিড ডগ (Feed Dog):** প্রতি স্টিচের পর কাপড়কে নির্দিষ্ট মাপে সামনে এগিয়ে দেয়।
+- **রোটারি হুক ও ববিন কেস:** নিচের সুতা সরবরাহ করে নিডেলের সুতার সাথে ইন্টারলক ঘটায়।`,
+            createdAt: "2026-02-05T00:00:00.000Z",
+            updatedAt: "2026-02-05T00:00:00.000Z",
+          },
+          {
+            id: 9002,
+            chapterId: 901,
+            orderIndex: 2,
+            itemType: "QUIZ",
+            title: "Quiz 1: Sewing Machine Mechanism & Stitch Standards Evaluation",
+            titleBangla: "১.২ কুইজ ১: সেলাই মেশিন মেকানিজম ও স্টিচ স্ট্যান্ডার্ড মূল্যায়ন",
+            isPublished: true,
+            isMandatory: true,
+            xpReward: 60,
+            unlockRule: "PREVIOUS_ITEM_COMPLETED",
+            minScoreToUnlockNext: 60,
+            attemptLimit: 3,
+            passingScore: 60,
+            durationMinutes: 5,
+            timeLimitSeconds: 300,
+            shuffleQuestions: true,
+            showCorrectAnswersAfter: true,
+            quizQuestions: [
+              {
+                id: "q-9002-1",
+                questionText: "আন্তর্জাতিক মানে সাধারণ লকস্টিচের স্টিচ টাইপ (Stitch Type) কোড কোনটি?",
+                options: ["Stitch Type 101", "Stitch Type 301", "Stitch Type 401", "Stitch Type 504"],
+                correctOptionIndex: 1,
+                explanation: "Stitch Type 301 হলো স্ট্যান্ডার্ড লকস্টিচ যা দুটি সুতার ইন্টারলকিংয়ে তৈরি হয়।",
+                marks: 1
+              },
+              {
+                id: "q-9002-2",
+                questionText: "সেলাই মেশিনে কাপড়কে প্রতি স্টিচের পর নির্দিষ্ট দূরত্বে এগিয়ে নেওয়ার কাজ করে কোনটি?",
+                options: ["ফিড ডগ (Feed Dog)", "প্রেসার ফুট", "টেনশন ডিস্ক", "ফ্লাইহুইল"],
+                correctOptionIndex: 0,
+                explanation: "ফিড ডগ দাঁতালো খাঁজের সাহায্যে কাপড়কে সামনে এগিয়ে নেয়।",
+                marks: 1
+              }
+            ],
+            createdAt: "2026-02-05T00:00:00.000Z",
+            updatedAt: "2026-02-05T00:00:00.000Z",
+          }
+        ]
+      }
+    ]
   }
 ];
 
@@ -1383,8 +1506,20 @@ class ChapterLearningStore {
     return result.sort((a, b) => a.orderIndex - b.orderIndex);
   }
 
-  public getCourseById(id: number): CourseItem | null {
-    return this.courses.find(c => c.id === Number(id)) || null;
+  public getCourseById(id: number | string): CourseItem | null {
+    if (typeof id === "number") {
+      return this.courses.find(c => c.id === id) || null;
+    }
+    const num = Number(id);
+    if (!isNaN(num)) {
+      const byId = this.courses.find(c => c.id === num);
+      if (byId) return byId;
+    }
+    const s = String(id).toLowerCase().trim();
+    return this.courses.find(c => 
+      (c.slug && c.slug.toLowerCase() === s) || 
+      (c.code && c.code.toLowerCase() === s)
+    ) || null;
   }
 
   public createCourse(data: Partial<CourseItem>): CourseItem {
@@ -1475,11 +1610,19 @@ class ChapterLearningStore {
     return newChapter;
   }
 
-  public getChapterById(chapterId: number): { chapter: CourseChapterItem; course: CourseItem } | null {
+  public getChapterById(chapterId: number | string): { chapter: CourseChapterItem; course: CourseItem } | null {
+    const num = typeof chapterId === "number" ? chapterId : Number(chapterId);
     for (const course of this.courses) {
-      const chapter = course.chapters.find(ch => ch.id === Number(chapterId));
-      if (chapter) {
-        return { chapter, course };
+      if (!isNaN(num)) {
+        const chapter = course.chapters.find(ch => ch.id === num);
+        if (chapter) {
+          return { chapter, course };
+        }
+      }
+      const s = String(chapterId).toLowerCase().trim();
+      const chBySlug = course.chapters.find(ch => ch.slug && ch.slug.toLowerCase() === s);
+      if (chBySlug) {
+        return { chapter: chBySlug, course };
       }
     }
     return null;
@@ -1607,6 +1750,26 @@ class ChapterLearningStore {
         chapter.updatedAt = now;
         course.updatedAt = now;
         return newItem;
+      }
+    }
+    return null;
+  }
+
+  public getContentItemById(itemId: number | string): { item: ChapterContentItemData; chapter: CourseChapterItem; course: CourseItem } | null {
+    const num = typeof itemId === "number" ? itemId : Number(itemId);
+    for (const course of this.courses) {
+      for (const chapter of course.chapters) {
+        if (!isNaN(num)) {
+          const item = chapter.items.find(it => it.id === num);
+          if (item) {
+            return { item, chapter, course };
+          }
+        }
+        const s = String(itemId).toLowerCase().trim();
+        const itBySlug = chapter.items.find(it => it.slug && it.slug.toLowerCase() === s);
+        if (itBySlug) {
+          return { item: itBySlug, chapter, course };
+        }
       }
     }
     return null;
@@ -1779,8 +1942,9 @@ class ChapterLearningStore {
           .map((item, itemIdx) => {
             totalCourseItems++;
             const progress = studentProgressMap.get(item.id) || null;
+            const isAlreadyPassed = progress ? (progress.status === "COMPLETED" || progress.isPassed) : false;
 
-            if (progress && (progress.status === "COMPLETED" || progress.isPassed)) {
+            if (isAlreadyPassed && progress) {
               completedInChapter++;
               completedCourseItems++;
               totalEarnedXp += progress.xpEarned;
@@ -1790,7 +1954,11 @@ class ChapterLearningStore {
             let isItemLocked = false;
             let itemLockReason: string | undefined;
 
-            if (isChapterLocked) {
+            if (isAlreadyPassed) {
+              // PERMANENT PROGRESS (No Re-Locking): Completed/Passed items are ALWAYS unlocked!
+              isItemLocked = false;
+              itemLockReason = undefined;
+            } else if (isChapterLocked) {
               isItemLocked = true;
               itemLockReason = chapterLockReason;
             } else if (itemIdx === 0) {
@@ -1819,13 +1987,13 @@ class ChapterLearningStore {
 
             // Is this the student's next actionable step?
             let isCurrentNextStep = false;
-            if (!isItemLocked && (!progress || progress.status !== "COMPLETED") && !firstPendingItemMarked) {
+            if (!isItemLocked && !isAlreadyPassed && !firstPendingItemMarked) {
               isCurrentNextStep = true;
               firstPendingItemMarked = true;
             }
 
             // Update status for the next item in the chain
-            const isThisItemPassed = progress ? (progress.status === "COMPLETED" || progress.isPassed) : false;
+            const isThisItemPassed = isAlreadyPassed;
             if (item.isMandatory) {
               if (!isThisItemPassed) {
                 previousItemSatisfied = false;
@@ -1877,7 +2045,7 @@ class ChapterLearningStore {
    * Validates prerequisites strictly on backend!
    */
   public completeBlogPart(
-    itemId: number,
+    itemId: number | string,
     studentRoll: string,
     studentName?: string,
     timeSpentSeconds: number = 60
@@ -1885,9 +2053,14 @@ class ChapterLearningStore {
     let targetItem: ChapterContentItemData | null = null;
     let targetCourse: CourseItem | null = null;
 
+    const num = typeof itemId === "number" ? itemId : Number(itemId);
+    const s = String(itemId).toLowerCase().trim();
+
     for (const course of this.courses) {
       for (const chapter of course.chapters) {
-        const item = chapter.items.find(i => i.id === Number(itemId));
+        const item = !isNaN(num)
+          ? chapter.items.find(i => i.id === num)
+          : chapter.items.find(i => i.slug && i.slug.toLowerCase() === s);
         if (item) {
           targetItem = item;
           targetCourse = course;
@@ -1909,8 +2082,9 @@ class ChapterLearningStore {
     const enriched = this.evaluateStudentCourseProgress(targetCourse, studentRoll);
     let isItemAccessible = false;
 
+    const resolvedItemId = targetItem.id;
     for (const ch of enriched.chapters) {
-      const it = ch.items.find(i => i.id === Number(itemId));
+      const it = ch.items.find(i => i.id === resolvedItemId);
       if (it) {
         if (!it.isLocked) {
           isItemAccessible = true;
@@ -1928,7 +2102,7 @@ class ChapterLearningStore {
       return { success: false, error: "Access Denied: This step is locked." };
     }
 
-    const existingProgress = this.getStudentItemProgress(studentRoll, Number(itemId));
+    const existingProgress = this.getStudentItemProgress(studentRoll, resolvedItemId);
     const alreadyCompleted = existingProgress && existingProgress.status === "COMPLETED";
 
     const nextProgressId = Date.now();
@@ -1936,7 +2110,7 @@ class ChapterLearningStore {
       id: existingProgress ? existingProgress.id : nextProgressId,
       studentRoll,
       studentName: studentName || existingProgress?.studentName || "Student",
-      itemId: Number(itemId),
+      itemId: resolvedItemId,
       status: "COMPLETED",
       attemptsCount: (existingProgress?.attemptsCount || 0) + 1,
       bestScore: 100,
@@ -1961,9 +2135,9 @@ class ChapterLearningStore {
    * Evaluates score server-side, checks attempts limit and unlocks progression.
    */
   public submitQuizAttempt(
-    itemId: number,
+    itemId: number | string,
     studentRoll: string,
-    answers: Record<string, number>, // questionId -> selectedOptionIndex
+    answers: Record<string, number | string>, // questionId -> selectedOptionIndex or option ID (opt_X)
     studentName?: string,
     timeSpentSeconds: number = 60,
     tabSwitchedQuestionIds: string[] = []
@@ -1983,9 +2157,14 @@ class ChapterLearningStore {
     let targetItem: ChapterContentItemData | null = null;
     let targetCourse: CourseItem | null = null;
 
+    const num = typeof itemId === "number" ? itemId : Number(itemId);
+    const s = String(itemId).toLowerCase().trim();
+
     for (const course of this.courses) {
       for (const chapter of course.chapters) {
-        const item = chapter.items.find(i => i.id === Number(itemId));
+        const item = !isNaN(num)
+          ? chapter.items.find(i => i.id === num)
+          : chapter.items.find(i => i.slug && i.slug.toLowerCase() === s);
         if (item) {
           targetItem = item;
           targetCourse = course;
@@ -2003,12 +2182,14 @@ class ChapterLearningStore {
       return { success: false, error: "Target is not a quiz" };
     }
 
+    const resolvedItemId = targetItem.id;
+
     // STRICT BACKEND ACCESS VERIFICATION
     const enriched = this.evaluateStudentCourseProgress(targetCourse, studentRoll);
     let enrichedItem: EnrichedContentItem | null = null;
 
     for (const ch of enriched.chapters) {
-      const it = ch.items.find(i => i.id === Number(itemId));
+      const it = ch.items.find(i => i.id === resolvedItemId);
       if (it) {
         enrichedItem = it;
         break;
@@ -2022,7 +2203,7 @@ class ChapterLearningStore {
       };
     }
 
-    const existingProgress = this.getStudentItemProgress(studentRoll, Number(itemId));
+    const existingProgress = this.getStudentItemProgress(studentRoll, resolvedItemId);
     const currentAttempts = existingProgress ? existingProgress.attemptsCount : 0;
 
     // Check attempt limit
@@ -2039,16 +2220,28 @@ class ChapterLearningStore {
     const disqualifiedQuestionIds: string[] = [];
 
     questions.forEach(q => {
-      const selected = answers[q.id];
-      const isTabSwitched = Array.isArray(tabSwitchedQuestionIds) && tabSwitchedQuestionIds.includes(q.id);
+      const qIdStr = String(q.id);
+      const selected = answers[q.id] !== undefined ? answers[q.id] : answers[qIdStr];
+      const isTabSwitched =
+        Array.isArray(tabSwitchedQuestionIds) &&
+        tabSwitchedQuestionIds.some(id => String(id) === qIdStr);
 
       if (isTabSwitched) {
         // Tab was switched while this question was active:
-        // Rule: Marks for this specific question MUST be 0 (zero), even if correct!
-        disqualifiedQuestionIds.push(q.id);
+        // Rule: Marks for this specific question MUST be 0 (zero), disqualified from score
+        disqualifiedQuestionIds.push(qIdStr);
       } else {
-        // Other questions score normally
-        if (selected !== undefined && selected === q.correctOptionIndex) {
+        // Normal grading: support both numeric index (0, 1, 2) and stable option ID ("opt_0", "opt_1")
+        const selectedIdx =
+          typeof selected === "number"
+            ? selected
+            : typeof selected === "string" && selected.startsWith("opt_")
+              ? parseInt(selected.replace("opt_", ""), 10)
+              : typeof selected === "string" && !isNaN(parseInt(selected, 10))
+                ? parseInt(selected, 10)
+                : -1;
+
+        if (selectedIdx !== -1 && selectedIdx === q.correctOptionIndex) {
           correctCount++;
         }
       }
@@ -2070,7 +2263,7 @@ class ChapterLearningStore {
       id: existingProgress ? existingProgress.id : Date.now(),
       studentRoll,
       studentName: studentName || existingProgress?.studentName || "Student",
-      itemId: Number(itemId),
+      itemId: resolvedItemId,
       status: isPassed ? "COMPLETED" : "FAILED",
       attemptsCount: newAttemptsCount,
       bestScore,

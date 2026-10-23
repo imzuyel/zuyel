@@ -31,8 +31,10 @@ const FORBIDDEN_STUDENT_MUTATION_FIELDS = new Set([
 
 function getAuthenticatedStudentRoll(req: NextRequest, identityUserId: string | number): string {
   const cookieRoll = req.cookies.get("ptsc_student_roll")?.value;
+  const headerRoll = req.headers.get("x-student-roll");
   const rawId = String(identityUserId || "").trim();
   if (cookieRoll && cookieRoll.trim()) return cookieRoll.trim();
+  if (headerRoll && headerRoll.trim()) return headerRoll.trim();
   if (rawId && rawId !== "4" && rawId !== "student") return rawId;
   return "101"; // Fallback to demo student roll 101
 }

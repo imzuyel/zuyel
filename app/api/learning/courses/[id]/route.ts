@@ -10,7 +10,7 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const studentRoll = searchParams.get("studentRoll");
 
-    const course = chapterLearningStore.getCourseById(Number(id));
+    const course = chapterLearningStore.getCourseById(id);
 
     if (!course) {
       return NextResponse.json(

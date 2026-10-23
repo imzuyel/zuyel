@@ -27,10 +27,18 @@ import {
   Heart,
   AlertCircle,
   Home,
+  KeyRound,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import PublicHeader from "@/components/layout/PublicHeader";
 import PublicFooter from "@/components/layout/PublicFooter";
+import StudentLoginModal from "@/components/auth/StudentLoginModal";
+import {
+  getActiveStudentAccount,
+  logoutStudentAccount,
+  updateStudentPassword,
+  UNIVERSAL_DEFAULT_PASSWORD,
+} from "@/lib/studentIntelligenceStore";
 
 interface StudentData {
   id: number;
@@ -94,13 +102,74 @@ export default function StudentProfilePortalView() {
   const [emergencyContact, setEmergencyContact] = useState("");
   const [photoUrl, setPhotoUrl] = useState("");
   const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+
+  // Password change states
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passChanging, setPassChanging] = useState(false);
+  const [passMessage, setPassMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassMessage(null);
+
+    if (newPassword === UNIVERSAL_DEFAULT_PASSWORD) {
+      setPassMessage({
+        text: "নতুন পাসওয়ার্ড ডিফল্ট পাসওয়ার্ড (1234)-এর মতো হতে পারবে না। ভিন্ন পাসওয়ার্ড নির্ধারণ করুন।",
+        isError: true,
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPassMessage({
+        text: "উভয় পাসওয়ার্ড হুবহু মেলেনি। অনুগ্রহ করে সতর্কতার সাথে লিখুন।",
+        isError: true,
+      });
+      return;
+    }
+
+    if (newPassword.trim().length < 4) {
+      setPassMessage({
+        text: "পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের বা সংখ্যার হতে হবে।",
+        isError: true,
+      });
+      return;
+    }
+
+    setPassChanging(true);
+    try {
+      const studentRoll = String(student?.roll || "");
+      const res = updateStudentPassword(studentRoll, newPassword.trim(), student?.className);
+
+      if (res.success) {
+        setPassMessage({ text: res.message, isError: false });
+        showToast("আপনার পাসওয়ার্ড সফলভাবে পরিবর্তিত ও হালনাগাদ করা হয়েছে।", "success");
+        setNewPassword("");
+        setConfirmPassword("");
+      } else {
+        setPassMessage({ text: res.message, isError: true });
+        showToast(res.message, "error");
+      }
+    } catch (e) {
+      setPassMessage({ text: "পাসওয়ার্ড আপডেট করতে সমস্যা হয়েছে।", isError: true });
+    } finally {
+      setPassChanging(false);
+    }
+  };
 
   // Fetch student profile from secure API
   const fetchProfile = async () => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/student/profile");
+      const activeAcc = getActiveStudentAccount();
+      const headers: Record<string, string> = {};
+      if (activeAcc?.rollNumber) {
+        headers["x-student-roll"] = activeAcc.rollNumber;
+      }
+      const res = await fetch("/api/student/profile", { headers });
       const data = await res.json();
 
       if (res.ok && data.success && data.student) {
@@ -115,7 +184,8 @@ export default function StudentProfilePortalView() {
         setEmergencyContact(data.student.emergencyContact || "");
         setPhotoUrl(data.student.photoUrl || "");
       } else if (res.status === 401) {
-        router.push("/login?callbackUrl=/student/profile");
+        setShowLoginModal(true);
+        setErrorMsg("প্রোফাইল ও সেটিংস অ্যাক্সেস করতে অনুগ্রহ করে শিক্ষার্থী একাউন্টে লগইন করুন।");
       } else {
         setErrorMsg(data.error || "প্রোফাইল লোড করতে ব্যর্থ হয়েছে।");
       }
@@ -179,8 +249,9 @@ export default function StudentProfilePortalView() {
   };
 
   const handleLogout = async () => {
-    await logout();
-    router.push("/login");
+    logoutStudentAccount();
+    setStudent(null);
+    router.push("/");
   };
 
   return (
@@ -595,6 +666,79 @@ export default function StudentProfilePortalView() {
                   </div>
                 </div>
 
+                {/* Password Security Self-Service Card */}
+                <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-cyan-500" />
+                      <span>পাসওয়ার্ড পরিবর্তন ও নিরাপত্তা</span>
+                    </h3>
+                    <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 font-bold bg-cyan-50 dark:bg-cyan-950 px-2 py-0.5 rounded-full border border-cyan-200 dark:border-cyan-800">
+                      Self-Service
+                    </span>
+                  </div>
+
+                  {passMessage && (
+                    <div
+                      className={`p-3 rounded-2xl text-xs font-bold flex items-start gap-2 ${
+                        passMessage.isError
+                          ? "bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400"
+                          : "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                      }`}
+                    >
+                      {passMessage.isError ? (
+                        <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                      )}
+                      <span>{passMessage.text}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handlePasswordChange} className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                        নতুন পাসওয়ার্ড (New Password):
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-cyan-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                        পাসওয়ার্ড নিশ্চিতকরণ (Confirm Password):
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="একই পাসওয়ার্ড পুনরায় লিখুন"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-cyan-500"
+                      />
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      * ডিফল্ট পাসওয়ার্ড (1234) পরিবর্তন করে এখানে যেকোনো সময় ব্যক্তিগত নতুন পাসওয়ার্ড সেট করুন।
+                    </p>
+
+                    <button
+                      type="submit"
+                      disabled={passChanging}
+                      className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 disabled:opacity-50 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>পাসওয়ার্ড হালনাগাদ করুন</span>
+                    </button>
+                  </form>
+                </div>
+
                 {/* Anti-Tamper Security Policy Banner */}
                 <div className="p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20 text-xs space-y-1.5 text-amber-900 dark:text-amber-200">
                   <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
@@ -671,6 +815,16 @@ export default function StudentProfilePortalView() {
           </div>
         </div>
       )}
+
+      {/* Streamlined Universal Student Login Modal */}
+      <StudentLoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSuccessLogin={() => {
+          setShowLoginModal(false);
+          fetchProfile();
+        }}
+      />
 
       <PublicFooter />
     </div>

@@ -11,6 +11,7 @@ import {
   Calendar,
   Clock,
   Sparkles,
+  BookOpen,
   Bot,
   FileText,
   Radio,
@@ -32,7 +33,9 @@ import {
   BarChart3,
   Edit3,
   User,
+  Cpu,
 } from "lucide-react";
+import GlobalAcademicDevBar from "@/components/navigation/GlobalAcademicDevBar";
 
 export interface HierarchicalSidebarProps {
   isCollapsed?: boolean;
@@ -115,9 +118,11 @@ export default function HierarchicalSidebar({
 
   // State for collapsible navigation groups
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    academic_core: true,
     ai_hub: true,
     academics: true,
     students_exams: true,
+    comms_output: true,
     system: true,
   });
 
@@ -127,6 +132,7 @@ export default function HierarchicalSidebar({
 
   const isActive = (href: string) => {
     if (href === "/admin") return pathname === "/admin";
+    if (href === "/learning") return pathname.startsWith("/learning") || pathname.startsWith("/learning-library");
     return pathname.startsWith(href);
   };
 
@@ -134,13 +140,66 @@ export default function HierarchicalSidebar({
   const navigationGroups: NavGroup[] = useMemo(
     () => [
       {
-        id: "main_overview",
-        title: "১. প্রধান ওভারভিউ",
-        icon: LayoutDashboard,
+        id: "academic_core",
+        title: "১. একাডেমিক ম্যাপিং ও কেন্দ্রীয় সেটআপ",
+        subtitle: "Academic Mapping",
+        icon: Layers,
+        isCollapsible: true,
         items: [
           {
+            href: "/academic/mapping",
+            label: "একাডেমিক ম্যাপিং (Academic Mapping)",
+            icon: Layers,
+            badge: "Central",
+            badgeColor: "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30",
+            keywords: ["academic", "mapping", "ম্যাপিং", "শ্রেণি", "ট্রেড", "শাখা", "সেশন"],
+            theme: {
+              iconText: "text-fuchsia-400",
+              iconBg: "bg-fuchsia-500/15 border-fuchsia-500/30",
+              activeBg: "bg-fuchsia-950/80 text-white border-fuchsia-500/40 shadow-fuchsia-950/50",
+              activeBorder: "border-fuchsia-400/40",
+              activeText: "text-fuchsia-200",
+              indicatorColor: "bg-fuchsia-400 shadow-[0_0_8px_#e879f9]",
+              glowShadow: "group-hover:shadow-[0_0_15px_rgba(217,70,239,0.4)]",
+            },
+          },
+          {
+            href: "/routine/master",
+            label: "একাডেমিক সেশন ও রুটিন মাস্টার",
+            icon: Calendar,
+            badge: "Master",
+            badgeColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
+            keywords: ["routine", "session", "master", "schedule", "সেশন", "রুটিন"],
+            theme: {
+              iconText: "text-indigo-400",
+              iconBg: "bg-indigo-500/15 border-indigo-500/30",
+              activeBg: "bg-indigo-950/80 text-white border-indigo-500/40 shadow-indigo-950/50",
+              activeBorder: "border-indigo-400/40",
+              activeText: "text-indigo-200",
+              indicatorColor: "bg-indigo-400 shadow-[0_0_8px_#818cf8]",
+              glowShadow: "group-hover:shadow-[0_0_15px_rgba(99,102,241,0.4)]",
+            },
+          },
+          {
+            href: "/admin?tab=lab_inventory",
+            label: "কারিগরি ল্যাব ও ওয়ার্কশপ",
+            icon: Cpu,
+            badge: "Labs",
+            badgeColor: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+            keywords: ["lab", "workshop", "equipment", "inventory", "ল্যাব"],
+            theme: {
+              iconText: "text-amber-400",
+              iconBg: "bg-amber-500/15 border-amber-500/30",
+              activeBg: "bg-amber-950/80 text-white border-amber-500/40 shadow-amber-950/50",
+              activeBorder: "border-amber-400/40",
+              activeText: "text-amber-200",
+              indicatorColor: "bg-amber-400 shadow-[0_0_8px_#fbbf24]",
+              glowShadow: "group-hover:shadow-[0_0_15px_rgba(245,158,11,0.4)]",
+            },
+          },
+          {
             href: "/admin",
-            label: "মূল ড্যাশবোর্ড",
+            label: "মূল ড্যাশবোর্ড ওভারভিউ",
             icon: LayoutDashboard,
             badge: "লাইভ",
             badgeColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
@@ -211,6 +270,23 @@ export default function HierarchicalSidebar({
               activeText: "text-emerald-200",
               indicatorColor: "bg-emerald-400 shadow-[0_0_8px_#34d399]",
               glowShadow: "group-hover:shadow-[0_0_15px_rgba(16,185,129,0.4)]",
+            },
+          },
+          {
+            href: "/learning",
+            label: "📚 অধ্যায়ভিত্তিক কন্টেন্ট ও ক্লাস স্টুডিও",
+            icon: BookOpen,
+            badge: "স্টুডিও",
+            badgeColor: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+            keywords: ["course", "chapter", "learning", "studio", "অধ্যায়ভিত্তিক", "কন্টেন্ট"],
+            theme: {
+              iconText: "text-cyan-400",
+              iconBg: "bg-cyan-500/15 border-cyan-500/30",
+              activeBg: "bg-cyan-950/80 text-white border-cyan-500/40 shadow-cyan-950/50",
+              activeBorder: "border-cyan-400/40",
+              activeText: "text-cyan-200",
+              indicatorColor: "bg-cyan-400 shadow-[0_0_8px_#22d3ee]",
+              glowShadow: "group-hover:shadow-[0_0_15px_rgba(6,182,212,0.4)]",
             },
           },
         ],
@@ -378,26 +454,11 @@ export default function HierarchicalSidebar({
       },
       {
         id: "system",
-        title: "৬. গ্লোবাল সেটিংস ও AI পাইপলাইন",
-        subtitle: "Global System",
+        title: "৬. সিস্টেম ও AI কনফিগারেশন",
+        subtitle: "System Config",
         icon: Sliders,
         isCollapsible: true,
         items: [
-          {
-            href: "/academic/settings",
-            label: "গ্লোবাল বিষয় ও শ্রেণি ম্যাপিং",
-            icon: Sliders,
-            keywords: ["global", "settings", "academic", "ম্যাপিং"],
-            theme: {
-              iconText: "text-fuchsia-400",
-              iconBg: "bg-fuchsia-500/15 border-fuchsia-500/30",
-              activeBg: "bg-fuchsia-950/80 text-white border-fuchsia-500/40 shadow-fuchsia-950/50",
-              activeBorder: "border-fuchsia-400/40",
-              activeText: "text-fuchsia-200",
-              indicatorColor: "bg-fuchsia-400 shadow-[0_0_8px_#e879f9]",
-              glowShadow: "group-hover:shadow-[0_0_15px_rgba(217,70,239,0.4)]",
-            },
-          },
           {
             href: "/admin/ai-settings",
             label: "AI পাইপলাইন সেটিংস",
@@ -433,6 +494,15 @@ export default function HierarchicalSidebar({
     ],
     []
   );
+
+  // Auto-expand group that contains active item
+  useEffect(() => {
+    navigationGroups.forEach((group) => {
+      if (group.items.some((item) => isActive(item.href))) {
+        setOpenGroups((prev) => ({ ...prev, [group.id]: true }));
+      }
+    });
+  }, [pathname, navigationGroups]);
 
   const filteredGroups = useMemo(() => {
     if (!searchQuery.trim()) return navigationGroups;
@@ -538,6 +608,9 @@ export default function HierarchicalSidebar({
 
       {/* 3. SCROLLABLE CATEGORIZED NAVIGATION BODY */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-3.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden text-xs font-semibold pr-0.5">
+        {/* Global Academic & Development Control Bar */}
+        <GlobalAcademicDevBar isCollapsed={!isVisuallyExpanded} />
+
         {filteredGroups.map((group) => {
           const isOpen = openGroups[group.id] ?? true;
           const GroupIcon = group.icon;

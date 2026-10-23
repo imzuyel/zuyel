@@ -81,14 +81,14 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
 
   return (
     <header
-      className={`sticky top-0 z-40 h-16 sm:h-20 transition-all duration-300 px-4 sm:px-6 lg:px-8 flex items-center justify-between border-b w-full max-w-full ${
+      className={`sticky top-0 z-40 h-16 sm:h-20 transition-all duration-300 px-3 sm:px-6 lg:px-8 flex items-center justify-between border-b w-full max-w-full overflow-x-clip ${
         scrolled
           ? "bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-slate-200/80 dark:border-slate-800 shadow-sm"
           : "bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-slate-200/60 dark:border-slate-850"
       }`}
     >
       {/* Left: Mobile Menu Toggle & Session Badge */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         <button
           onClick={onToggleSidebar}
           className="p-2.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-indigo-600 dark:text-cyan-400 border border-indigo-100 dark:border-slate-700 transition-all active:scale-95 lg:hidden flex items-center justify-center cursor-pointer"
@@ -98,14 +98,14 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
         </button>
 
         {/* Academic Session Active Badge */}
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 text-xs font-bold">
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 text-xs font-bold shrink-0">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
           <span>{language === "bn" ? "২০২৬ শিক্ষাবর্ষ (সক্রিয়)" : "Session 2026 (Active)"}</span>
         </div>
       </div>
 
       {/* Center: Global Search Bar (Ctrl+K) */}
-      <div className="flex-1 max-w-xs sm:max-w-md lg:max-w-lg mx-3 sm:mx-6">
+      <div className="flex-1 max-w-xs sm:max-w-md lg:max-w-lg mx-2 sm:mx-6 min-w-0">
         <GlobalSearchBar />
       </div>
 
@@ -215,22 +215,22 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
             <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white font-black text-xs flex items-center justify-center shrink-0">
               {activeUser?.nameBangla?.charAt(0) || activeUser?.role?.charAt(0).toUpperCase()}
             </div>
-            <div className="hidden md:block text-left">
-              <p className="text-[10px] text-indigo-500 dark:text-cyan-400 uppercase tracking-wider font-extrabold leading-none">
+            <div className="hidden md:block text-left min-w-0 max-w-[120px] lg:max-w-[150px]">
+              <p className="text-[10px] text-indigo-500 dark:text-cyan-400 uppercase tracking-wider font-extrabold leading-none truncate">
                 {activeUser?.role}
               </p>
-              <p className="text-[11px] font-black text-slate-800 dark:text-white truncate max-w-[90px]">
+              <p className="text-[11px] font-black text-slate-800 dark:text-white truncate max-w-[120px] lg:max-w-[150px]">
                 {activeUser?.nameBangla || activeUser?.fullName || "ব্যবহারকারী"}
               </p>
             </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showUserMenu ? "rotate-180" : ""}`} />
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${showUserMenu ? "rotate-180" : ""}`} />
           </button>
 
           {showUserMenu && (
             <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-3 text-xs z-50 animate-in fade-in zoom-in-95 duration-150">
               {/* Profile Card Header */}
               <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl mb-2">
-                <p className="font-extrabold text-slate-900 dark:text-white">
+                <p className="font-extrabold text-slate-900 dark:text-white truncate">
                   {activeUser?.nameBangla || activeUser?.fullName}
                 </p>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">

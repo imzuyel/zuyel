@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, safePrismaQuery, isPrismaAvailable } from "@/lib/prisma";
-import { PRESET_USERS } from "@/context/AuthContext";
+import { PRESET_USERS } from "@/lib/presetUsers";
 import { createPasswordResetToken } from "@/lib/passwordService";
 import { recordSecurityAuditLog } from "@/lib/rbac";
 import { getStudentAccountByRoll } from "@/lib/studentIntelligenceStore";

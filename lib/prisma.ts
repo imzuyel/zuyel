@@ -126,10 +126,17 @@ export const mockPrisma: any = new Proxy(rootDelegates, {
   },
 });
 
+let lastDbFailureTime = 0;
+const DB_RETRY_COOLDOWN_MS = 60000; // 60 seconds cooldown before attempting reconnect if database is offline
+
 /**
- * Returns true if Prisma client is initialized and DATABASE_URL is configured
+ * Returns true if Prisma client is initialized, DATABASE_URL is configured,
+ * and the database is not in an active connection failure cooldown.
  */
 export function isPrismaAvailable(): boolean {
+  if (lastDbFailureTime > 0 && Date.now() - lastDbFailureTime < DB_RETRY_COOLDOWN_MS) {
+    return false;
+  }
   return prismaOperational && prismaClientInstance !== null;
 }
 
@@ -153,6 +160,15 @@ export async function safePrismaQuery<T>(
     return await queryFn(prisma);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.includes("Can't reach database server") ||
+      msg.includes("ECONNREFUSED") ||
+      msg.includes("Connection refused") ||
+      msg.includes("ETIMEDOUT") ||
+      msg.includes("timed out")
+    ) {
+      lastDbFailureTime = Date.now();
+    }
     console.warn("[Prisma SafeQuery] Query failed gracefully:", msg);
     return fallbackValue;
   }

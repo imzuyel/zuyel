@@ -40,14 +40,16 @@ import {
   MANDATORY_FOUR_TRADES,
   parseClassNumeric,
 } from "@/lib/academicStructure";
-import { getSubjectIcon } from "@/components/learning/SequentialLearningPathView";
+import { getSubjectVisualTheme } from "@/lib/subjectIconRegistry";
 import StudentLearningLeaderboard from "@/components/learning/StudentLearningLeaderboard";
+import { buildSubjectUrl } from "@/lib/learningSlugService";
+
 
 const ACADEMIC_CLASSES = [
-  { id: "all", label: "সকল শ্রেণি (All Classes)" },
-  { id: "6", label: "৬ষ্ঠ শ্রেণি (প্রাক-ভোকেশনাল · ট্রেড নেই)" },
-  { id: "7", label: "৭ম শ্রেণি (প্রাক-ভোকেশনাল · ট্রেড নেই)" },
-  { id: "8", label: "৮ম শ্রেণি (প্রাক-ভোকেশনাল · ট্রেড নেই)" },
+  { id: "all", label: "সকল শ্রেণি" },
+  { id: "6", label: "৬ষ্ঠ শ্রেণি (প্রাক-ভোকেশনাল · সাধারণ)" },
+  { id: "7", label: "৭ম শ্রেণি (প্রাক-ভোকেশনাল · সাধারণ)" },
+  { id: "8", label: "৮ম শ্রেণি (প্রাক-ভোকেশনাল · সাধারণ)" },
   { id: "9", label: "৯ম শ্রেণি (ভোকেশনাল · ৪টি ট্রেড)" },
   { id: "10", label: "১০ম শ্রেণি (ভোকেশনাল · ৪টি ট্রেড)" },
   { id: "11", label: "একাদশ শ্রেণি (ভোকেশনাল · ৪টি ট্রেড)" },
@@ -139,10 +141,10 @@ export default function LearningFilterPage() {
     setActiveStudent(null);
   };
 
-  // Navigate to dedicated Subject Chapters Page (Step 2)
-  const handleNavigateToSubject = (courseId: number) => {
-    setNavigatingCourseId(courseId);
-    router.push(`/learning/subjects/${courseId}`);
+  // Navigate to dedicated Subject Chapters Page using SEO slug
+  const handleNavigateToSubject = (course: CourseItem) => {
+    setNavigatingCourseId(course.id);
+    router.push(buildSubjectUrl(course));
   };
 
   // Filtered Subject Courses
@@ -220,7 +222,7 @@ export default function LearningFilterPage() {
             <div className="space-y-2.5">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs font-bold tracking-wider uppercase">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                <span>PTSC Interactive Learning Platform</span>
+                <span>পিটিএসসি ডিজিটাল লার্নিং প্ল্যাটফর্ম</span>
               </div>
               <h1 className="text-xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
                 <BookOpen className="w-7 h-7 sm:w-8 sm:h-8 text-cyan-400 shrink-0" />
@@ -406,10 +408,10 @@ export default function LearningFilterPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
               <Layers className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-500" />
-              <span>কারিকুলাম বিষয়সমূহ (Click Subject to View Chapters)</span>
+              <span>কারিকুলামের বিষয়সমূহ</span>
             </h2>
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium hidden sm:inline">
-              স্টেপ ২: বিষয়ের অধ্যায় তালিকায় যাওয়ার জন্য কার্ডে ক্লিক করুন
+              অধ্যায় তালিকায় যাওয়ার জন্য কার্ডে ক্লিক করুন
             </span>
           </div>
 
@@ -419,7 +421,7 @@ export default function LearningFilterPage() {
               <p className="text-xs text-slate-500 dark:text-slate-400 font-bold">বিষয় তালিকা লোড হচ্ছে...</p>
             </div>
           ) : filteredCourses.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {filteredCourses.map((course) => {
                 const totalLessons = course.chapters?.length || 0;
                 const blogPartsCount = course.chapters?.reduce(
@@ -435,127 +437,115 @@ export default function LearningFilterPage() {
                 const progressPercentage = enrichedCourse.courseProgressPercentage ?? 0;
                 const isCompleted = enrichedCourse.isCompleted ?? false;
                 const isNavigating = navigatingCourseId === course.id;
-                const SubjectIcon = getSubjectIcon(course.tradeCode, course.code);
+                const theme = getSubjectVisualTheme(course);
+                const SubjectIcon = theme.icon;
 
                 return (
                   <div
                     key={course.id}
-                    onClick={() => !navigatingCourseId && handleNavigateToSubject(course.id)}
-                    className={`group bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-200 p-5 flex flex-col justify-between space-y-4 shadow-xs hover:shadow-md cursor-pointer relative overflow-hidden transform hover:-translate-y-0.5 ${
-                      isNavigating
-                        ? "border-cyan-500 ring-2 ring-cyan-500/30 opacity-80 pointer-events-none"
-                        : "border-slate-200 dark:border-slate-800 hover:border-cyan-500/50 dark:hover:border-cyan-500/40"
+                    onClick={() => !navigatingCourseId && handleNavigateToSubject(course)}
+                    className={`rgb-neon-border-card group cursor-pointer ${
+                      isNavigating ? "opacity-80 pointer-events-none" : ""
                     }`}
                   >
-                    {/* Top Accent bar */}
-                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-500 opacity-70 group-hover:opacity-100 transition-opacity" />
-
-                    <div className="space-y-3.5">
-                      {/* Badge row */}
-                      <div className="flex flex-wrap items-center justify-between gap-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 text-[10px] font-black border border-cyan-200 dark:border-cyan-800/60">
-                            {course.className}
+                    <div className="rgb-neon-border-inner p-5 sm:p-6 flex flex-col justify-between space-y-4">
+                      <div className="space-y-4">
+                        {/* Badge row */}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black border shadow-xs ${theme.badgeBg} ${theme.badgeText} ${theme.badgeBorder}`}>
+                              {course.className}
+                            </span>
+                            {course.tradeName && (
+                              <span className="px-2.5 py-1 rounded-xl bg-indigo-100/90 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-300 text-[10px] font-bold border border-indigo-300/70 dark:border-indigo-800/80 shadow-xs truncate max-w-[140px]">
+                                {course.tradeName}
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono text-[11px] font-extrabold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                            {course.code}
                           </span>
-                          {course.tradeName && (
-                            <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200 dark:border-indigo-800/60 truncate max-w-[120px]">
-                              {course.tradeName}
-                            </span>
-                          )}
                         </div>
-                        <span className="font-mono text-[10px] font-bold text-slate-400">
-                          {course.code}
-                        </span>
-                      </div>
 
-                      {/* Subject Title & Icon Header */}
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-slate-800 text-indigo-600 dark:text-cyan-400 flex items-center justify-center shrink-0 border border-indigo-100 dark:border-slate-700/80 group-hover:scale-105 transition-transform">
-                          <SubjectIcon className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors leading-snug line-clamp-1">
-                            {course.titleBangla}
-                          </h3>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5 truncate">
-                            {course.title}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Description */}
-                      {course.description && (
-                        <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed font-sans">
-                          {course.description}
-                        </p>
-                      )}
-
-                      {/* Metrics breakdown */}
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
-                        <div className="flex items-center gap-1.5">
-                          <BookOpen className="w-3.5 h-3.5 text-cyan-500" />
-                          <span>{totalLessons} টি অধ্যায় (Chapters)</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                          <span>{blogPartsCount} টি ব্লগ পাঠ</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Award className="w-3.5 h-3.5 text-amber-500" />
-                          <span>{quizzesCount} টি অনুশীলন কুইজ</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Zap className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>+{course.totalXp} XP পুরস্কার</span>
-                        </div>
-                      </div>
-
-                      {/* Student Progress */}
-                      {activeStudent && (
-                        <div className="pt-1 space-y-1">
-                          <div className="flex items-center justify-between text-[10px] font-bold">
-                            <span className="text-slate-400">অগ্রগতি:</span>
-                            <span className={isCompleted ? "text-emerald-500" : "text-cyan-600 dark:text-cyan-400 font-mono font-bold"}>
-                              {isCompleted ? "সম্পন্ন (100%)" : `${progressPercentage}%`}
-                            </span>
+                        {/* Subject Title & Icon Header */}
+                        <div className="flex items-center gap-3.5">
+                          <div className={`w-12 h-12 rounded-2xl bg-gradient-to-tr ${theme.iconGradient} text-white flex items-center justify-center shrink-0 shadow-md shadow-cyan-500/25 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300`}>
+                            <SubjectIcon className="w-6 h-6 drop-shadow-xs" />
                           </div>
-                          <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan-500 to-indigo-500 rounded-full transition-all duration-500"
-                              style={{ width: `${progressPercentage}%` }}
-                            />
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors leading-snug line-clamp-2">
+                              {course.titleBangla}
+                            </h3>
                           </div>
                         </div>
-                      )}
-                    </div>
 
-                    {/* Bottom Action Button with Loader */}
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                      <button
-                        type="button"
-                        disabled={navigatingCourseId !== null}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleNavigateToSubject(course.id);
-                        }}
-                        className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                          isNavigating
-                            ? "bg-cyan-500 text-slate-950 shadow-sm"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-cyan-500 hover:text-slate-950 dark:hover:bg-cyan-500 dark:hover:text-slate-950"
-                        }`}
-                      >
-                        {isNavigating ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>অধ্যায় তালিকা লোড হচ্ছে...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span>অধ্যায় তালিকা দেখুন (View Chapters)</span>
-                            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                          </>
+                        {/* Metrics breakdown - Clean Bangla Only */}
+                        <div className="grid grid-cols-2 gap-2 pt-2.5 border-t border-slate-200/70 dark:border-slate-800 text-[11px] font-bold">
+                          <div className="flex items-center gap-1.5 p-2 rounded-xl bg-cyan-50/80 dark:bg-cyan-950/40 text-cyan-800 dark:text-cyan-300 border border-cyan-200/60 dark:border-cyan-800/60">
+                            <BookOpen className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                            <span>{totalLessons} টি অধ্যায়</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 p-2 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
+                            <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                            <span>{blogPartsCount} টি ব্লগ পাঠ</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 p-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
+                            <Award className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>{quizzesCount} টি কুইজ</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 p-2 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
+                            <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <span>+{course.totalXp} XP</span>
+                          </div>
+                        </div>
+
+                        {/* Student Progress */}
+                        {activeStudent && (
+                          <div className="pt-1.5 space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px] font-bold">
+                              <span className="text-slate-500 dark:text-slate-400">অগ্রগতি ট্র্যাক:</span>
+                              <span className={isCompleted ? "text-emerald-600 dark:text-emerald-400 font-black" : "text-cyan-600 dark:text-cyan-400 font-mono font-extrabold"}>
+                                {isCompleted ? "সম্পন্ন (100%) ✨" : `${progressPercentage}%`}
+                              </span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-200/60 dark:border-slate-700/60">
+                              <div
+                                className="h-full bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-500 rounded-full transition-all duration-500 shadow-xs"
+                                style={{ width: `${progressPercentage}%` }}
+                              />
+                            </div>
+                          </div>
                         )}
-                      </button>
+                      </div>
+
+                      {/* Bottom Action Button */}
+                      <div className="pt-3 border-t border-slate-200/70 dark:border-slate-800">
+                        <button
+                          type="button"
+                          disabled={navigatingCourseId !== null}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleNavigateToSubject(course);
+                          }}
+                          className={`w-full py-2.5 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
+                            isNavigating
+                              ? "bg-cyan-500 text-slate-950 shadow-cyan-500/25"
+                              : "bg-gradient-to-r from-slate-900 to-slate-800 dark:from-slate-800 dark:to-slate-700 text-white hover:from-cyan-600 hover:to-indigo-600 hover:text-white shadow-slate-900/10 hover:shadow-cyan-500/30 active:scale-95"
+                          }`}
+                        >
+                          {isNavigating ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>অধ্যায় তালিকা লোড হচ্ছে...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>চ্যাপ্টার দেখুন</span>
+                              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1.5 transition-transform" />
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

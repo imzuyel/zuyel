@@ -31,12 +31,18 @@ import {
   LogOut,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { useAuth } from "@/context/AuthContext";
+import StudentLoginModal from "@/components/auth/StudentLoginModal";
+import {
+  getActiveStudentAccount,
+  logoutStudentAccount,
+  StudentAuthAccount,
+} from "@/lib/studentIntelligenceStore";
+import { Settings } from "lucide-react";
 
 // Primary Navigation Links (Displayed directly on Desktop)
 const PRIMARY_NAV_LINKS = [
   { href: "/", label: "হোম", icon: School },
-  { href: "/learning-library", label: "শিক্ষা হাব", icon: BookOpen },
+  { href: "/learning", label: "শিক্ষা হাব", icon: BookOpen },
   { href: "/ask-ai", label: "Ask AI", icon: Sparkles },
   { href: "/notices", label: "নোটিশ", icon: Bell },
   { href: "/results", label: "ফলাফল", icon: GraduationCap },
@@ -57,13 +63,45 @@ const ALL_NAV_LINKS = [...PRIMARY_NAV_LINKS, ...MORE_NAV_LINKS];
 export default function PublicHeader() {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const { isLoggedIn, currentUser, logout, openLoginModal } = useAuth();
+
+  // Strict Student-only Authentication State (NEVER displays backend admin/teacher roles)
+  const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(null);
+  const [showStudentLoginModal, setShowStudentLoginModal] = useState(false);
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const moreDropdownRef = useRef<HTMLDivElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sync Student Authentication on Mount and Events
+  useEffect(() => {
+    const syncStudent = () => {
+      setActiveStudent(getActiveStudentAccount());
+    };
+    syncStudent();
+
+    const handleOpenLogin = () => setShowStudentLoginModal(true);
+
+    window.addEventListener("ptsc_student_auth_changed", syncStudent);
+    window.addEventListener("ptsc_student_logout", syncStudent);
+    window.addEventListener("ptsc_open_student_login", handleOpenLogin);
+    window.addEventListener("storage", syncStudent);
+
+    return () => {
+      window.removeEventListener("ptsc_student_auth_changed", syncStudent);
+      window.removeEventListener("ptsc_student_logout", syncStudent);
+      window.removeEventListener("ptsc_open_student_login", handleOpenLogin);
+      window.removeEventListener("storage", syncStudent);
+    };
+  }, []);
+
+  const handleStudentLogout = () => {
+    logoutStudentAccount();
+    setActiveStudent(null);
+    setUserDropdownOpen(false);
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -100,11 +138,17 @@ export default function PublicHeader() {
     setUserDropdownOpen(false);
   }, [pathname]);
 
-  const isMoreLinkActive = MORE_NAV_LINKS.some((link) => pathname === link.href);
+  const isLinkActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    if (href === "/learning") return pathname.startsWith("/learning") || pathname.startsWith("/learning-library");
+    return pathname === href || pathname.startsWith(href + "/");
+  };
+
+  const isMoreLinkActive = MORE_NAV_LINKS.some((link) => isLinkActive(link.href));
 
   return (
     <header
-      className={`sticky top-0 z-50 w-full max-w-full overflow-visible transition-all duration-300 border-b ${
+      className={`sticky top-0 z-50 w-full transition-all duration-300 border-b ${
         scrolled
           ? "bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl border-slate-200/80 dark:border-slate-800 shadow-[0_4px_30px_rgba(99,102,241,0.06)] dark:shadow-[0_4px_30px_rgba(6,182,212,0.08)]"
           : "bg-white/75 dark:bg-slate-950/75 backdrop-blur-md border-slate-200/50 dark:border-slate-900/50 shadow-xs"
@@ -112,7 +156,7 @@ export default function PublicHeader() {
     >
       {/* Top micro-bar for institutional accreditation */}
       <div className="bg-slate-950 text-slate-300 text-[11px] py-1.5 px-4 border-b border-slate-800 hidden sm:block w-full max-w-full overflow-hidden">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="max-w-7xl 2xl:max-w-[1440px] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2 font-semibold min-w-0">
             <span className="text-cyan-400 font-extrabold uppercase tracking-wide shrink-0">
               গণপ্রজাতন্ত্রী বাংলাদেশ সরকার
@@ -129,22 +173,22 @@ export default function PublicHeader() {
             <span className="font-mono text-cyan-300 font-black hidden sm:inline">02589941021</span>
             <span className="text-slate-800 dark:text-slate-200 hidden sm:inline">|</span>
             <Link
-              href={isLoggedIn && currentUser.role !== "student" ? "/admin" : "/login?role=admin"}
-              className="text-indigo-400 hover:text-indigo-300 font-black flex items-center gap-1 transition-all duration-200 hover:scale-105 active:scale-95"
+              href="/login?role=admin"
+              className="text-indigo-400 hover:text-indigo-300 font-black flex items-center gap-1 transition-all duration-200 hover:scale-105 active:scale-95 shrink-0"
             >
               <Lock className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{isLoggedIn && currentUser.role !== "student" ? "ERP ড্যাশবোর্ড" : "ERP লগইন"}</span>
+              <span>ERP লগইন</span>
             </Link>
           </div>
         </div>
       </div>
 
       {/* Main Navigation Bar */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 w-full min-w-0">
-        <div className="flex items-center justify-between h-14 sm:h-16 lg:h-20 gap-3 min-w-0">
+      <div className="max-w-7xl 2xl:max-w-[1440px] mx-auto px-3 sm:px-4 lg:px-6 xl:px-8 w-full min-w-0">
+        <div className="flex items-center justify-between h-14 sm:h-16 lg:h-20 gap-2 lg:gap-3 xl:gap-4 min-w-0">
           
           {/* Brand Logo & Name */}
-          <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0 min-w-0 max-w-[280px] sm:max-w-none">
+          <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink min-w-0 max-w-[200px] xs:max-w-[240px] sm:max-w-xs md:max-w-sm lg:max-w-[280px] xl:max-w-[340px] 2xl:max-w-none">
             <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-500 p-0.5 flex items-center justify-center text-white text-base sm:text-xl font-black shadow-[0_0_25px_rgba(6,182,212,0.35)] group-hover:rotate-6 transition-transform shrink-0">
               <div className="w-full h-full rounded-2xl bg-slate-950 flex items-center justify-center">
                 <span className="text-[10px] sm:text-xs text-cyan-400 font-black">PTSC</span>
@@ -163,13 +207,16 @@ export default function PublicHeader() {
           {/* Desktop Nav Links - Clean & Non-overflowing Layout */}
           <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 bg-slate-100/60 dark:bg-slate-900/50 p-1 xl:p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-800/80 shadow-inner shrink-0 relative">
             {PRIMARY_NAV_LINKS.map((link) => {
-              const isActive = pathname === link.href;
+              const isActive = isLinkActive(link.href);
               const Icon = link.icon;
+              const isNotice = link.href === "/notices";
+              const isResult = link.href === "/results";
+              const visibilityClass = isResult ? "hidden 2xl:flex" : isNotice ? "hidden xl:flex" : "flex";
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`px-2 xl:px-3 py-1.5 rounded-xl text-[11px] xl:text-xs font-black tracking-tight transition-all duration-200 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
+                  className={`px-2 xl:px-3 py-1.5 rounded-xl text-[11px] xl:text-xs font-black tracking-tight transition-all duration-200 items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${visibilityClass} ${
                     isActive
                       ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/25 border border-indigo-400/40"
                       : "text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-white dark:hover:bg-slate-800"
@@ -209,14 +256,43 @@ export default function PublicHeader() {
               {moreDropdownOpen && (
                 <div
                   onMouseLeave={() => setMoreDropdownOpen(false)}
-                  className="absolute right-0 mt-2 w-52 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200"
+                  className="absolute right-0 mt-2 w-56 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200"
                 >
+                  {/* Dynamic overflow primary links for compact screens */}
+                  <div className="2xl:hidden pb-1 mb-1 border-b border-slate-100 dark:border-slate-800 space-y-1">
+                    <Link
+                      href="/notices"
+                      onClick={() => setMoreDropdownOpen(false)}
+                      className={`w-full flex xl:hidden items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isLinkActive("/notices")
+                          ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md"
+                          : "text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-indigo-600 dark:hover:text-cyan-300"
+                      }`}
+                    >
+                      <Bell className={`w-4 h-4 shrink-0 ${isLinkActive("/notices") ? "text-cyan-300" : "text-indigo-500 dark:text-cyan-400"}`} />
+                      <span>নোটিশ ও ঘোষণা</span>
+                    </Link>
+
+                    <Link
+                      href="/results"
+                      onClick={() => setMoreDropdownOpen(false)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isLinkActive("/results")
+                          ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md"
+                          : "text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-indigo-600 dark:hover:text-cyan-300"
+                      }`}
+                    >
+                      <GraduationCap className={`w-4 h-4 shrink-0 ${isLinkActive("/results") ? "text-cyan-300" : "text-indigo-500 dark:text-cyan-400"}`} />
+                      <span>ফলাফল ও গ্রেডশিট</span>
+                    </Link>
+                  </div>
+
                   <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 px-3 py-1 mb-1">
                     অতিরিক্ত মেনু অপশন
                   </div>
                   <div className="space-y-1">
                     {MORE_NAV_LINKS.map((link) => {
-                      const isActive = pathname === link.href;
+                      const isActive = isLinkActive(link.href);
                       const Icon = link.icon;
                       return (
                         <Link
@@ -241,12 +317,31 @@ export default function PublicHeader() {
           </nav>
 
           {/* Header Action Buttons & Theme Switcher */}
-          <div className="hidden sm:flex items-center gap-2.5 shrink-0">
+          <div className="hidden sm:flex items-center gap-1.5 md:gap-2 xl:gap-2.5 shrink-0">
+            {/* Glowing Live Quiz CTA with Rotating RGB Gradient Border Glow */}
+            <Link
+              href="/quiz/join"
+              className="rgb-live-quiz-cta-wrapper shrink-0"
+              title="⚡ লাইভ কুইজে যোগ দিন"
+            >
+              <span className="rgb-live-quiz-cta-inner text-xs py-1.5 px-2.5 xl:px-3.5">
+                <span className="text-amber-400 text-xs sm:text-sm font-black animate-pulse">⚡</span>
+                <span className="tracking-wide font-black whitespace-nowrap">
+                  <span className="hidden 2xl:inline">লাইভ কুইজে যোগ দিন</span>
+                  <span className="2xl:hidden">লাইভ কুইজ</span>
+                </span>
+                <span className="relative flex h-2 w-2 ml-0.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                </span>
+              </span>
+            </Link>
+
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-300 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
+              className="p-2 xl:p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-300 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer shrink-0"
             >
               {theme === "dark" ? (
                 <Sun className="w-4 h-4 text-amber-400" />
@@ -255,40 +350,40 @@ export default function PublicHeader() {
               )}
             </button>
 
-            {/* Auth State Indicator / Profile Dropdown & Login */}
-            {isLoggedIn ? (
-              <div className="relative" ref={userDropdownRef}>
+            {/* Auth State Indicator / Student Profile Dropdown & Login */}
+            {activeStudent ? (
+              <div className="relative shrink-0" ref={userDropdownRef}>
                 <button
                   type="button"
                   onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-extrabold text-xs flex items-center gap-2 border border-slate-200/80 dark:border-slate-700 transition-all cursor-pointer shadow-xs"
-                  title="আমার অ্যাকাউন্ট ও প্রোফাইল"
+                  className="px-2 xl:px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-extrabold text-xs flex items-center gap-1.5 xl:gap-2 border border-slate-200/80 dark:border-slate-700 transition-all cursor-pointer shadow-xs shrink-0"
+                  title="শিক্ষার্থী প্রোফাইল ও সেটিংস"
                 >
-                  <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white font-black text-[11px] flex items-center justify-center shrink-0">
-                    {currentUser?.nameBangla?.charAt(0) || currentUser?.fullName?.charAt(0) || "U"}
+                  <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white font-black text-[11px] flex items-center justify-center shrink-0 shadow-xs">
+                    {activeStudent.studentName?.charAt(0) || "S"}
                   </div>
-                  <span className="hidden xl:inline max-w-[100px] truncate text-slate-800 dark:text-white">
-                    {currentUser?.nameBangla || currentUser?.fullName || "প্রোফাইল"}
-                  </span>
-                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} />
+                  <div className="hidden sm:flex flex-col text-left min-w-0 max-w-[85px] lg:max-w-[100px] xl:max-w-[125px] 2xl:max-w-[150px]">
+                    <span className="truncate text-xs font-black text-slate-800 dark:text-white leading-tight">
+                      {activeStudent.studentName}
+                    </span>
+                    <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold truncate leading-none">
+                      রোল: {activeStudent.rollNumber}
+                    </span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} />
                 </button>
 
                 {userDropdownOpen && (
                   <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-2.5 text-xs z-50 animate-in fade-in zoom-in-95 duration-150">
-                    {/* User Summary Header */}
+                    {/* Student Summary Header */}
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl mb-2">
-                      <p className="font-extrabold text-slate-900 dark:text-white truncate">
-                        {currentUser?.nameBangla || currentUser?.fullName}
+                      <p className="font-extrabold text-slate-900 dark:text-white truncate max-w-[220px]">
+                        {activeStudent.studentName}
                       </p>
                       <div className="flex items-center gap-1.5 mt-1">
-                        <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-cyan-400 text-[10px] font-bold">
-                          {currentUser?.role === "student"
-                            ? `শিক্ষার্থী • রোল ${currentUser?.roll || "১০১"}`
-                            : currentUser?.role === "teacher"
-                            ? "শিক্ষক পরিষদ"
-                            : currentUser?.role === "principal"
-                            ? "অধ্যক্ষ"
-                            : "প্রশাসনিক স্টাফ"}
+                        <span className="px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-[10px] font-bold">
+                          {activeStudent.trade ? `${activeStudent.trade} • ` : ""}
+                          {activeStudent.classLevel?.replace("class-", "")}ম শ্রেণি • রোল {activeStudent.rollNumber}
                         </span>
                       </div>
                     </div>
@@ -296,52 +391,47 @@ export default function PublicHeader() {
                     {/* Navigation Links */}
                     <div className="space-y-1 mb-2">
                       <Link
-                        href={currentUser?.role === "student" ? "/student/profile" : "/admin?tab=profile"}
+                        href="/student/profile"
                         onClick={() => setUserDropdownOpen(false)}
-                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-800 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-cyan-400 font-bold transition"
+                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 text-slate-800 dark:text-slate-200 hover:text-cyan-600 dark:hover:text-cyan-400 font-bold transition"
                       >
                         <span className="flex items-center gap-2">
-                          <User className="w-3.5 h-3.5 text-indigo-500" />
-                          <span>আমার প্রোফাইল ও তথ্য</span>
+                          <Settings className="w-3.5 h-3.5 text-cyan-500" />
+                          <span>আমার প্রোফাইল ও সেটিংস</span>
                         </span>
                         <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                       </Link>
 
-                      {currentUser?.role === "student" ? (
-                        <Link
-                          href="/results"
-                          onClick={() => setUserDropdownOpen(false)}
-                          className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <GraduationCap className="w-3.5 h-3.5 text-teal-500" />
-                            <span>আমার ফলাফল ও গ্রেডশিট</span>
-                          </span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                        </Link>
-                      ) : (
-                        <Link
-                          href="/admin"
-                          onClick={() => setUserDropdownOpen(false)}
-                          className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Lock className="w-3.5 h-3.5 text-teal-500" />
-                            <span>ERP অ্যাডমিন ড্যাশবোর্ড</span>
-                          </span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                        </Link>
-                      )}
+                      <Link
+                        href="/results"
+                        onClick={() => setUserDropdownOpen(false)}
+                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
+                      >
+                        <span className="flex items-center gap-2">
+                          <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>আমার ফলাফল ও গ্রেডশিট</span>
+                        </span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                      </Link>
+
+                      <Link
+                        href="/learning"
+                        onClick={() => setUserDropdownOpen(false)}
+                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
+                      >
+                        <span className="flex items-center gap-2">
+                          <BookOpen className="w-3.5 h-3.5 text-purple-500" />
+                          <span>শিক্ষা রোডম্যাপ</span>
+                        </span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                      </Link>
                     </div>
 
                     {/* Logout Button */}
                     <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                       <button
                         type="button"
-                        onClick={() => {
-                          setUserDropdownOpen(false);
-                          logout();
-                        }}
+                        onClick={handleStudentLogout}
                         className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition text-left cursor-pointer"
                       >
                         <LogOut className="w-3.5 h-3.5" />
@@ -352,50 +442,45 @@ export default function PublicHeader() {
                 )}
               </div>
             ) : (
-              <Link
-                href="/login"
-                className="hidden sm:flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200/80 dark:border-slate-700 transition"
+              <button
+                type="button"
+                onClick={() => setShowStudentLoginModal(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 xl:py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-black shadow-md shadow-indigo-600/20 hover:shadow-indigo-600/35 transition-all duration-200 hover:scale-[1.02] active:scale-95 shrink-0 cursor-pointer"
               >
-                <User className="w-3.5 h-3.5 text-indigo-500" />
-                <span>স্টুডেন্ট লগইন</span>
-              </Link>
+                <GraduationCap className="w-3.5 h-3.5" />
+                <span>শিক্ষার্থী লগইন</span>
+              </button>
             )}
 
-            {/* Document Verification CTA */}
+            {/* Discreet ERP Login Button for Institutional Staff on Ultra-Wide screens */}
             <Link
-              href="/verify"
-              className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200/80 dark:border-slate-700 transition"
-              title="ডিজিটাল সনদ ও প্রত্যয়নপত্র যাচাই"
+              href="/login?role=admin"
+              className="hidden 2xl:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-900 text-slate-300 hover:text-white border border-slate-700/60 text-xs font-black shadow-xs transition-all hover:scale-[1.02] active:scale-95 shrink-0"
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-teal-500 shrink-0" />
-              <span>সনদ যাচাই</span>
-            </Link>
-
-            {/* Live Quiz CTA */}
-            <Link
-              href="/quiz/join"
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-sm transition-all duration-300 transform hover:scale-[1.03] active:scale-95 border border-emerald-400/20 shrink-0"
-            >
-              <Award className="w-4 h-4" />
-              <span>লাইভ কুইজ</span>
-            </Link>
-
-            {/* ERP Login Button */}
-            <Link
-              href={isLoggedIn && currentUser?.role !== "student" ? "/admin" : "/login?role=admin"}
-              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-sm shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-95 shrink-0"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>{isLoggedIn && currentUser?.role !== "student" ? "ERP প্যানেল" : "ERP লগইন"}</span>
+              <Lock className="w-3.5 h-3.5 text-indigo-400" />
+              <span>ERP লগইন</span>
             </Link>
           </div>
 
-          {/* Mobile Menu Toggle Button */}
-          <div className="flex items-center gap-2 lg:hidden shrink-0">
+          {/* Mobile Header Controls & Live Quiz */}
+          <div className="flex items-center gap-1.5 sm:gap-2 lg:hidden shrink-0">
+            {/* Mobile Compact Glowing Live Quiz Button */}
+            <Link
+              href="/quiz/join"
+              className="rgb-live-quiz-cta-wrapper shrink-0 sm:hidden"
+              title="⚡ লাইভ কুইজ"
+            >
+              <span className="rgb-live-quiz-cta-inner text-[10px] py-1 px-2.5 gap-1 font-black whitespace-nowrap">
+                <span className="text-amber-400 text-xs font-black animate-pulse">⚡</span>
+                <span>লাইভ কুইজ</span>
+              </span>
+            </Link>
+
+            {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
             >
               {theme === "dark" ? (
                 <Sun className="w-4 h-4 text-amber-400 animate-pulse" />
@@ -403,9 +488,11 @@ export default function PublicHeader() {
                 <Moon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
               )}
             </button>
+
+            {/* Mobile Menu Hamburger */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800 transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800 transition-colors cursor-pointer shrink-0"
               aria-label="Toggle mobile menu"
             >
               {mobileMenuOpen ? <X className="w-5 h-5 text-rose-500" /> : <Menu className="w-5 h-5" />}
@@ -417,11 +504,11 @@ export default function PublicHeader() {
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl px-4 pt-3 pb-6 space-y-3 animate-in slide-in-from-top-4 duration-300">
+        <div className="lg:hidden border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl px-4 pt-3 pb-6 space-y-3 animate-in slide-in-from-top-4 duration-300 max-h-[85vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-2 pt-2">
             {ALL_NAV_LINKS.map((link) => {
               const Icon = link.icon;
-              const isActive = pathname === link.href;
+              const isActive = isLinkActive(link.href);
               return (
                 <Link
                   key={link.href}
@@ -440,59 +527,88 @@ export default function PublicHeader() {
           </div>
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">
-            {isLoggedIn && (
+            {activeStudent ? (
               <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 mb-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white font-black text-xs flex items-center justify-center">
-                    {currentUser?.nameBangla?.charAt(0) || currentUser?.fullName?.charAt(0) || "U"}
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white font-black text-xs flex items-center justify-center shrink-0">
+                    {activeStudent.studentName?.charAt(0) || "S"}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-black text-slate-900 dark:text-white truncate">
-                      {currentUser?.nameBangla || currentUser?.fullName}
+                    <div className="text-xs font-black text-slate-900 dark:text-white truncate max-w-[200px] sm:max-w-[260px]">
+                      {activeStudent.studentName}
                     </div>
-                    <div className="text-[10px] text-indigo-500 dark:text-cyan-400 font-bold">
-                      {currentUser?.role === "student" ? `শিক্ষার্থী • রোল ${currentUser?.roll || "১০১"}` : "স্টাফ / শিক্ষক"}
+                    <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold truncate">
+                      {activeStudent.classLevel?.replace("class-", "")}ম শ্রেণি • রোল {activeStudent.rollNumber}
                     </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <Link
-                    href={currentUser?.role === "student" ? "/student/profile" : "/admin?tab=profile"}
+                    href="/student/profile"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="py-2 text-center text-xs font-bold rounded-xl bg-indigo-600 text-white"
+                    className="py-2 text-center text-xs font-bold rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 text-white shadow-xs"
                   >
-                    আমার প্রোফাইল
+                    আমার প্রোফাইল ও সেটিংস
                   </Link>
                   <button
                     onClick={() => {
-                      logout();
+                      handleStudentLogout();
                       setMobileMenuOpen(false);
                     }}
-                    className="py-2 text-center text-xs font-bold rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                    className="py-2 text-center text-xs font-bold rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 cursor-pointer"
                   >
                     লগআউট
                   </button>
                 </div>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowStudentLoginModal(true);
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 text-white text-xs font-black flex items-center justify-center gap-2 shadow-md shadow-indigo-600/25 active:scale-95 transition-all cursor-pointer"
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>শিক্ষার্থী লগইন করুন</span>
+              </button>
             )}
 
             <Link
               href="/quiz/join"
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-slate-950 text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+              onClick={() => setMobileMenuOpen(false)}
+              className="rgb-live-quiz-cta-wrapper w-full shadow-lg"
             >
-              <Award className="w-4 h-4" />
-              <span>লাইভ কুইজে যোগ দিন</span>
+              <span className="rgb-live-quiz-cta-inner w-full justify-center py-3 text-xs">
+                <span className="text-amber-400 text-sm font-black animate-pulse">⚡</span>
+                <span className="font-black">লাইভ কুইজে যোগ দিন</span>
+                <span className="relative flex h-2 w-2 ml-1">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                </span>
+              </span>
             </Link>
             <Link
-              href={isLoggedIn && currentUser.role !== "student" ? "/admin" : "/login?role=admin"}
-              className="w-full py-3 rounded-xl bg-slate-900 dark:bg-slate-900/90 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 border border-slate-700/80 active:scale-95 transition-all"
+              href="/login?role=admin"
+              className="w-full py-2.5 rounded-xl bg-slate-900 dark:bg-slate-900/90 text-slate-300 text-xs font-bold flex items-center justify-center gap-2 border border-slate-700/80 active:scale-95 transition-all"
             >
-              <Lock className="w-4 h-4 text-indigo-400 animate-pulse" />
-              <span>{isLoggedIn && currentUser.role !== "student" ? "ইনস্টিটিউশনাল ERP ব্যাকএন্ড" : "প্রশাসনিক ERP লগইন"}</span>
+              <Lock className="w-3.5 h-3.5 text-indigo-400" />
+              <span>প্রশাসনিক ERP লগইন</span>
             </Link>
           </div>
         </div>
       )}
+
+      {/* Streamlined Universal Student Login Modal */}
+      <StudentLoginModal
+        isOpen={showStudentLoginModal}
+        onClose={() => setShowStudentLoginModal(false)}
+        onSuccessLogin={(account) => {
+          setActiveStudent(account);
+          setShowStudentLoginModal(false);
+        }}
+      />
     </header>
   );
 }

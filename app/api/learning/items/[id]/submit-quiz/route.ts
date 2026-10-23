@@ -24,7 +24,7 @@ export async function POST(
     const tabSwitchedQuestionIds = Array.isArray(body.tabSwitchedQuestionIds) ? body.tabSwitchedQuestionIds : [];
 
     const result = chapterLearningStore.submitQuizAttempt(
-      Number(id),
+      id,
       studentRoll,
       answers,
       studentName,
@@ -45,6 +45,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       isPassed: result.isPassed,
+      score: result.scorePercentage,
       scorePercentage: result.scorePercentage,
       correctCount: result.correctCount,
       disqualifiedCount: result.disqualifiedCount || 0,

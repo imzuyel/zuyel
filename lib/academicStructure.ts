@@ -188,51 +188,6 @@ export const MANDATORY_FOUR_TRADES: AcademicTrade[] = [
 
 export const ALL_TRADES: AcademicTrade[] = [
   ...MANDATORY_FOUR_TRADES,
-  // SSC Class 9 Variants
-  {
-    id: 101,
-    tradeNumber: 1,
-    code: "CE",
-    name: "Consumer Electronics",
-    nameBangla: "কনজিউমার ইলেকট্রনিক্স",
-    seats: 50,
-    level: "SSC",
-    applicableClass: 9,
-    descriptionBangla: "কনজিউমার ইলেকট্রনিক্স ও সার্কিট ডায়াগনসিস।",
-  },
-  {
-    id: 102,
-    tradeNumber: 2,
-    code: "IT-IOT",
-    name: "IT Support & IoT Basics",
-    nameBangla: "আইটি সাপোর্ট এন্ড আইওটি বেসিক্স",
-    seats: 50,
-    level: "SSC",
-    applicableClass: 9,
-    descriptionBangla: "কম্পিউটার হার্ডওয়্যার, নেটওয়ার্কিং ও আইওটি সেন্সর ফান্ডামেন্টালস।",
-  },
-  {
-    id: 103,
-    tradeNumber: 3,
-    code: "GEW",
-    name: "General Electrical Workshop",
-    nameBangla: "জেনারেল ইলেকট্রিক্যাল ওয়ার্কশপ",
-    seats: 50,
-    level: "SSC",
-    applicableClass: 9,
-    descriptionBangla: "হাউস ওয়্যারিং ও প্রাথমিক সার্কিট সংযোগ।",
-  },
-  {
-    id: 104,
-    tradeNumber: 4,
-    code: "AMB",
-    name: "Apparel Manufacturing Basics",
-    nameBangla: "এপারেল ম্যানুফ্যাকচারিং বেসিক্স",
-    seats: 50,
-    level: "SSC",
-    applicableClass: 9,
-    descriptionBangla: "পোশাক তৈরি ও সুইং মেশিন দক্ষতা।",
-  },
   // Class 10 Variants
   {
     id: 111,

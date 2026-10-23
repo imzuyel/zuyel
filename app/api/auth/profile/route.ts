@@ -14,7 +14,7 @@ import {
   normalizeRole,
   AUTHORIZED_STAFF_ROLES,
 } from "@/lib/rbac";
-import { PRESET_USERS, UserProfile } from "@/context/AuthContext";
+import { PRESET_USERS, UserProfile } from "@/lib/presetUsers";
 import { institutionalDb } from "@/lib/database";
 import { safePrismaQuery, isPrismaAvailable } from "@/lib/prisma";
 

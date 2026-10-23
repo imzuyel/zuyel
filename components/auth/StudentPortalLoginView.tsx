@@ -32,6 +32,7 @@ import {
   updateStudentPassword,
   StudentAuthAccount,
   UNIVERSAL_DEFAULT_PASSWORD,
+  STUDENT_LOGIN_CLASSES,
 } from "@/lib/studentIntelligenceStore";
 
 interface StudentPortalLoginViewProps {
@@ -50,6 +51,7 @@ export default function StudentPortalLoginView({
 
   // Mode: 'login' | 'change_password'
   const [mode, setMode] = useState<"login" | "change_password">("login");
+  const [selectedClass, setSelectedClass] = useState("class-10");
   const [rollNumber, setRollNumber] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -91,6 +93,7 @@ export default function StudentPortalLoginView({
         body: JSON.stringify({
           identifier: cleanRoll,
           password: cleanPass,
+          classLevel: selectedClass,
           source: "student",
         }),
       }).catch(() => null);
@@ -106,7 +109,7 @@ export default function StudentPortalLoginView({
       }
 
       // 2. Client-side intelligence store verification & first-time password change handling
-      const res = loginStudentAccount(cleanRoll, cleanPass);
+      const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass);
 
       if (res.success) {
         if (res.requiresPasswordChange && res.account) {
@@ -404,6 +407,35 @@ export default function StudentPortalLoginView({
                 /* Login Form */
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
                   
+                  {/* Class / Academic Year Dropdown */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <label htmlFor="student-portal-class" className="font-bold text-slate-200 flex items-center gap-1.5">
+                        <span>শ্রেণি ও শিক্ষাবর্ষ (Class / Academic Year)</span>
+                        <span className="text-rose-400">*</span>
+                      </label>
+                      <span className="text-[10px] font-mono text-cyan-400 font-bold">শিক্ষাবর্ষ ২০২৬</span>
+                    </div>
+
+                    <div className="relative">
+                      <select
+                        id="student-portal-class"
+                        value={selectedClass}
+                        onChange={(e) => setSelectedClass(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-900/90 border border-slate-800 rounded-2xl text-sm text-slate-100 focus:outline-none focus:border-cyan-500/80 focus:ring-4 focus:ring-cyan-500/15 focus:shadow-[0_0_25px_rgba(6,182,212,0.2)] transition-all duration-300 font-bold cursor-pointer appearance-none pr-9"
+                      >
+                        {STUDENT_LOGIN_CLASSES.map((cls) => (
+                          <option key={cls.id} value={cls.id} className="bg-slate-900 text-slate-100">
+                            {cls.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                        ▼
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Roll Number Input with Neon Glow Focus Ring */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs">

@@ -10,15 +10,20 @@ import {
   Bot,
   FileText,
   Radio,
+  BookOpen,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
 
 export default function AiQuizSidebarSection() {
-  const [isOpen, setIsOpen] = useState(true);
   const pathname = usePathname();
+  const [isOpen, setIsOpen] = useState(true);
 
-  const isLinkActive = (href: string) => pathname === href;
+  const isLinkActive = (href: string) => {
+    if (href === "/admin") return pathname === "/admin";
+    if (href === "/learning") return pathname.startsWith("/learning");
+    return pathname === href || pathname.startsWith(href);
+  };
 
   return (
     <aside className="bg-slate-950 text-slate-200 h-screen max-h-screen sticky top-0 w-64 border-r border-slate-800 flex flex-col p-4 select-none font-sans shrink-0 overflow-hidden">
@@ -102,6 +107,18 @@ export default function AiQuizSidebarSection() {
               >
                 <Radio className="w-3.5 h-3.5 text-emerald-400 group-hover:text-emerald-300 transition" />
                 <span>Live Quiz & Pin Lobby</span>
+              </Link>
+
+              <Link
+                href="/learning"
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition group ${
+                  isLinkActive("/learning")
+                    ? "bg-cyan-950/50 text-cyan-300 font-bold border border-cyan-800/50"
+                    : "text-slate-400 hover:text-white hover:bg-slate-900"
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5 text-cyan-400 group-hover:text-cyan-300 transition" />
+                <span>অধ্যায়ভিত্তিক লার্নিং হাব</span>
               </Link>
             </div>
           )}

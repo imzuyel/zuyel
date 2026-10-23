@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma, isPrismaAvailable, safePrismaQuery } from "./prisma";
-import { PRESET_USERS } from "@/context/AuthContext";
+import { PRESET_USERS } from "./presetUsers";
 import { updateStudentPassword } from "./studentIntelligenceStore";
 import { recordSecurityAuditLog } from "./rbac";
 

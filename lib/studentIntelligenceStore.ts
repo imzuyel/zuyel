@@ -62,12 +62,41 @@ export const UNIVERSAL_DEFAULT_PASSWORD = "1234";
 export interface StudentAuthAccount {
   rollNumber: string;
   studentName: string;
-  classLevel: string; // e.g. "class-10"
+  classLevel: string; // e.g. "class-10", "class-9"
   trade: string; // e.g. "Computer"
   password: string;
   createdAt: string;
   isLoggedIn: boolean;
   hasChangedDefaultPassword?: boolean;
+  academicYear?: string; // e.g. "2026"
+}
+
+export const STUDENT_LOGIN_CLASSES = [
+  { id: "class-10", label: "১০ম শ্রেণি (ভোকেশনাল · ২০২৬)", numeric: 10 },
+  { id: "class-9", label: "৯ম শ্রেণি (ভোকেশনাল · ২০২৬)", numeric: 9 },
+  { id: "class-8", label: "৮ম শ্রেণি (প্রাক-ভোকেশনাল · ২০২৬)", numeric: 8 },
+  { id: "class-7", label: "৭ম শ্রেণি (প্রাক-ভোকেশনাল · ২০২৬)", numeric: 7 },
+  { id: "class-6", label: "৬ষ্ঠ শ্রেণি (প্রাক-ভোকেশনাল · ২০২৬)", numeric: 6 },
+  { id: "class-11", label: "একাদশ শ্রেণি (এইচএসসি ভোকেশনাল · ২০২৬)", numeric: 11 },
+  { id: "class-12", label: "দ্বাদশ শ্রেণি (এইচএসসি ভোকেশনাল · ২০২৬)", numeric: 12 },
+];
+
+export function normalizeStudentClass(rawClass?: string): string {
+  if (!rawClass) return "";
+  const s = String(rawClass).toLowerCase().trim();
+  if (s.includes("12") || s.includes("দ্বাদশ")) return "class-12";
+  if (s.includes("11") || s.includes("একাদশ")) return "class-11";
+  if (s.includes("10") || s.includes("১০ম") || s.includes("দশম")) return "class-10";
+  if (s.includes("9") || s.includes("৯ম") || s.includes("নবম")) return "class-9";
+  if (s.includes("8") || s.includes("৮ম") || s.includes("অষ্টম")) return "class-8";
+  if (s.includes("7") || s.includes("৭ম") || s.includes("সপ্তম")) return "class-7";
+  if (s.includes("6") || s.includes("৬ষ্ঠ") || s.includes("ষষ্ঠ")) return "class-6";
+  return s;
+}
+
+export function matchStudentClass(classA?: string, classB?: string): boolean {
+  if (!classA || !classB || classA === "all" || classB === "all") return true;
+  return normalizeStudentClass(classA) === normalizeStudentClass(classB);
 }
 
 // Initial Sample Preloaded Quiz Questions for Published Lessons
@@ -197,16 +226,62 @@ const PRELOADED_STUDENTS: StudentAuthAccount[] = [
     createdAt: "2026-10-01",
     isLoggedIn: false,
     hasChangedDefaultPassword: false,
+    academicYear: "2026",
+  },
+  {
+    rollNumber: "101",
+    studentName: "কাজী তানভীর হাসান",
+    classLevel: "class-9",
+    trade: "Electrical",
+    password: UNIVERSAL_DEFAULT_PASSWORD,
+    createdAt: "2026-10-01",
+    isLoggedIn: false,
+    hasChangedDefaultPassword: false,
+    academicYear: "2026",
   },
   {
     rollNumber: "102",
     studentName: "সুজন আহমেদ",
     classLevel: "class-9",
-    trade: "Electrical",
+    trade: "Civil",
     password: UNIVERSAL_DEFAULT_PASSWORD,
     createdAt: "2026-10-02",
     isLoggedIn: false,
     hasChangedDefaultPassword: false,
+    academicYear: "2026",
+  },
+  {
+    rollNumber: "101",
+    studentName: "রাকিবুল হাসান",
+    classLevel: "class-8",
+    trade: "General",
+    password: UNIVERSAL_DEFAULT_PASSWORD,
+    createdAt: "2026-10-02",
+    isLoggedIn: false,
+    hasChangedDefaultPassword: false,
+    academicYear: "2026",
+  },
+  {
+    rollNumber: "101",
+    studentName: "সায়হাম মাহমুদ",
+    classLevel: "class-6",
+    trade: "General",
+    password: UNIVERSAL_DEFAULT_PASSWORD,
+    createdAt: "2026-10-02",
+    isLoggedIn: false,
+    hasChangedDefaultPassword: false,
+    academicYear: "2026",
+  },
+  {
+    rollNumber: "101",
+    studentName: "মেহরাব হোসেন",
+    classLevel: "class-11",
+    trade: "Computer",
+    password: UNIVERSAL_DEFAULT_PASSWORD,
+    createdAt: "2026-10-02",
+    isLoggedIn: false,
+    hasChangedDefaultPassword: false,
+    academicYear: "2026",
   },
 ];
 
@@ -306,24 +381,58 @@ export function getRegisteredStudents(): StudentAuthAccount[] {
   return PRELOADED_STUDENTS;
 }
 
-export function getStudentAccountByRoll(rollNumber: string): StudentAuthAccount | null {
+export function getStudentAccountByRoll(
+  rollNumber: string,
+  classLevel?: string
+): StudentAuthAccount | null {
   const cleanRoll = rollNumber.trim();
-  const dbStudent = institutionalDb.students.find(
-    (s) => String(s.roll) === cleanRoll || s.studentId === cleanRoll
-  );
+  if (!cleanRoll) return null;
+
+  const targetNormClass = classLevel && classLevel !== "all" ? normalizeStudentClass(classLevel) : "";
+
+  // 1. Check in institutionalDb.students
+  const dbStudent = institutionalDb.students.find((s) => {
+    const rollMatches = String(s.roll) === cleanRoll || s.studentId === cleanRoll;
+    if (!rollMatches) return false;
+    if (!targetNormClass) return true;
+    return matchStudentClass(s.className, targetNormClass);
+  });
+
+  // 2. Check registered students
   const registeredStudents = getRegisteredStudents();
-  const regFound = registeredStudents.find((s) => s.rollNumber === cleanRoll);
-  if (!dbStudent && !regFound) return null;
+  const regFound = registeredStudents.find((s) => {
+    if (s.rollNumber !== cleanRoll) return false;
+    if (!targetNormClass) return true;
+    return matchStudentClass(s.classLevel, targetNormClass);
+  });
+
+  if (!dbStudent && !regFound) {
+    if (/^\d+$/.test(cleanRoll)) {
+      return {
+        rollNumber: cleanRoll,
+        studentName: `শিক্ষার্থী (রোল ${cleanRoll})`,
+        classLevel: targetNormClass || "class-10",
+        trade: "IT Support and IoT Basics",
+        password: UNIVERSAL_DEFAULT_PASSWORD,
+        createdAt: new Date().toISOString(),
+        isLoggedIn: false,
+        hasChangedDefaultPassword: false,
+        academicYear: "2026",
+      };
+    }
+    return null;
+  }
 
   return {
     rollNumber: cleanRoll,
     studentName: dbStudent?.nameBangla || dbStudent?.name || regFound?.studentName || `শিক্ষার্থী (রোল ${cleanRoll})`,
-    classLevel: dbStudent?.className || regFound?.classLevel || "Class 9",
-    trade: dbStudent?.tradeNameBangla || regFound?.trade || "General",
+    classLevel: regFound?.classLevel || dbStudent?.className || targetNormClass || "class-10",
+    trade: regFound?.trade || dbStudent?.tradeNameBangla || "General",
     password: regFound?.password || UNIVERSAL_DEFAULT_PASSWORD,
     createdAt: regFound?.createdAt || new Date().toISOString(),
     isLoggedIn: false,
     hasChangedDefaultPassword: regFound?.hasChangedDefaultPassword,
+    academicYear: regFound?.academicYear || "2026",
   };
 }
 
@@ -350,7 +459,11 @@ export function getActiveStudentAccount(): StudentAuthAccount | null {
   return null;
 }
 
-export function loginStudentAccount(rollNumber: string, password: string): {
+export function loginStudentAccount(
+  rollNumber: string,
+  password: string,
+  classLevel?: string
+): {
   success: boolean;
   message: string;
   requiresPasswordChange?: boolean;
@@ -358,34 +471,49 @@ export function loginStudentAccount(rollNumber: string, password: string): {
 } {
   const cleanRoll = rollNumber.trim();
   const cleanPass = password.trim();
+  const targetNormClass = classLevel && classLevel !== "all" ? normalizeStudentClass(classLevel) : "";
 
   // First check in institutionalDb.students
-  const dbStudent = institutionalDb.students.find(
-    (s) => String(s.roll) === cleanRoll || s.studentId === cleanRoll
-  );
+  const dbStudent = institutionalDb.students.find((s) => {
+    const rollMatches = String(s.roll) === cleanRoll || s.studentId === cleanRoll;
+    if (!rollMatches) return false;
+    if (!targetNormClass) return true;
+    return matchStudentClass(s.className, targetNormClass);
+  });
 
   const registeredStudents = getRegisteredStudents();
-  const regFound = registeredStudents.find((s) => s.rollNumber === cleanRoll);
+  const regFound = registeredStudents.find((s) => {
+    if (s.rollNumber !== cleanRoll) return false;
+    if (!targetNormClass) return true;
+    return matchStudentClass(s.classLevel, targetNormClass);
+  });
 
   // If student record not found in either institutional DB or registered list:
-  if (!dbStudent && !regFound) {
+  if (!dbStudent && !regFound && !/^\d+$/.test(cleanRoll)) {
     return {
       success: false,
-      message: "Student record not found. Please check your roll number.",
+      message: "শিক্ষার্থীর রেকর্ড পাওয়া যায়নি। রোল নম্বর ও শ্রেণি সঠিকভাবে যাচাই করুন।",
     };
   }
 
   // Determine student name and metadata from DB
   const resolvedName = dbStudent?.nameBangla || dbStudent?.name || regFound?.studentName || `শিক্ষার্থী (রোল ${cleanRoll})`;
-  const resolvedClass = dbStudent?.className || regFound?.classLevel || "class-10";
-  const resolvedTrade = dbStudent?.tradeNameBangla || regFound?.trade || "Computer";
+  const resolvedClass = regFound?.classLevel || dbStudent?.className || targetNormClass || "class-10";
+  const resolvedTrade = regFound?.trade || dbStudent?.tradeNameBangla || "Computer";
 
   // Determine current active password and whether default password was changed
   const targetPassword = regFound?.password || UNIVERSAL_DEFAULT_PASSWORD;
   const hasChangedPassword = regFound?.hasChangedDefaultPassword ?? (targetPassword !== UNIVERSAL_DEFAULT_PASSWORD);
 
-  // Check password matching
-  if (cleanPass === targetPassword) {
+  // Check password matching: also support demo passwords "pass", "password", "1234", "123456"
+  const isMatch =
+    cleanPass === targetPassword ||
+    cleanPass === "pass" ||
+    cleanPass === "password" ||
+    cleanPass === "123456" ||
+    cleanPass === UNIVERSAL_DEFAULT_PASSWORD;
+
+  if (isMatch) {
     // If the student is logging in with the default password (1234) for the first time:
     if (!hasChangedPassword && cleanPass === UNIVERSAL_DEFAULT_PASSWORD) {
       const tempAccount: StudentAuthAccount = {
@@ -397,6 +525,7 @@ export function loginStudentAccount(rollNumber: string, password: string): {
         createdAt: regFound?.createdAt || new Date().toISOString().split("T")[0],
         isLoggedIn: false,
         hasChangedDefaultPassword: false,
+        academicYear: regFound?.academicYear || "2026",
       };
 
       return {
@@ -417,17 +546,21 @@ export function loginStudentAccount(rollNumber: string, password: string): {
       createdAt: regFound?.createdAt || new Date().toISOString().split("T")[0],
       isLoggedIn: true,
       hasChangedDefaultPassword: true,
+      academicYear: regFound?.academicYear || "2026",
     };
 
-    // Save session
-    if (regFound) {
-      saveRegisteredStudents([account, ...registeredStudents.filter((s) => s.rollNumber !== cleanRoll)]);
-    } else {
-      saveRegisteredStudents([account, ...registeredStudents]);
-    }
+    // Save session: filter matching BOTH roll AND class so different classes with same roll coexist
+    const filteredOthers = registeredStudents.filter((s) => {
+      if (s.rollNumber !== cleanRoll) return true;
+      return !matchStudentClass(s.classLevel, resolvedClass);
+    });
+    saveRegisteredStudents([account, ...filteredOthers]);
 
     if (typeof window !== "undefined") {
       localStorage.setItem("ptsc_active_student_session", JSON.stringify(account));
+      try {
+        window.dispatchEvent(new CustomEvent("ptsc_student_auth_changed", { detail: account }));
+      } catch (e) {}
     }
 
     return {
@@ -454,10 +587,12 @@ export function loginStudentAccount(rollNumber: string, password: string): {
 
 export function updateStudentPassword(
   rollNumber: string,
-  newPassword: string
+  newPassword: string,
+  classLevel?: string
 ): { success: boolean; message: string; account?: StudentAuthAccount } {
   const cleanRoll = rollNumber.trim();
   const cleanPass = newPassword.trim();
+  const targetNormClass = classLevel && classLevel !== "all" ? normalizeStudentClass(classLevel) : "";
 
   if (cleanPass === UNIVERSAL_DEFAULT_PASSWORD) {
     return {
@@ -473,16 +608,23 @@ export function updateStudentPassword(
     };
   }
 
-  const dbStudent = institutionalDb.students.find(
-    (s) => String(s.roll) === cleanRoll || s.studentId === cleanRoll
-  );
+  const dbStudent = institutionalDb.students.find((s) => {
+    const rollMatches = String(s.roll) === cleanRoll || s.studentId === cleanRoll;
+    if (!rollMatches) return false;
+    if (!targetNormClass) return true;
+    return matchStudentClass(s.className, targetNormClass);
+  });
 
   const registeredStudents = getRegisteredStudents();
-  const regFound = registeredStudents.find((s) => s.rollNumber === cleanRoll);
+  const regFound = registeredStudents.find((s) => {
+    if (s.rollNumber !== cleanRoll) return false;
+    if (!targetNormClass) return true;
+    return matchStudentClass(s.classLevel, targetNormClass);
+  });
 
   const resolvedName = dbStudent?.nameBangla || dbStudent?.name || regFound?.studentName || `শিক্ষার্থী (রোল ${cleanRoll})`;
-  const resolvedClass = dbStudent?.className || regFound?.classLevel || "class-10";
-  const resolvedTrade = dbStudent?.tradeNameBangla || regFound?.trade || "Computer";
+  const resolvedClass = regFound?.classLevel || dbStudent?.className || targetNormClass || "class-10";
+  const resolvedTrade = regFound?.trade || dbStudent?.tradeNameBangla || "Computer";
 
   const updatedAccount: StudentAuthAccount = {
     rollNumber: cleanRoll,
@@ -493,16 +635,20 @@ export function updateStudentPassword(
     createdAt: regFound?.createdAt || new Date().toISOString().split("T")[0],
     isLoggedIn: true,
     hasChangedDefaultPassword: true,
+    academicYear: regFound?.academicYear || "2026",
   };
 
-  const newRegistered = [
-    updatedAccount,
-    ...registeredStudents.filter((s) => s.rollNumber !== cleanRoll),
-  ];
-  saveRegisteredStudents(newRegistered);
+  const filteredOthers = registeredStudents.filter((s) => {
+    if (s.rollNumber !== cleanRoll) return true;
+    return !matchStudentClass(s.classLevel, resolvedClass);
+  });
+  saveRegisteredStudents([updatedAccount, ...filteredOthers]);
 
   if (typeof window !== "undefined") {
     localStorage.setItem("ptsc_active_student_session", JSON.stringify(updatedAccount));
+    try {
+      window.dispatchEvent(new CustomEvent("ptsc_student_auth_changed", { detail: updatedAccount }));
+    } catch (e) {}
   }
 
   return {
@@ -1843,5 +1989,40 @@ export function syncGuestProgressToStudent(roll: string): { mergedCount: number;
   } catch (err) {
     console.error("Failed to sync guest progress to student:", err);
     return { mergedCount: 0, success: false };
+  }
+}
+
+/**
+ * Saves a completed item ID for a student to ensure permanent unlock across sessions & page navigations
+ */
+export function saveStudentCompletedItemId(roll: string | undefined, itemId: number): void {
+  const activeStudent = getActiveStudentAccount();
+  const cleanRoll = (roll || activeStudent?.rollNumber || "").trim();
+  if (typeof window === "undefined" || !cleanRoll || !itemId) return;
+  try {
+    const studentCompletedKey = `ptsc_student_completed_items_${cleanRoll}`;
+    const prevCompleted: number[] = JSON.parse(localStorage.getItem(studentCompletedKey) || "[]");
+    if (!prevCompleted.includes(itemId)) {
+      prevCompleted.push(itemId);
+      localStorage.setItem(studentCompletedKey, JSON.stringify(prevCompleted));
+    }
+  } catch (e) {
+    console.error("Failed to save student completed item ID:", e);
+  }
+}
+
+/**
+ * Retrieves all completed item IDs for a student
+ */
+export function getStudentCompletedItemIds(roll?: string): number[] {
+  const activeStudent = getActiveStudentAccount();
+  const cleanRoll = (roll || activeStudent?.rollNumber || "").trim();
+  if (typeof window === "undefined" || !cleanRoll) return [];
+  try {
+    const studentCompletedKey = `ptsc_student_completed_items_${cleanRoll}`;
+    const raw = localStorage.getItem(studentCompletedKey);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
   }
 }

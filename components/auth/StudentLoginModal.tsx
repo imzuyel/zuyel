@@ -20,21 +20,30 @@ import {
   updateStudentPassword,
   StudentAuthAccount,
   UNIVERSAL_DEFAULT_PASSWORD,
+  STUDENT_LOGIN_CLASSES,
 } from "@/lib/studentIntelligenceStore";
 
 interface StudentLoginModalProps {
+  isOpen?: boolean;
   onClose: () => void;
-  onSuccessLogin: (account: StudentAuthAccount) => void;
+  onSuccessLogin?: (account: StudentAuthAccount) => void;
+  onSuccess?: (account?: StudentAuthAccount) => void;
+  defaultClass?: string;
 }
 
 export default function StudentLoginModal({
+  isOpen,
   onClose,
   onSuccessLogin,
+  onSuccess,
+  defaultClass = "class-10",
 }: StudentLoginModalProps) {
+  if (isOpen !== undefined && !isOpen) return null;
   // Modal flow modes: 'login' | 'change_password'
   const [modalMode, setModalMode] = useState<"login" | "change_password">("login");
 
   // Login inputs
+  const [selectedClass, setSelectedClass] = useState(defaultClass);
   const [loginRoll, setLoginRoll] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
 
@@ -52,7 +61,7 @@ export default function StudentLoginModal({
     setMessage(null);
     setIsSubmitting(true);
 
-    const res = loginStudentAccount(loginRoll, loginPassword);
+    const res = loginStudentAccount(loginRoll, loginPassword, selectedClass);
     setIsSubmitting(false);
 
     if (res.success) {
@@ -70,11 +79,16 @@ export default function StudentLoginModal({
           document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
           document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
           document.cookie = `ptsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
+          document.cookie = `ptsc_student_class=${res.account.classLevel}; path=/; max-age=86400; SameSite=Lax`;
         } catch (e) {}
 
         setMessage({ text: res.message, isError: false });
         setTimeout(() => {
-          onSuccessLogin(res.account!);
+          if (typeof onSuccessLogin === "function") {
+            onSuccessLogin(res.account!);
+          } else if (typeof onSuccess === "function") {
+            onSuccess(res.account);
+          }
           onClose();
         }, 700);
       }
@@ -115,7 +129,11 @@ export default function StudentLoginModal({
     }
 
     setIsSubmitting(true);
-    const res = updateStudentPassword(pendingAccount.rollNumber, newPassword.trim());
+    const res = updateStudentPassword(
+      pendingAccount.rollNumber,
+      newPassword.trim(),
+      pendingAccount.classLevel
+    );
     setIsSubmitting(false);
 
     if (res.success && res.account) {
@@ -123,11 +141,16 @@ export default function StudentLoginModal({
         document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
         document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
         document.cookie = `ptsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
+        document.cookie = `ptsc_student_class=${res.account.classLevel}; path=/; max-age=86400; SameSite=Lax`;
       } catch (e) {}
 
       setMessage({ text: res.message, isError: false });
       setTimeout(() => {
-        onSuccessLogin(res.account!);
+        if (typeof onSuccessLogin === "function") {
+          onSuccessLogin(res.account!);
+        } else if (typeof onSuccess === "function") {
+          onSuccess(res.account);
+        }
         onClose();
       }, 900);
     } else {
@@ -135,17 +158,18 @@ export default function StudentLoginModal({
     }
   };
 
-  const handleDemoFill = () => {
-    setLoginRoll("101");
+  const handleDemoFill = (cls: string = "class-10", roll: string = "101") => {
+    setSelectedClass(cls);
+    setLoginRoll(roll);
     setLoginPassword(UNIVERSAL_DEFAULT_PASSWORD);
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-indigo-500/30 shadow-2xl w-full max-w-md overflow-hidden my-auto flex flex-col">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-indigo-500/30 shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto my-auto flex flex-col">
         
         {/* Header */}
-        <div className="p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-indigo-500/20 shrink-0">
+        <div className="p-5 sm:p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-indigo-500/20 shrink-0 sticky top-0 z-20">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
@@ -153,11 +177,11 @@ export default function StudentLoginModal({
                 PTSC STUDENT PORTAL
               </span>
             </div>
-            <h2 className="text-lg font-black text-white flex items-center gap-2">
+            <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <GraduationCap className="w-5 h-5 text-indigo-400" />
               <span>
                 {modalMode === "login"
-                  ? "শিক্ষার্থী লগইন ও ক্লাউড সিঙ্ক"
+                  ? "শিক্ষার্থী স্মার্ট লগইন ও ক্লাউড সিঙ্ক"
                   : "নতুন পাসওয়ার্ড সেটআপ"}
               </span>
             </h2>
@@ -175,7 +199,7 @@ export default function StudentLoginModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-5">
+        <div className="p-5 sm:p-6 space-y-4">
           
           {/* Status Alert Banner */}
           {message && (
@@ -198,9 +222,42 @@ export default function StudentLoginModal({
           )}
 
           {modalMode === "login" ? (
-            /* 1. STANDARD LOGIN FORM */
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
+            /* 1. STANDARD LOGIN FORM WITH CLASS + ROLL DISAMBIGUATION */
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5">
               
+              {/* Class / Academic Year Dropdown */}
+              <div className="space-y-1.5">
+                <label htmlFor="student-login-class" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
+                  শ্রেণি ও শিক্ষাবর্ষ (Class / Academic Year):
+                </label>
+                <div className="relative">
+                  <select
+                    id="student-login-class"
+                    name="studentClass"
+                    value={selectedClass}
+                    onChange={(e) => setSelectedClass(e.target.value)}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none pr-8"
+                  >
+                    {STUDENT_LOGIN_CLASSES.map((cls) => (
+                      <option
+                        key={cls.id}
+                        value={cls.id}
+                        className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      >
+                        {cls.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                    ▼
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                  * একই রোল নম্বর একাধিক শ্রেণিতে থাকতে পারে, তাই আপনার সঠিক শ্রেণি নির্বাচন করুন।
+                </p>
+              </div>
+
+              {/* Roll Number Input */}
               <div className="space-y-1.5">
                 <label htmlFor="student-login-roll" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
                   রোল নম্বর (Roll Number):
@@ -219,6 +276,7 @@ export default function StudentLoginModal({
                 />
               </div>
 
+              {/* Password Input */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor="student-login-password" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
@@ -248,25 +306,44 @@ export default function StudentLoginModal({
                   <span>প্রথমবার লগইনের নিয়মাবলী:</span>
                 </p>
                 <p>
-                  সকল অ্যাকাউন্টের ডিফল্ট পাসওয়ার্ড হলো <strong className="font-mono text-indigo-600 dark:text-cyan-400 font-black">1234</strong>। প্রথমবার লগইন করার পর আপনাকে বাধ্যতামূলকভাবে ব্যক্তিগত নতুন পাসওয়ার্ড সেট করতে হবে।
+                  সকল শ্রেণির শিক্ষার্থীদের ডিফল্ট পাসওয়ার্ড হলো <strong className="font-mono text-indigo-600 dark:text-cyan-400 font-black">1234</strong>। প্রথমবার লগইনে সফলভাবে প্রবেশ করার পর ব্যক্তিগত নতুন পাসওয়ার্ড সেট করতে হবে।
                 </p>
               </div>
 
-              <div className="flex items-center justify-between pt-1">
-                <button
-                  type="button"
-                  onClick={handleDemoFill}
-                  className="text-[11px] font-bold text-indigo-600 dark:text-cyan-400 hover:underline cursor-pointer flex items-center gap-1"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>ডেমো আইডি অটো-ফিল (Roll 101, Pass 1234)</span>
-                </button>
+              {/* Quick Conflict Demo Chips */}
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">
+                  দ্রুত টেস্ট ডেমো অ্যাকাউন্ট:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleDemoFill("class-10", "101")}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-cyan-400 text-[11px] font-bold border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                  >
+                    ১০ম শ্রেণি · রোল ১০১
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDemoFill("class-9", "101")}
+                    className="px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 text-[11px] font-bold border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+                  >
+                    ৯ম শ্রেণি · রোল ১০১
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDemoFill("class-8", "101")}
+                    className="px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 text-teal-700 dark:text-teal-300 text-[11px] font-bold border border-teal-200 dark:border-teal-800 transition cursor-pointer"
+                  >
+                    ৮ম শ্রেণি · রোল ১০১
+                  </button>
+                </div>
               </div>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer transition-all"
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer transition-all active:scale-[0.99]"
               >
                 <Lock className="w-4 h-4" />
                 <span>লগইন করুন (Login)</span>

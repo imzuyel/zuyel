@@ -110,6 +110,10 @@ const StudentManagementView = dynamic(() => import("@/components/students/Studen
   loading: () => <ViewLoader title="শিক্ষার্থী ব্যবস্থাপনা" />,
   ssr: false,
 });
+const StudentPromotionView = dynamic(() => import("@/components/students/StudentPromotionView"), {
+  loading: () => <ViewLoader title="শিক্ষার্থী প্রমোশন" />,
+  ssr: false,
+});
 const AdvancedAttendanceKhata = dynamic(() => import("@/components/attendance/AdvancedAttendanceKhata"), {
   loading: () => <ViewLoader title="হাজিরা ও রেজিস্টার" />,
   ssr: false,
@@ -433,7 +437,10 @@ export default function AdminPage() {
               {activeTab === "dashboard" && (
                 <CleanDashboardView onNavigate={(tab: string) => handleTabChange(tab as AdminTab)} />
               )}
-              {activeTab === "students" && <StudentManagementView />}
+              {activeTab === "students" && (
+                <StudentManagementView onNavigateToPromotion={() => handleTabChange("student_promotion")} />
+              )}
+              {activeTab === "student_promotion" && <StudentPromotionView />}
               {activeTab === "attendance" && <AdvancedAttendanceKhata initialTab="daily" />}
               {activeTab === "mobile_attendance" && <AdvancedAttendanceKhata initialTab="daily" />}
               {activeTab === "teacher_dashboard" && <TeacherDashboardView />}
@@ -441,7 +448,10 @@ export default function AdminPage() {
               {activeTab === "teacher_workload" && <AdvancedAttendanceKhata initialTab="staff" />}
               {activeTab === "attendance_report" && <AdvancedAttendanceKhata initialTab="report" />}
               {activeTab === "excel_wizard" && <SmartExcelWizard />}
-              {activeTab === "classes_trades" && <ClassesAndTradesView />}
+              {activeTab === "academic_years" && <ClassesAndTradesView initialSubTab="years" />}
+              {activeTab === "classes_sections" && <ClassesAndTradesView initialSubTab="classes" />}
+              {activeTab === "trades_management" && <ClassesAndTradesView initialSubTab="trades" />}
+              {activeTab === "classes_trades" && <ClassesAndTradesView initialSubTab="years" />}
               {activeTab === "global_academic_hub" && <GlobalSettingsSubjectMappingHub />}
               {activeTab === "subjects" && <SubjectsView />}
               {activeTab === "lab_inventory" && <LabEquipmentStudio />}

@@ -10,7 +10,7 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const studentRoll = searchParams.get("studentRoll");
 
-    const result = chapterLearningStore.getChapterById(Number(id));
+    const result = chapterLearningStore.getChapterById(id);
     if (!result) {
       return NextResponse.json(
         { success: false, error: "Chapter not found" },
@@ -20,7 +20,7 @@ export async function GET(
 
     if (studentRoll) {
       const enrichedCourse = chapterLearningStore.evaluateStudentCourseProgress(result.course, studentRoll);
-      const enrichedChapter = enrichedCourse.chapters.find(ch => ch.id === Number(id));
+      const enrichedChapter = enrichedCourse.chapters.find(ch => ch.id === result.chapter.id);
       return NextResponse.json({
         success: true,
         chapter: enrichedChapter || result.chapter,
@@ -88,6 +88,8 @@ export async function PUT(
     );
   }
 }
+
+export const PATCH = PUT;
 
 export async function DELETE(
   req: NextRequest,

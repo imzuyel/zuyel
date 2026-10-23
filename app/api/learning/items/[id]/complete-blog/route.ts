@@ -14,7 +14,7 @@ export async function POST(
     const timeSpentSeconds = body.timeSpentSeconds || 60;
 
     const result = chapterLearningStore.completeBlogPart(
-      Number(id),
+      id,
       studentRoll,
       studentName,
       timeSpentSeconds

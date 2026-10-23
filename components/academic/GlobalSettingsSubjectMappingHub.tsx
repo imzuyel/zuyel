@@ -43,10 +43,15 @@ import {
   getAllTradeConfigurations,
 } from "@/lib/globalSubjectMappingHub";
 import { ALL_TRADES, ACADEMIC_CLASSES } from "@/lib/academicStructure";
+import CentralAcademicMappingView from "@/components/academic/CentralAcademicMappingView";
+import AcademicYearsManagerView from "@/components/academic/AcademicYearsManagerView";
+import InstitutionSettingsView from "@/components/academic/InstitutionSettingsView";
 
 export default function GlobalSettingsSubjectMappingHub() {
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<"mapping" | "classes" | "catalog" | "playground">("mapping");
+  const [activeTab, setActiveTab] = useState<
+    "mappings" | "mapping" | "years" | "classes" | "catalog" | "institution" | "playground"
+  >("mappings");
 
   // Global settings state
   const [academicYear, setAcademicYear] = useState<string>("2026");
@@ -496,6 +501,21 @@ export default function GlobalSettingsSubjectMappingHub() {
         {/* Global Navigation Tabs */}
         <div className="flex flex-wrap items-center gap-2 pt-6 mt-6 border-t border-slate-800/80">
           <button
+            onClick={() => setActiveTab("mappings")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === "mappings"
+                ? "bg-gradient-to-r from-indigo-600 to-cyan-600 text-white shadow-lg shadow-indigo-600/30"
+                : "bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            <Layers className="w-4 h-4 text-cyan-300" />
+            <span>কেন্দ্রীয় একাডেমিক ম্যাপিং (Academic Mapping)</span>
+            <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-400/20 text-cyan-200 font-mono">
+              Core
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("mapping")}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
               activeTab === "mapping"
@@ -504,10 +524,22 @@ export default function GlobalSettingsSubjectMappingHub() {
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            <span>বিষয় ম্যাপিং ইঞ্জিন (Subject Mapping)</span>
+            <span>বিষয় ম্যাপিং (Subject Mapping)</span>
             <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 text-indigo-200">
               {mappedSubjects.length}
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("years")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === "years"
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            <Clock className="w-4 h-4 text-amber-400" />
+            <span>শিক্ষাবর্ষ ও সেশন (Academic Years)</span>
           </button>
 
           <button
@@ -518,7 +550,7 @@ export default function GlobalSettingsSubjectMappingHub() {
                 : "bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white"
             }`}
           >
-            <Layers className="w-4 h-4" />
+            <GraduationCap className="w-4 h-4" />
             <span>শ্রেণি ও ট্রেড কনফিগারেশন (Classes & Trades)</span>
             <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 text-indigo-200">
               {classes.length}
@@ -534,10 +566,22 @@ export default function GlobalSettingsSubjectMappingHub() {
             }`}
           >
             <Database className="w-4 h-4" />
-            <span>কেন্দ্রীয় বিষয় ভান্ডার (Master Catalog)</span>
+            <span>বিষয় ভান্ডার (Master Catalog)</span>
             <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 text-indigo-200">
               {masterCatalog.length}
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("institution")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === "institution"
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            <Settings className="w-4 h-4 text-emerald-400" />
+            <span>প্রতিষ্ঠান প্রোফাইল (Institution)</span>
           </button>
 
           <button
@@ -549,10 +593,31 @@ export default function GlobalSettingsSubjectMappingHub() {
             }`}
           >
             <Sparkles className="w-4 h-4 text-cyan-400" />
-            <span>লাইভ টেস্ট ও ইন্টিগ্রেশন প্রিভিউ (Playground)</span>
+            <span>লাইভ টেস্ট ও ইন্টিগ্রেশন (Playground)</span>
           </button>
         </div>
       </div>
+
+      {/* ========================================================= */}
+      {/* TAB 0: CENTRAL ACADEMIC MAPPING (PHASE 3 GLOBAL FOUNDATION)*/}
+      {/* ========================================================= */}
+      {activeTab === "mappings" && (
+        <CentralAcademicMappingView />
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB: ACADEMIC YEARS & SESSIONS MANAGER                   */}
+      {/* ========================================================= */}
+      {activeTab === "years" && (
+        <AcademicYearsManagerView />
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB: INSTITUTION SETTINGS & PROFILE                       */}
+      {/* ========================================================= */}
+      {activeTab === "institution" && (
+        <InstitutionSettingsView />
+      )}
 
       {/* ========================================================= */}
       {/* TAB 1: SUBJECT MAPPING ENGINE (SINGLE SOURCE OF TRUTH)     */}

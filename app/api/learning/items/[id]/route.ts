@@ -1,6 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
 
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const result = chapterLearningStore.getContentItemById(Number(id));
+    if (!result) {
+      return NextResponse.json(
+        { success: false, error: "Content item not found" },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({
+      success: true,
+      item: result.item,
+      chapter: result.chapter,
+      course: result.course,
+    });
+  } catch (error: any) {
+    console.error("GET /api/learning/items/[id] error:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to fetch content item" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -31,6 +59,8 @@ export async function PUT(
     );
   }
 }
+
+export const PATCH = PUT;
 
 export async function DELETE(
   req: NextRequest,
