@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
+import { isPrismaAvailable, safePrismaQuery } from "@/lib/prisma";
 
 export async function GET(
   req: NextRequest,
@@ -8,7 +10,30 @@ export async function GET(
   try {
     const { id } = await params;
     const { searchParams } = new URL(req.url);
-    const studentRoll = searchParams.get("studentRoll");
+    let studentRoll = searchParams.get("studentRoll");
+
+    // Also support reading from student session cookie if not provided in URL
+    if (!studentRoll) {
+      const studentCookie = req.cookies.get("ptsc_student_session")?.value;
+      if (studentCookie) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(studentCookie));
+          if (parsed?.rollNumber) studentRoll = parsed.rollNumber;
+        } catch {}
+      }
+    }
+
+    // Sync student progress from Prisma DB so logged-out/returning students have persistent stars & progress
+    if (studentRoll && isPrismaAvailable()) {
+      const dbProgress = await safePrismaQuery(async (p) => {
+        return await p.studentItemProgress.findMany({
+          where: { studentRoll: String(studentRoll) },
+        });
+      }, []);
+      if (dbProgress && dbProgress.length > 0) {
+        chapterLearningStore.mergeStudentProgressFromPrisma(studentRoll, dbProgress);
+      }
+    }
 
     const result = chapterLearningStore.getChapterById(id);
     if (!result) {
@@ -62,6 +87,11 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireTeacherOrAdmin(req, "/api/learning/chapters/[id] (PUT)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { id } = await params;
     const body = await req.json();
@@ -95,6 +125,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireTeacherOrAdmin(req, "/api/learning/chapters/[id] (DELETE)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { id } = await params;
     const success = chapterLearningStore.deleteChapter(Number(id));

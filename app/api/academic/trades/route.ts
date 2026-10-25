@@ -25,6 +25,15 @@ export async function GET(req: NextRequest) {
     if (isPrismaAvailable()) {
       try {
         const dbTrades = await prisma.trade.findMany({
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            nameBangla: true,
+            shortName: true,
+            order: true,
+            status: true,
+          },
           orderBy: { id: "asc" },
         });
 
@@ -41,9 +50,21 @@ export async function GET(req: NextRequest) {
     }
 
     const snapshot = await getMasterDataSnapshot();
+    const safeTrades = (snapshot.trades || []).map((t: any) => ({
+      id: t.id,
+      code: t.code,
+      name: t.name,
+      nameBangla: t.nameBangla,
+      shortName: t.shortName || t.name,
+      description: t.description || "",
+      intakeCapacity: t.intakeCapacity || 50,
+      totalLabs: t.totalLabs || 1,
+      status: t.status || "Active",
+    }));
+
     return NextResponse.json({
       success: true,
-      trades: snapshot.trades || [],
+      trades: safeTrades,
       source: "engine_store",
     });
   } catch (error: any) {

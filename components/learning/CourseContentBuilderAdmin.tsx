@@ -29,6 +29,8 @@ import {
   ChevronRight,
   RotateCcw,
   ShieldAlert,
+  ShieldCheck,
+  Target,
   Loader2,
   ExternalLink,
   Flame,
@@ -49,12 +51,16 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { toast } from "sonner";
+import DeleteConfirmationModal from "@/components/ui/DeleteConfirmationModal";
 import { InternationalStoryLessonRenderer } from "@/components/learning/InternationalStoryLessonRenderer";
+import { RichTextEditor } from "@/components/learning/RichTextEditor";
 import {
   CourseItem,
   CourseChapterItem,
   ChapterContentItemData,
   QuizQuestionItem,
+  QuizQuestionType,
+  MatchingPair,
   ContentItemType,
 } from "@/lib/chapterLearningEngine";
 import {
@@ -69,6 +75,7 @@ import {
 import { useAcademySettings } from "@/lib/useAcademySettings";
 import { saveCustomLessonQuiz, StudentQuizQuestion } from "@/lib/studentIntelligenceStore";
 import { TWENTY_QUIZ_TEMPLATES, QuizTemplateTheme } from "@/lib/quizEngineTypes";
+import UniversalQuestionRenderer from "@/components/quiz/shared/UniversalQuestionRenderer";
 
 interface CourseContentBuilderAdminProps {
   initialSubTab?: "builder" | "ai_prep" | "preview" | "template_gallery";
@@ -194,6 +201,24 @@ export default function CourseContentBuilderAdmin({
   const [editingChapter, setEditingChapter] = useState<CourseChapterItem | null>(null);
   const [targetChapterId, setTargetChapterId] = useState<number | null>(null);
 
+  // Custom Animated Delete Confirmation Modal state
+  const [deleteModalState, setDeleteModalState] = useState<{
+    isOpen: boolean;
+    type: "chapter" | "item";
+    id: number | null;
+    title: string;
+    description: string;
+    itemName?: string;
+  }>({
+    isOpen: false,
+    type: "chapter",
+    id: null,
+    title: "",
+    description: "",
+    itemName: "",
+  });
+  const [isDeletingEntity, setIsDeletingEntity] = useState(false);
+
   // New Course Form State
   const [newCourseForm, setNewCourseForm] = useState({
     title: "",
@@ -238,13 +263,36 @@ export default function CourseContentBuilderAdmin({
 
   // Question editing sub-state for quiz builder
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
-  const [newQuestion, setNewQuestion] = useState({
+  const [isUpdating, setIsUpdating] = useState<boolean>(false);
+  const [isSavingQuestionItem, setIsSavingQuestionItem] = useState<boolean>(false);
+  const [newQuestion, setNewQuestion] = useState<{
+    questionType: QuizQuestionType;
+    questionText: string;
+    optionA: string;
+    optionB: string;
+    optionC: string;
+    optionD: string;
+    correctOptionIndex: number;
+    correctBoolean: boolean;
+    acceptedAnswersText: string;
+    matchingPairs: { left: string; right: string }[];
+    reorderItems: string[];
+    explanation: string;
+  }>({
+    questionType: "MCQ",
     questionText: "",
     optionA: "",
     optionB: "",
     optionC: "",
     optionD: "",
     correctOptionIndex: 0,
+    correctBoolean: true,
+    acceptedAnswersText: "",
+    matchingPairs: [
+      { left: "", right: "" },
+      { left: "", right: "" },
+    ],
+    reorderItems: ["প্রথম ধাপ / উপাদান ১", "দ্বিতীয় ধাপ / উপাদান ২", "তৃতীয় ধাপ / উপাদান ৩"],
     explanation: "",
   });
 
@@ -557,6 +605,7 @@ export default function CourseContentBuilderAdmin({
     items.splice(targetIdx, 0, moved);
 
     const newOrderIds = items.map((i) => i.id);
+    const movedTitle = moved.titleBangla || moved.title || "আইটেম";
 
     // Optimistic UI update
     setCourses((prev) =>
@@ -586,7 +635,9 @@ export default function CourseContentBuilderAdmin({
       });
       const data = await res.json();
       if (data.success) {
-        toast.success("সিকোয়েন্স সফলভাবে আপডেট করা হয়েছে!");
+        toast.success("আইটেম সফলভাবে পুনর্বিন্যাস করা হয়েছে", {
+          description: `"${movedTitle}" এখন ক্রম #${targetIdx + 1}-এ অবস্থান করছে।`,
+        });
       } else {
         toast.error(data.error || "পুনর্বিন্যাস ব্যর্থ হয়েছে");
         fetchCourses();
@@ -614,6 +665,24 @@ export default function CourseContentBuilderAdmin({
     items[swapIdx] = temp;
 
     const newOrderIds = items.map((i) => i.id);
+    const movedTitle = temp.titleBangla || temp.title || "আইটেম";
+
+    // Optimistic UI update
+    setCourses((prev) =>
+      prev.map((c) => {
+        if (c.id !== selectedCourse?.id) return c;
+        return {
+          ...c,
+          chapters: c.chapters.map((ch) => {
+            if (ch.id !== chapterId) return ch;
+            return {
+              ...ch,
+              items: items.map((it, i) => ({ ...it, orderIndex: i + 1 })),
+            };
+          }),
+        };
+      })
+    );
 
     try {
       const res = await fetch(`/api/learning/chapters/${chapterId}/reorder`, {
@@ -623,11 +692,17 @@ export default function CourseContentBuilderAdmin({
       });
       const data = await res.json();
       if (data.success) {
-        toast.success("সিকোয়েন্স পরিবর্তিত হয়েছে");
+        toast.success("আইটেম সফলভাবে পুনর্বিন্যাস করা হয়েছে", {
+          description: `"${movedTitle}" এখন ক্রম #${swapIdx + 1}-এ অবস্থান করছে।`,
+        });
+        fetchCourses();
+      } else {
+        toast.error(data.error || "পুনর্বিন্যাস ব্যর্থ হয়েছে");
         fetchCourses();
       }
     } catch {
       toast.error("পুনর্বিন্যাস ব্যর্থ হয়েছে");
+      fetchCourses();
     }
   };
 
@@ -721,28 +796,65 @@ export default function CourseContentBuilderAdmin({
     }
   };
 
-  // Delete Chapter
-  const handleDeleteChapter = async (chapterId: number) => {
-    if (
-      !confirm(
-        "আপনি কি নিশ্চিতভাবে এই অধ্যায়টি মুছে ফেলতে চান? এর অধীনস্থ সকল ব্লগ পার্ট ও কুইজ মুছে যাবে।"
-      )
-    ) {
-      return;
-    }
+  // Open Custom Animated Delete Confirmation Modal for Chapter
+  const openDeleteChapterModal = (chapterId: number, chapterTitle?: string) => {
+    const chapter = selectedCourse?.chapters.find((ch) => ch.id === chapterId);
+    setDeleteModalState({
+      isOpen: true,
+      type: "chapter",
+      id: chapterId,
+      title: "অধ্যায় মুছে ফেলার নিশ্চিতকরণ",
+      description:
+        "আপনি কি নিশ্চিতভাবে এই অধ্যায়টি মুছে ফেলতে চান? এর অধীনস্থ সকল ব্লগ পার্ট, কুইজ ও প্রোগ্রেসিভ লকিং পাথওয়ে স্থায়ীভাবে মুছে যাবে।",
+      itemName: chapterTitle || chapter?.titleBangla || chapter?.title || `অধ্যায় #${chapterId}`,
+    });
+  };
+
+  const handleDeleteChapter = (chapterId: number, chapterTitle?: string) => {
+    openDeleteChapterModal(chapterId, chapterTitle);
+  };
+
+  // Unified execution of delete action from custom animated modal
+  const handleExecuteDelete = async () => {
+    if (!deleteModalState.id) return;
+    setIsDeletingEntity(true);
     try {
-      const res = await fetch(`/api/learning/chapters/${chapterId}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success("অধ্যায় সফলভাবে মুছে ফেলা হয়েছে");
-        fetchCourses();
-      } else {
-        toast.error(data.error || "অধ্যায় মোছা যায়নি");
+      if (deleteModalState.type === "chapter") {
+        const res = await fetch(`/api/learning/chapters/${deleteModalState.id}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (data.success) {
+          toast.success("অধ্যায় সফলভাবে মুছে ফেলা হয়েছে", {
+            description: deleteModalState.itemName
+              ? `"${deleteModalState.itemName}" সম্পূর্ণ সরানো হয়েছে`
+              : undefined,
+          });
+          fetchCourses();
+        } else {
+          toast.error(data.error || "অধ্যায় মোছা যায়নি");
+        }
+      } else if (deleteModalState.type === "item") {
+        const res = await fetch(`/api/learning/items/${deleteModalState.id}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (data.success) {
+          toast.success("কনটেন্ট ব্লক সফলভাবে মুছে ফেলা হয়েছে", {
+            description: deleteModalState.itemName
+              ? `"${deleteModalState.itemName}" সম্পূর্ণ সরানো হয়েছে`
+              : undefined,
+          });
+          fetchCourses();
+        } else {
+          toast.error(data.error || "আইটেম মোছা যায়নি");
+        }
       }
     } catch {
-      toast.error("নেটওয়ার্ক ত্রুটি");
+      toast.error("সার্ভার ত্রুটি ঘটেছে");
+    } finally {
+      setIsDeletingEntity(false);
+      setDeleteModalState((prev) => ({ ...prev, isOpen: false, id: null }));
     }
   };
 
@@ -826,6 +938,7 @@ export default function CourseContentBuilderAdmin({
     e.preventDefault();
     if (!targetChapterId) return;
 
+    setIsUpdating(true);
     const payload = {
       ...itemForm,
       itemType: itemModalType,
@@ -852,7 +965,7 @@ export default function CourseContentBuilderAdmin({
       const data = await res.json();
       if (data.success) {
         toast.success(
-          editingItem ? "আইটেম সফলভাবে আপডেট হয়েছে" : "নতুন আইটেম যোগ করা হয়েছে!"
+          editingItem ? "আইটেম ও কুইজ প্রশ্ন সফলভাবে আপডেট হয়েছে!" : "নতুন আইটেম সফলভাবে যোগ করা হয়েছে!"
         );
         setShowItemModal(false);
         fetchCourses();
@@ -861,36 +974,129 @@ export default function CourseContentBuilderAdmin({
       }
     } catch {
       toast.error("সার্ভার ত্রুটি");
+    } finally {
+      setIsUpdating(false);
     }
   };
 
-  // Delete Item
-  const handleDeleteItem = async (itemId: number) => {
-    if (!confirm("আপনি কি নিশ্চিতভাবে এই আইটেমটি মুছে ফেলতে চান?")) return;
-    try {
-      const res = await fetch(`/api/learning/items/${itemId}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success("আইটেম মুছে ফেলা হয়েছে");
-        fetchCourses();
+  // Open Custom Animated Delete Confirmation Modal for Content Item
+  const openDeleteItemModal = (itemId: number, itemTitle?: string) => {
+    let resolvedTitle = itemTitle;
+    if (!resolvedTitle && selectedCourse) {
+      for (const ch of selectedCourse.chapters) {
+        const found = ch.items.find((it) => it.id === itemId);
+        if (found) {
+          resolvedTitle = found.titleBangla || found.title;
+          break;
+        }
       }
-    } catch {
-      toast.error("আইটেম মোছা যায়নি");
     }
+    setDeleteModalState({
+      isOpen: true,
+      type: "item",
+      id: itemId,
+      title: "কনটেন্ট ব্লক মুছে ফেলার নিশ্চিতকরণ",
+      description:
+        "আপনি কি নিশ্চিতভাবে এই আইটেমটি মুছে ফেলতে চান? এই কাজটি পূর্বাবস্থায় ফিরিয়ে আনা যাবে না।",
+      itemName: resolvedTitle || `আইটেম #${itemId}`,
+    });
+  };
+
+  const handleDeleteItem = (itemId: number, itemTitle?: string) => {
+    openDeleteItemModal(itemId, itemTitle);
   };
 
   // Add or update question in quiz form
-  const handleAddQuestionToQuiz = () => {
-    if (!newQuestion.questionText || !newQuestion.optionA || !newQuestion.optionB) {
-      toast.error("প্রশ্ন ও অন্তত ২টি অপশন পূরণ করুন");
-      return;
-    }
+  const handleAddQuestionToQuiz = async () => {
+    setIsSavingQuestionItem(true);
+    await new Promise((r) => setTimeout(r, 150));
+    try {
+      if (!newQuestion.questionText.trim()) {
+        toast.error("প্রশ্নের বিবরণ পূরণ করুন");
+        setIsSavingQuestionItem(false);
+        return;
+      }
 
-    const options = [newQuestion.optionA, newQuestion.optionB];
-    if (newQuestion.optionC) options.push(newQuestion.optionC);
-    if (newQuestion.optionD) options.push(newQuestion.optionD);
+    let options: string[] = [];
+    let correctOptionIndex = 0;
+    let correctBoolean: boolean | undefined = undefined;
+    let acceptedAnswers: string[] | undefined = undefined;
+    let matchingPairs: MatchingPair[] | undefined = undefined;
+    let correctOrder: string[] | undefined = undefined;
+    let correctAnswer: string | undefined = undefined;
+    let optionsJson: string | undefined = undefined;
+
+    if (newQuestion.questionType === "MCQ") {
+      if (!newQuestion.optionA || !newQuestion.optionB) {
+        toast.error("MCQ প্রশ্নের জন্য অন্তত ২টি অপশন (A ও B) পূরণ করুন");
+        return;
+      }
+      options = [newQuestion.optionA, newQuestion.optionB];
+      if (newQuestion.optionC) options.push(newQuestion.optionC);
+      if (newQuestion.optionD) options.push(newQuestion.optionD);
+      correctOptionIndex = Number(newQuestion.correctOptionIndex);
+      correctAnswer = options[correctOptionIndex] || "";
+    } else if (newQuestion.questionType === "TRUE_FALSE") {
+      options = ["সত্য", "মিথ্যা"];
+      correctBoolean = newQuestion.correctBoolean;
+      correctOptionIndex = newQuestion.correctBoolean ? 0 : 1;
+      correctAnswer = String(newQuestion.correctBoolean);
+    } else if (newQuestion.questionType === "FILL_BLANKS") {
+      // Check for inline bracketed words: e.g. [CPU]
+      const bracketMatches = Array.from(
+        newQuestion.questionText.matchAll(/\[(.*?)\]/g)
+      ).map((m) => m[1].trim());
+
+      const parsedAnswers = newQuestion.acceptedAnswersText
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const combinedAnswers = Array.from(
+        new Set([...bracketMatches, ...parsedAnswers])
+      ).filter(Boolean);
+
+      if (combinedAnswers.length === 0) {
+        toast.error("শূন্যস্থান পূরণের জন্য বাক্যে [সঠিক উত্তর] ব্র্যাকেটে লিখুন অথবা নিচে গ্রহণযোগ্য উত্তর ইনপুট দিন");
+        return;
+      }
+      acceptedAnswers = combinedAnswers;
+      options = combinedAnswers;
+      correctOptionIndex = 0;
+      correctAnswer = combinedAnswers[0];
+    } else if (newQuestion.questionType === "MATCHING") {
+      const validPairs = (newQuestion.matchingPairs || []).filter(
+        (p) => p.left.trim() && p.right.trim()
+      );
+      if (validPairs.length < 2) {
+        toast.error("বাম-ডান মিলকরণের জন্য অন্তত ২টি পূর্ণাঙ্গ জোড়া (Left-Right Pair) লিখুন");
+        return;
+      }
+      const formattedPairs: MatchingPair[] = validPairs.map((p, idx) => ({
+        id: idx + 1,
+        left: p.left.trim(),
+        right: p.right.trim(),
+      }));
+      matchingPairs = formattedPairs;
+      const jsonPairs = JSON.stringify(formattedPairs);
+      correctAnswer = jsonPairs;
+      optionsJson = jsonPairs;
+      options = validPairs.map((p) => p.left.trim());
+      correctOptionIndex = 0;
+    } else if (newQuestion.questionType === "REORDER") {
+      const validItems = (newQuestion.reorderItems || [])
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      if (validItems.length < 2) {
+        toast.error("সঠিক ক্রমে সাজানোর জন্য অন্তত ২টি আইটেম ক্রমানুসারে ইনপুট দিন");
+        return;
+      }
+      correctOrder = validItems;
+      options = validItems;
+      correctOptionIndex = 0;
+      correctAnswer = JSON.stringify(validItems);
+    }
 
     if (editingQuestionId) {
       setItemForm((prev) => ({
@@ -899,22 +1105,36 @@ export default function CourseContentBuilderAdmin({
           q.id === editingQuestionId
             ? {
                 ...q,
+                questionType: newQuestion.questionType,
                 questionText: newQuestion.questionText,
                 options,
-                correctOptionIndex: Number(newQuestion.correctOptionIndex),
+                correctOptionIndex,
+                correctBoolean,
+                acceptedAnswers,
+                matchingPairs,
+                correctOrder,
+                correctAnswer,
+                optionsJson,
                 explanation: newQuestion.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
               }
             : q
         ),
       }));
       setEditingQuestionId(null);
-      toast.success("প্রশ্নটি আপডেট করা হয়েছে!");
+      toast.success("প্রশ্নটি সফলভাবে আপডেট করা হয়েছে!");
     } else {
       const questionItem: QuizQuestionItem = {
         id: `q-${Date.now()}`,
+        questionType: newQuestion.questionType,
         questionText: newQuestion.questionText,
         options,
-        correctOptionIndex: Number(newQuestion.correctOptionIndex),
+        correctOptionIndex,
+        correctBoolean,
+        acceptedAnswers,
+        matchingPairs,
+        correctOrder,
+        correctAnswer,
+        optionsJson,
         explanation: newQuestion.explanation || "সঠিক উত্তর নির্বাচন করা হয়েছে।",
         marks: 1,
       };
@@ -926,26 +1146,73 @@ export default function CourseContentBuilderAdmin({
       toast.success("প্রশ্ন কুইজে যোগ হয়েছে!");
     }
 
+    // Reset question form
     setNewQuestion({
+      questionType: "MCQ",
       questionText: "",
       optionA: "",
       optionB: "",
       optionC: "",
       optionD: "",
       correctOptionIndex: 0,
+      correctBoolean: true,
+      acceptedAnswersText: "",
+      matchingPairs: [
+        { left: "", right: "" },
+        { left: "", right: "" },
+      ],
+      reorderItems: ["প্রথম ধাপ / উপাদান ১", "দ্বিতীয় ধাপ / উপাদান ২", "তৃতীয় ধাপ / উপাদান ৩"],
       explanation: "",
     });
+    } finally {
+      setIsSavingQuestionItem(false);
+    }
   };
 
   const handleEditQuestionInQuiz = (q: QuizQuestionItem) => {
     setEditingQuestionId(q.id);
+    const qType = q.questionType || "MCQ";
+
+    // Safely extract matching pairs from either q.matchingPairs or q.correctAnswer or q.optionsJson
+    let loadedMatchingPairs = [
+      { left: "", right: "" },
+      { left: "", right: "" },
+    ];
+    if (q.matchingPairs && q.matchingPairs.length > 0) {
+      loadedMatchingPairs = q.matchingPairs.map((p) => ({ left: p.left, right: p.right }));
+    } else if (typeof q.correctAnswer === "string" && q.correctAnswer.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(q.correctAnswer);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          loadedMatchingPairs = parsed.map((p: any) => ({ left: p.left || "", right: p.right || "" }));
+        }
+      } catch {}
+    } else if (typeof q.optionsJson === "string" && q.optionsJson.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(q.optionsJson);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          loadedMatchingPairs = parsed.map((p: any) => ({ left: p.left || "", right: p.right || "" }));
+        }
+      } catch {}
+    }
+
     setNewQuestion({
+      questionType: qType,
       questionText: q.questionText,
-      optionA: q.options[0] || "",
-      optionB: q.options[1] || "",
-      optionC: q.options[2] || "",
-      optionD: q.options[3] || "",
-      correctOptionIndex: q.correctOptionIndex,
+      optionA: (q.options && q.options[0]) || "",
+      optionB: (q.options && q.options[1]) || "",
+      optionC: (q.options && q.options[2]) || "",
+      optionD: (q.options && q.options[3]) || "",
+      correctOptionIndex: q.correctOptionIndex ?? 0,
+      correctBoolean: q.correctBoolean !== undefined ? q.correctBoolean : q.correctOptionIndex === 0,
+      acceptedAnswersText: (q.acceptedAnswers || []).join(", "),
+      matchingPairs: loadedMatchingPairs,
+      reorderItems:
+        q.correctOrder && q.correctOrder.length > 0
+          ? [...q.correctOrder]
+          : q.options && q.options.length > 0
+          ? [...q.options]
+          : ["প্রথম ধাপ / উপাদান ১", "দ্বিতীয় ধাপ / উপাদান ২", "তৃতীয় ধাপ / উপাদান ৩"],
       explanation: q.explanation || "",
     });
   };
@@ -954,12 +1221,20 @@ export default function CourseContentBuilderAdmin({
     if (editingQuestionId === qId) {
       setEditingQuestionId(null);
       setNewQuestion({
+        questionType: "MCQ",
         questionText: "",
         optionA: "",
         optionB: "",
         optionC: "",
         optionD: "",
         correctOptionIndex: 0,
+        correctBoolean: true,
+        acceptedAnswersText: "",
+        matchingPairs: [
+          { left: "", right: "" },
+          { left: "", right: "" },
+        ],
+        reorderItems: ["প্রথম ধাপ / উপাদান ১", "দ্বিতীয় ধাপ / উপাদান ২", "তৃতীয় ধাপ / উপাদান ৩"],
         explanation: "",
       });
     }
@@ -1050,54 +1325,54 @@ export default function CourseContentBuilderAdmin({
             </p>
           </div>
 
-          {/* Sub-Tab Switcher Pills (Notion / Duolingo Style) */}
-          <div className="flex items-center gap-1.5 p-1.5 bg-slate-800/90 border border-slate-700/80 rounded-2xl backdrop-blur-md self-start lg:self-auto overflow-x-auto max-w-full">
+          {/* Sub-Tab Switcher Pills (Modern, High Contrast, Subtle Ring, No Spread-Out Glow) */}
+          <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/90 dark:bg-slate-950/90 border border-slate-700/60 rounded-2xl backdrop-blur-md self-start lg:self-auto overflow-x-auto max-w-full">
             <button
               onClick={() => setActiveSubTab("builder")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400/50 ${
                 activeSubTab === "builder"
-                  ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-md shadow-emerald-500/20 scale-102"
-                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+                  ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 ring-1 ring-white/30"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent hover:border-slate-700/50"
               }`}
             >
-              <Layers className="w-4 h-4" />
-              <span>১. অধ্যায় ও ব্লক পাথওয়ে</span>
+              <Layers className="w-4 h-4 text-emerald-400" />
+              <span>১. ব্লগ পাথওয়ে (Blog Pathway)</span>
             </button>
 
             <button
               onClick={() => setActiveSubTab("ai_prep")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400/50 ${
                 activeSubTab === "ai_prep"
-                  ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-md shadow-indigo-500/20 scale-102"
-                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+                  ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white ring-1 ring-white/30"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent hover:border-slate-700/50"
               }`}
             >
-              <Sparkles className="w-4 h-4" />
-              <span>২. AI স্লাইড ও লেসন প্ল্যান</span>
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+              <span>২. স্লাইড ও লেসন প্ল্যান (Slide & Lesson Plan)</span>
             </button>
 
             <button
               onClick={() => setActiveSubTab("preview")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-400/50 ${
                 activeSubTab === "preview"
-                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-amber-500/20 scale-102"
-                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 ring-1 ring-white/30"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent hover:border-slate-700/50"
               }`}
             >
-              <Play className="w-4 h-4" />
-              <span>৩. সিকোয়েন্সিয়াল ফ্লো প্রিভিউ</span>
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>৩. সিকিউরিটি ও ফ্লো (Security & Flow)</span>
             </button>
 
             <button
               onClick={() => setActiveSubTab("template_gallery")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400/50 ${
                 activeSubTab === "template_gallery"
-                  ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/20 scale-102"
-                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+                  ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white ring-1 ring-white/30"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/80 border border-transparent hover:border-slate-700/50"
               }`}
             >
-              <Award className="w-4 h-4" />
-              <span>৪. কুইজ টেমপ্লেট গ্যালারি (Admin Preview)</span>
+              <Award className="w-4 h-4 text-purple-400" />
+              <span>৪. কুইজ টেমপ্লেট গ্যালারি</span>
             </button>
           </div>
         </div>
@@ -1251,14 +1526,14 @@ export default function CourseContentBuilderAdmin({
                   <div className="flex items-center gap-2.5 self-start md:self-auto flex-wrap">
                     <button
                       onClick={() => setActiveSubTab("ai_prep")}
-                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-white text-xs font-bold flex items-center gap-2 ring-1 ring-cyan-400/30 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 active:scale-95 transition cursor-pointer"
                     >
-                      <Sparkles className="w-4 h-4" />
+                      <Sparkles className="w-4 h-4 text-cyan-200" />
                       <span>AI দিয়ে স্লাইড থেকে ব্লক বানান</span>
                     </button>
                     <button
                       onClick={openAddChapterModal}
-                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 ring-1 ring-emerald-400/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 active:scale-95 transition cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>+ নতুন অধ্যায় যোগ</span>
@@ -1274,7 +1549,7 @@ export default function CourseContentBuilderAdmin({
                   <p className="text-xs text-slate-500 font-bold">এই কোর্সে এখনও কোনো অধ্যায় নেই।</p>
                   <button
                     onClick={openAddChapterModal}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold cursor-pointer transition focus:outline-none focus:ring-2 focus:ring-emerald-400/50"
                   >
                     প্রথম অধ্যায় যোগ করুন
                   </button>
@@ -1316,30 +1591,31 @@ export default function CourseContentBuilderAdmin({
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
                               onClick={() => openAddItemModal(chapter.id, "BLOG_PART")}
-                              className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                              className="px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400/30"
                             >
-                              <FileText className="w-3.5 h-3.5" />
+                              <FileText className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
                               <span>+ ব্লক পার্ট (Blog)</span>
                             </button>
                             <button
                               onClick={() => openAddItemModal(chapter.id, "QUIZ")}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                              className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
                             >
-                              <Award className="w-3.5 h-3.5" />
+                              <Award className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
                               <span>+ চেকপয়েন্ট কুইজ</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => openEditChapterModal(chapter)}
-                              className="px-3 py-1.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95"
+                              className="px-3.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/60 dark:hover:bg-cyan-900/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 focus:outline-none focus:ring-2 focus:ring-cyan-400/30"
                               title="অধ্যায় তথ্য এডিট করুন"
                             >
                               <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
                               <span>অধ্যায় এডিট ✏️</span>
                             </button>
                             <button
-                              onClick={() => handleDeleteChapter(chapter.id)}
-                              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                              type="button"
+                              onClick={() => openDeleteChapterModal(chapter.id, chapter.titleBangla)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer border border-transparent hover:border-rose-200 dark:hover:border-rose-900/60 focus:outline-none focus:ring-2 focus:ring-rose-400/30"
                               title="অধ্যায় মুছুন"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1374,114 +1650,148 @@ export default function CourseContentBuilderAdmin({
                                       onDragStart={() => handleDragStart(item.id, chapter.id)}
                                       onDragOver={(e) => handleDragOver(e, item.id)}
                                       onDrop={(e) => handleDrop(e, item.id, chapter.id)}
-                                      className={`p-3.5 rounded-2xl border transition-all duration-150 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                                      className={`group relative rounded-2xl border transition-all duration-200 p-4 backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                                         isDragging
-                                          ? "opacity-40 border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30"
+                                          ? "opacity-40 border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30 scale-[0.99]"
                                           : ""
                                       } ${
                                         isDragOver
-                                          ? "border-cyan-500 ring-2 ring-cyan-500/20 bg-cyan-50/20"
+                                          ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/30 scale-[1.01]"
                                           : ""
                                       } ${
+                                        isQuiz
+                                          ? "border-l-4 border-l-emerald-500 bg-white/95 dark:bg-slate-900/95 border-slate-200/90 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700"
+                                          : "border-l-4 border-l-indigo-500 bg-white/95 dark:bg-slate-900/95 border-slate-200/90 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700"
+                                      } ${
                                         !item.isPublished
-                                          ? "bg-slate-50 dark:bg-slate-900/50 opacity-60 border-slate-200 dark:border-slate-800"
-                                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs"
+                                          ? "bg-slate-50/60 dark:bg-slate-900/50 opacity-60 border-dashed"
+                                          : "shadow-xs hover:shadow-sm"
                                       }`}
                                     >
-                                      {/* Left: Drag Handle, Sequence Badge, Type & Title */}
-                                      <div className="flex items-start md:items-center gap-3">
+                                      {/* Left: Drag Handle, Sequence Badge, Type Icon, Metadata & Title */}
+                                      <div className="flex items-start md:items-center gap-3.5 min-w-0 flex-1">
+                                        {/* Drag handle */}
                                         <div
-                                          className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 p-1 -ml-1"
-                                          title="ড্র্যাগ করে ক্রম পরিবর্তন করুন"
+                                          className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 -ml-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0"
+                                          title="ড্র্যাগ করে ক্রম পরিবর্তন করুন (Drag to Reorder)"
                                         >
                                           <GripVertical className="w-4 h-4" />
                                         </div>
 
-                                        {/* Order index badge */}
-                                        <div className="w-7 h-7 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-black flex items-center justify-center shrink-0">
+                                        {/* Order sequence badge */}
+                                        <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 text-slate-800 dark:text-slate-200 text-xs font-mono font-black flex items-center justify-center shrink-0">
                                           #{item.orderIndex}
                                         </div>
 
-                                        {/* Type icon & badge */}
-                                        <div className="flex items-center gap-2.5">
-                                          <div
-                                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                                              isQuiz
-                                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                                                : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
-                                            }`}
-                                          >
-                                            {isQuiz ? (
-                                              <Award className="w-4 h-4" />
-                                            ) : (
-                                              <FileText className="w-4 h-4" />
+                                        {/* Content Type Graphic Icon */}
+                                        <div
+                                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                                            isQuiz
+                                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+                                              : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25"
+                                          }`}
+                                        >
+                                          {isQuiz ? (
+                                            <Award className="w-5 h-5" />
+                                          ) : (
+                                            <BookOpen className="w-5 h-5" />
+                                          )}
+                                        </div>
+
+                                        {/* Metadata & Title */}
+                                        <div className="min-w-0 flex-1 space-y-1">
+                                          <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                                            {/* Type Badge */}
+                                            <span
+                                              className={`px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wider border ${
+                                                isQuiz
+                                                  ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60"
+                                                  : "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60"
+                                              }`}
+                                            >
+                                              {isQuiz
+                                                ? `চেকপয়েন্ট কুইজ (${item.quizQuestions?.length || 0} টি প্রশ্ন)`
+                                                : `ব্লক পার্ট ${item.blogPartNumber || itemIdx + 1}`}
+                                            </span>
+
+                                            {/* Read / Duration time */}
+                                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium flex items-center gap-1">
+                                              <Clock className="w-3 h-3 text-slate-400" />
+                                              <span>{item.durationMinutes} মিনিট</span>
+                                            </span>
+
+                                            {/* XP Reward */}
+                                            <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 font-bold flex items-center gap-1">
+                                              <Zap className="w-3 h-3 text-amber-500" />
+                                              <span>+{item.xpReward} XP</span>
+                                            </span>
+
+                                            {/* Passing Score (Quiz only) */}
+                                            {isQuiz && (
+                                              <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 font-medium flex items-center gap-1">
+                                                <Target className="w-3 h-3 text-teal-500" />
+                                                <span>পাস মার্ক: {item.passingScore || 70}%</span>
+                                              </span>
+                                            )}
+
+                                            {/* Sequential lock rule */}
+                                            {item.unlockRule === "PREVIOUS_ITEM_COMPLETED" && (
+                                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700">
+                                                <Lock className="w-3 h-3 text-amber-500" />
+                                                <span>পূর্ববর্তী ব্লক সাপেক্ষ (Locked 🔒)</span>
+                                              </span>
                                             )}
                                           </div>
 
-                                          <div>
-                                            <div className="flex items-center gap-2 text-[10px] text-slate-500">
-                                              <span className="font-extrabold uppercase">
-                                                {isQuiz
-                                                  ? `চেকপয়েন্ট কুইজ (${item.quizQuestions?.length || 0} টি প্রশ্ন)`
-                                                  : `ব্লক পার্ট ${item.blogPartNumber || itemIdx + 1}`}
-                                              </span>
-                                              <span>·</span>
-                                              <span>{item.durationMinutes} মিনিট</span>
-                                              <span>·</span>
-                                              <span className="text-amber-600 dark:text-amber-400 font-bold">
-                                                +{item.xpReward} XP
-                                              </span>
-                                              {/* Progressive locking badge */}
-                                              {item.unlockRule === "PREVIOUS_ITEM_COMPLETED" && (
-                                                <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5">
-                                                  <Lock className="w-3 h-3" />
-                                                  <span>পূর্ববর্তী ব্লক সাপেক্ষ (Locked 🔒)</span>
-                                                </span>
-                                              )}
-                                            </div>
-
-                                            <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white leading-snug">
-                                              {item.titleBangla}
-                                            </h4>
-                                          </div>
+                                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white leading-snug group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                            {item.titleBangla}
+                                          </h4>
                                         </div>
                                       </div>
 
                                       {/* Right: Step Move, Edit, and Delete */}
-                                      <div className="flex items-center gap-1.5 self-end md:self-auto shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleMoveStep(chapter.id, item.id, "up")}
-                                          disabled={itemIdx === 0}
-                                          className="p-1 rounded-lg text-slate-400 hover:text-slate-600 disabled:opacity-20 cursor-pointer"
-                                          title="উপরে নিন"
-                                        >
-                                          <ArrowUp className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleMoveStep(chapter.id, item.id, "down")}
-                                          disabled={itemIdx === chapter.items.length - 1}
-                                          className="p-1 rounded-lg text-slate-400 hover:text-slate-600 disabled:opacity-20 cursor-pointer"
-                                          title="নিচে নিন"
-                                        >
-                                          <ArrowDown className="w-3.5 h-3.5" />
-                                        </button>
+                                      <div className="flex items-center gap-2 self-end md:self-auto shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800 w-full md:w-auto justify-end">
+                                        {/* Accessible Move Up / Move Down */}
+                                        <div className="flex items-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMoveStep(chapter.id, item.id, "up")}
+                                            disabled={itemIdx === 0}
+                                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700 disabled:opacity-20 cursor-pointer transition"
+                                            title="উপরে নিন (Move Up)"
+                                          >
+                                            <ArrowUp className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMoveStep(chapter.id, item.id, "down")}
+                                            disabled={itemIdx === chapter.items.length - 1}
+                                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700 disabled:opacity-20 cursor-pointer transition"
+                                            title="নিচে নিন (Move Down)"
+                                          >
+                                            <ArrowDown className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+
+                                        {/* Edit Button */}
                                         <button
                                           type="button"
                                           onClick={() => openEditItemModal(chapter.id, item)}
-                                          className="px-2.5 py-1 rounded-lg bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95"
+                                          className="px-3 py-1.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 dark:hover:bg-cyan-900/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
                                           title="ব্লক পার্ট এডিট ও আপডেট করুন (Edit)"
                                         >
                                           <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
                                           <span>এডিট ✏️</span>
                                         </button>
+
+                                        {/* Delete Button */}
                                         <button
-                                          onClick={() => handleDeleteItem(item.id)}
-                                          className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition"
-                                          title="মুছুন"
+                                          type="button"
+                                          onClick={() => openDeleteItemModal(item.id, item.titleBangla || item.title)}
+                                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl cursor-pointer transition border border-transparent hover:border-rose-200 dark:hover:border-rose-900/60 focus:outline-none focus:ring-2 focus:ring-rose-400/40"
+                                          title="আইটেম মুছুন"
                                         >
-                                          <Trash2 className="w-3.5 h-3.5" />
+                                          <Trash2 className="w-4 h-4" />
                                         </button>
                                       </div>
                                     </div>
@@ -1527,7 +1837,7 @@ export default function CourseContentBuilderAdmin({
                 <button
                   onClick={handleAddAiPackageToChapter}
                   disabled={isAddingToChapter}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-1.5 ring-1 ring-emerald-300/40 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition active:scale-95 cursor-pointer"
                 >
                   {isAddingToChapter ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1619,7 +1929,7 @@ export default function CourseContentBuilderAdmin({
             <button
               onClick={handleGenerateClassPackage}
               disabled={isGenerating}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 transition cursor-pointer"
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-xs flex items-center justify-center gap-2 ring-1 ring-cyan-400/30 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 shadow-xs transition active:scale-[0.99] cursor-pointer"
             >
               {isGenerating ? (
                 <>
@@ -2103,70 +2413,88 @@ export default function CourseContentBuilderAdmin({
                                 {previewQuizCurrentQ + 1}. {currentQ.questionText}
                               </h4>
 
-                              {/* Options List */}
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                {currentQ.options.map((option, oIdx) => {
-                                  const isSelected = currentSelected === oIdx;
-                                  const isCorrect = oIdx === currentQ.correctOptionIndex;
+                              {/* Options List / Interactive Question Renderer */}
+                              {currentQ.questionType && currentQ.questionType !== "MCQ" ? (
+                                <UniversalQuestionRenderer
+                                  question={currentQ}
+                                  selectedAnswer={currentSelected}
+                                  onSelectAnswer={(ans) => {
+                                    handlePreviewSelectOption(
+                                      currentQ.id,
+                                      ans,
+                                      currentQ.correctOptionIndex ?? 0,
+                                      currentQ.explanation || ""
+                                    );
+                                  }}
+                                  isConfirmed={isConfirmed}
+                                  isCorrect={currentSelected === currentQ.correctOptionIndex}
+                                  disabled={isConfirmed}
+                                />
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                  {currentQ.options.map((option, oIdx) => {
+                                    const isSelected = currentSelected === oIdx;
+                                    const isCorrect = oIdx === currentQ.correctOptionIndex;
 
-                                  let optStyle =
-                                    "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400";
+                                    let optStyle =
+                                      "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400";
 
-                                  if (isConfirmed) {
-                                    if (isCorrect) {
-                                      optStyle =
-                                        "bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-bold ring-2 ring-emerald-500/40";
-                                    } else if (isSelected && !isCorrect) {
-                                      optStyle =
-                                        "bg-rose-50 dark:bg-rose-950/60 border-rose-500 text-rose-800 dark:text-rose-200 font-bold ring-2 ring-rose-500/40";
-                                    } else {
-                                      optStyle =
-                                        "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60";
-                                    }
-                                  }
-
-                                  return (
-                                    <button
-                                      key={oIdx}
-                                      onClick={() =>
-                                        handlePreviewSelectOption(
-                                          currentQ.id,
-                                          oIdx,
-                                          currentQ.correctOptionIndex,
-                                          currentQ.explanation
-                                        )
+                                    if (isConfirmed) {
+                                      if (isCorrect) {
+                                        optStyle =
+                                          "bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-bold ring-2 ring-emerald-500/40";
+                                      } else if (isSelected && !isCorrect) {
+                                        optStyle =
+                                          "bg-rose-50 dark:bg-rose-950/60 border-rose-500 text-rose-800 dark:text-rose-200 font-bold ring-2 ring-rose-500/40";
+                                      } else {
+                                        optStyle =
+                                          "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60";
                                       }
-                                      disabled={isConfirmed}
-                                      className={`p-3.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between gap-2 ${
-                                        !isConfirmed ? "cursor-pointer" : "cursor-default"
-                                      } ${optStyle}`}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-[10px] flex items-center justify-center shrink-0">
-                                          {String.fromCharCode(65 + oIdx)}
-                                        </span>
-                                        <span>{option}</span>
-                                      </div>
+                                    }
 
-                                      {isConfirmed && (
-                                        <span className="shrink-0 text-xs font-bold">
-                                          {isCorrect ? (
-                                            <span className="text-emerald-600 flex items-center gap-0.5">
-                                              <CheckCircle2 className="w-4 h-4" />
-                                              <span>সঠিক</span>
-                                            </span>
-                                          ) : isSelected ? (
-                                            <span className="text-rose-600 flex items-center gap-0.5">
-                                              <XCircle className="w-4 h-4" />
-                                              <span>ভুল</span>
-                                            </span>
-                                          ) : null}
-                                        </span>
-                                      )}
-                                    </button>
-                                  );
-                                })}
-                              </div>
+                                    return (
+                                      <button
+                                        key={oIdx}
+                                        onClick={() =>
+                                          handlePreviewSelectOption(
+                                            currentQ.id,
+                                            oIdx,
+                                            currentQ.correctOptionIndex ?? 0,
+                                            currentQ.explanation || ""
+                                          )
+                                        }
+                                        disabled={isConfirmed}
+                                        className={`p-3.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between gap-2 ${
+                                          !isConfirmed ? "cursor-pointer" : "cursor-default"
+                                        } ${optStyle}`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                            {String.fromCharCode(65 + oIdx)}
+                                          </span>
+                                          <span>{option}</span>
+                                        </div>
+
+                                        {isConfirmed && (
+                                          <span className="shrink-0 text-xs font-bold">
+                                            {isCorrect ? (
+                                              <span className="text-emerald-600 flex items-center gap-0.5">
+                                                <CheckCircle2 className="w-4 h-4" />
+                                                <span>সঠিক</span>
+                                              </span>
+                                            ) : isSelected ? (
+                                              <span className="text-rose-600 flex items-center gap-0.5">
+                                                <XCircle className="w-4 h-4" />
+                                                <span>ভুল</span>
+                                              </span>
+                                            ) : null}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
 
                               {/* Immediate Feedback Explanation Box */}
                               {isConfirmed && (
@@ -2187,8 +2515,8 @@ export default function CourseContentBuilderAdmin({
                                       {currentSelected === currentQ.correctOptionIndex
                                         ? "🎉 চমৎকার! সঠিক উত্তর।"
                                         : `ভুল উত্তর। সঠিক উত্তর হলো: (${String.fromCharCode(
-                                            65 + currentQ.correctOptionIndex
-                                          )}) ${currentQ.options[currentQ.correctOptionIndex]}`}
+                                            65 + (currentQ.correctOptionIndex ?? 0)
+                                          )}) ${currentQ.options ? currentQ.options[currentQ.correctOptionIndex ?? 0] : ""}`}
                                     </span>
                                     <span className="text-[11px] text-slate-600 dark:text-slate-300 block mt-0.5">
                                       💡 ব্যাখ্যা: {currentQ.explanation}
@@ -2726,7 +3054,25 @@ export default function CourseContentBuilderAdmin({
               </button>
             </div>
 
-            <form onSubmit={handleSaveItem} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveItem} className="space-y-4 text-xs relative">
+              {/* Premium Animated Loading Overlay */}
+              {isUpdating && (
+                <div className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs rounded-2xl flex flex-col items-center justify-center z-50 animate-in fade-in duration-200">
+                  <div className="p-4 px-6 rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-3.5">
+                    <Loader2 className="w-5 h-5 animate-spin text-emerald-600 dark:text-emerald-400" />
+                    <div>
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        {editingItem ? "কনটেন্ট ও কুইজ প্রশ্ন আপডেট করা হচ্ছে..." : "নতুন কনটেন্ট সংরক্ষণ করা হচ্ছে..."}
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        অনুগ্রহ করে অপেক্ষা করুন, ব্যাকগ্রাউন্ড প্রসেস সম্পন্ন হচ্ছে...
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <fieldset disabled={isUpdating} className="space-y-4 border-0 p-0 m-0 disabled:opacity-60">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1 sm:col-span-2">
                   <label className="font-bold text-slate-500">শিরোনাম (বাংলায়) *</label>
@@ -2784,147 +3130,584 @@ export default function CourseContentBuilderAdmin({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-bold text-slate-500">মূল ব্লগ কনটেন্ট (Markdown)</label>
-                    <textarea
-                      rows={8}
-                      placeholder="# পাঠ্য বিষয়..."
-                      value={itemForm.contentMarkdown}
-                      onChange={(e) =>
-                        setItemForm({ ...itemForm, contentMarkdown: e.target.value })
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-700 dark:text-slate-300">
+                        মূল ব্লগ কনটেন্ট (Rich Text Editor)
+                      </label>
+                      <span className="text-[10px] text-indigo-500 font-semibold">
+                        হেডিংস, বোল্ড, ইটালিক, হাইলাইট ও লিস্ট সমর্থনযোগ্য
+                      </span>
+                    </div>
+                    <RichTextEditor
+                      content={itemForm.contentMarkdown}
+                      onChange={(html) =>
+                        setItemForm({ ...itemForm, contentMarkdown: html })
                       }
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 font-mono text-xs rounded-xl border border-slate-200 dark:border-slate-700"
+                      placeholder="এখানে আকর্ষণীয় ও সুন্দরভাবে সাজানো পাঠ্য বিষয় লিখুন বা পেস্ট করুন..."
                     />
                   </div>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50 dark:bg-slate-800/40 space-y-3">
-                    <span className="font-extrabold text-slate-900 dark:text-white block">
-                      কুইজের প্রশ্নাবলি ({itemForm.quizQuestions.length} টি সংযুক্ত)
-                    </span>
-
-                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                      {itemForm.quizQuestions.map((q, idx) => (
-                        <div
-                          key={q.id || idx}
-                          className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2"
-                        >
-                          <div>
-                            <p className="font-bold text-slate-800 dark:text-white">
-                              {idx + 1}. {q.questionText}
-                            </p>
-                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                              সঠিক উত্তর: {q.options[q.correctOptionIndex]}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleEditQuestionInQuiz(q)}
-                              className="p-1 text-slate-400 hover:text-cyan-500 rounded-lg cursor-pointer transition"
-                              title="প্রশ্ন এডিট করুন"
-                            >
-                              <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveQuestion(q.id)}
-                              className="p-1 text-slate-400 hover:text-rose-500 rounded-lg cursor-pointer transition"
-                              title="প্রশ্ন মুছুন"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-slate-900 dark:text-white">
+                        কুইজের প্রশ্নাবলি ({itemForm.quizQuestions.length} টি সংযুক্ত)
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        MCQ, সত্য/মিথ্যা, শূন্যস্থান ও মিলকরণ
+                      </span>
                     </div>
 
-                    {/* New Question Form */}
-                    <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-                      <span className="font-bold text-indigo-600 dark:text-indigo-400 block text-[11px]">
-                        {editingQuestionId ? "✏️ প্রশ্নটি সংশোধন / এডিট করুন" : "+ নতুন প্রশ্ন যোগ করুন"}
-                      </span>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {itemForm.quizQuestions.map((q, idx) => {
+                        const qType = q.questionType || "MCQ";
+                        let answerPreview = "";
+                        let typeBadgeLabel = "MCQ";
+                        let badgeColor = "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300";
+
+                        if (qType === "TRUE_FALSE") {
+                          typeBadgeLabel = "সত্য / মিথ্যা";
+                          badgeColor = "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300";
+                          answerPreview = q.correctBoolean ? "সত্য (True)" : "মিথ্যা (False)";
+                        } else if (qType === "FILL_BLANKS") {
+                          typeBadgeLabel = "শূন্যস্থান পূরণ";
+                          badgeColor = "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300";
+                          answerPreview = (q.acceptedAnswers || []).join(", ") || (q.options || []).join(", ");
+                        } else if (qType === "MATCHING") {
+                          typeBadgeLabel = "বাম-ডান মিলকরণ";
+                          badgeColor = "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300";
+                          answerPreview = `${(q.matchingPairs || []).length} টি জোড়া পেয়ার`;
+                        } else if (qType === "REORDER") {
+                          typeBadgeLabel = "সঠিক ক্রমে সাজানো";
+                          badgeColor = "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300";
+                          const orderList = q.correctOrder || q.options || [];
+                          answerPreview = orderList.join(" ➔ ");
+                        } else {
+                          typeBadgeLabel = "MCQ";
+                          badgeColor = "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300";
+                          answerPreview = q.options[q.correctOptionIndex] || "N/A";
+                        }
+
+                        return (
+                          <div
+                            key={q.id || idx}
+                            className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex items-start justify-between gap-2 shadow-2xs"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${badgeColor}`}>
+                                  {typeBadgeLabel}
+                                </span>
+                                <p className="font-bold text-slate-800 dark:text-white text-xs">
+                                  {idx + 1}. {q.questionText}
+                                </p>
+                              </div>
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold block">
+                                সঠিক উত্তর: {answerPreview}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleEditQuestionInQuiz(q)}
+                                className="p-1 text-slate-400 hover:text-cyan-500 rounded-lg cursor-pointer transition"
+                                title="প্রশ্ন এডিট করুন"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveQuestion(q.id)}
+                                className="p-1 text-slate-400 hover:text-rose-500 rounded-lg cursor-pointer transition"
+                                title="প্রশ্ন মুছুন"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* New Question Form with Dynamic Type Switcher */}
+                    <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400 block text-[11px]">
+                          {editingQuestionId ? "✏️ প্রশ্নটি সংশোধন / এডিট করুন" : "+ নতুন প্রশ্ন যোগ করুন"}
+                        </span>
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+                          <span>ধরণ:</span>
+                          <select
+                            value={newQuestion.questionType}
+                            onChange={(e) =>
+                              setNewQuestion({
+                                ...newQuestion,
+                                questionType: e.target.value as QuizQuestionType,
+                              })
+                            }
+                            className="p-1 px-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-indigo-600 dark:text-indigo-400 font-bold"
+                          >
+                            <option value="MCQ">বহুনির্বাচনী প্রশ্ন (MCQ)</option>
+                            <option value="TRUE_FALSE">সত্য / মিথ্যা (True/False)</option>
+                            <option value="FILL_BLANKS">শূন্যস্থান পূরণ (Fill in Blanks)</option>
+                            <option value="MATCHING">বাম-ডান মিলকরণ (Matching Pairs)</option>
+                            <option value="REORDER">সঠিক ক্রমে সাজানো (Reordering)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Question Text / Prompt (Hidden if Fill Blanks uses dedicated sentence textarea) */}
+                      {newQuestion.questionType !== "FILL_BLANKS" && (
+                        <input
+                          type="text"
+                          placeholder="প্রশ্নের মূল শিরোনাম / প্রশ্নটি লিখুন..."
+                          value={newQuestion.questionText}
+                          onChange={(e) =>
+                            setNewQuestion({ ...newQuestion, questionText: e.target.value })
+                          }
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium"
+                        />
+                      )}
+
+                      {/* 1. MCQ OPTIONS */}
+                      {newQuestion.questionType === "MCQ" && (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              placeholder="অপশন A (বাধ্যতামূলক)"
+                              value={newQuestion.optionA}
+                              onChange={(e) =>
+                                setNewQuestion({ ...newQuestion, optionA: e.target.value })
+                              }
+                              className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                            />
+                            <input
+                              type="text"
+                              placeholder="অপশন B (বাধ্যতামূলক)"
+                              value={newQuestion.optionB}
+                              onChange={(e) =>
+                                setNewQuestion({ ...newQuestion, optionB: e.target.value })
+                              }
+                              className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                            />
+                            <input
+                              type="text"
+                              placeholder="অপশন C (ঐচ্ছিক)"
+                              value={newQuestion.optionC}
+                              onChange={(e) =>
+                                setNewQuestion({ ...newQuestion, optionC: e.target.value })
+                              }
+                              className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                            />
+                            <input
+                              type="text"
+                              placeholder="অপশন D (ঐচ্ছিক)"
+                              value={newQuestion.optionD}
+                              onChange={(e) =>
+                                setNewQuestion({ ...newQuestion, optionD: e.target.value })
+                              }
+                              className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-[11px] font-bold text-slate-500 shrink-0">
+                              সঠিক অপশন:
+                            </label>
+                            <select
+                              value={newQuestion.correctOptionIndex}
+                              onChange={(e) =>
+                                setNewQuestion({
+                                  ...newQuestion,
+                                  correctOptionIndex: Number(e.target.value),
+                                })
+                              }
+                              className="p-1.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-emerald-600 dark:text-emerald-400"
+                            >
+                              <option value={0}>অপশন A সঠিক</option>
+                              <option value={1}>অপশন B সঠিক</option>
+                              <option value={2}>অপশন C সঠিক</option>
+                              <option value={3}>অপশন D সঠিক</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 2. TRUE / FALSE OPTIONS (Simple Radio Toggle) */}
+                      {newQuestion.questionType === "TRUE_FALSE" && (
+                        <div className="p-3 bg-slate-50/80 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/80 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                              সঠিক উত্তর নির্বাচন করুন (Radio Toggle):
+                            </label>
+                            <span className="text-[10px] text-slate-500 font-medium">
+                              একটি বিকল্প রেডিও সিলেক্ট করুন
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <label
+                              onClick={() => setNewQuestion({ ...newQuestion, correctBoolean: true })}
+                              className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition select-none ${
+                                newQuestion.correctBoolean
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 shadow-xs"
+                                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="tfRadio"
+                                checked={newQuestion.correctBoolean === true}
+                                onChange={() => setNewQuestion({ ...newQuestion, correctBoolean: true })}
+                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className={`w-4 h-4 ${newQuestion.correctBoolean ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}`} />
+                                <span className={`text-xs font-black ${newQuestion.correctBoolean ? "text-emerald-700 dark:text-emerald-300" : "text-slate-700 dark:text-slate-300"}`}>
+                                  সত্য (True)
+                                </span>
+                              </div>
+                            </label>
+
+                            <label
+                              onClick={() => setNewQuestion({ ...newQuestion, correctBoolean: false })}
+                              className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition select-none ${
+                                !newQuestion.correctBoolean
+                                  ? "bg-rose-50 dark:bg-rose-950/40 border-rose-500 shadow-xs"
+                                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="tfRadio"
+                                checked={newQuestion.correctBoolean === false}
+                                onChange={() => setNewQuestion({ ...newQuestion, correctBoolean: false })}
+                                className="w-4 h-4 text-rose-600 focus:ring-rose-500"
+                              />
+                              <div className="flex items-center gap-2">
+                                <XCircle className={`w-4 h-4 ${!newQuestion.correctBoolean ? "text-rose-600 dark:text-rose-400" : "text-slate-400"}`} />
+                                <span className={`text-xs font-black ${!newQuestion.correctBoolean ? "text-rose-700 dark:text-rose-300" : "text-slate-700 dark:text-slate-300"}`}>
+                                  মিথ্যা (False)
+                                </span>
+                              </div>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 3. FILL IN THE BLANKS (Sentence with Explicit Blanks & Accepted Answers) */}
+                      {newQuestion.questionType === "FILL_BLANKS" && (
+                        <div className="p-3 bg-purple-50/50 dark:bg-purple-950/20 rounded-xl border border-purple-200/80 dark:border-purple-800/40 space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              বাক্য লিখুন এবং শূন্যস্থানের স্থানে ব্র্যাকেটে [সঠিক উত্তর] দিন:
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewQuestion({
+                                  ...newQuestion,
+                                  questionText: (newQuestion.questionText || "") + " [সঠিক উত্তর]",
+                                });
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/60 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 font-bold transition cursor-pointer"
+                            >
+                              + [ব্র্যাকেট ইনসার্ট]
+                            </button>
+                          </div>
+
+                          <textarea
+                            rows={3}
+                            placeholder="যেমন: কম্পিউটারের মস্তিষ্ক হলো [CPU] এবং বিদ্যুৎ প্রবাহের একক [অ্যাম্পিয়ার]।"
+                            value={newQuestion.questionText}
+                            onChange={(e) =>
+                              setNewQuestion({ ...newQuestion, questionText: e.target.value })
+                            }
+                            className="w-full p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:ring-2 focus:ring-purple-500/20"
+                          />
+
+                          {/* Live Sentence Preview with inline blanks */}
+                          {newQuestion.questionText && (
+                            <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/70 border border-purple-200 dark:border-purple-900/50 text-xs text-slate-700 dark:text-slate-300">
+                              <span className="text-[10px] uppercase font-bold text-purple-600 dark:text-purple-400 block mb-1">
+                                শিক্ষার্থীর ভিউ প্রিভিউ:
+                              </span>
+                              <div className="leading-relaxed">
+                                {newQuestion.questionText.split(/(\[.*?\])/g).map((part, pIdx) => {
+                                  if (part.startsWith("[") && part.endsWith("]")) {
+                                    const blankWord = part.slice(1, -1);
+                                    return (
+                                      <span
+                                        key={pIdx}
+                                        className="inline-flex items-center gap-1 mx-1 px-2 py-0.5 bg-purple-100 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-700 text-purple-800 dark:text-purple-200 rounded font-mono font-bold text-[11px]"
+                                        title={`সঠিক উত্তর: ${blankWord}`}
+                                      >
+                                        ___ ({blankWord || "খালি"}) ___
+                                      </span>
+                                    );
+                                  }
+                                  return <span key={pIdx}>{part}</span>;
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">
+                              বিকল্প গ্রহণযোগ্য উত্তরসমূহ (কমা দিয়ে পৃথক করুন):
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="যেমন: CPU, Central Processing Unit, সিপইউ"
+                              value={newQuestion.acceptedAnswersText}
+                              onChange={(e) =>
+                                setNewQuestion({ ...newQuestion, acceptedAnswersText: e.target.value })
+                              }
+                              className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                            />
+                            <p className="text-[10px] text-slate-500">
+                              * কেস-ইনসেনসিটিভ চেক: শিক্ষার্থী ছোট বা বড় হাতের অক্ষরে লিখলেও উত্তর গৃহীত হবে।
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 4. MATCHING PAIRS (Left & Right Items Inputted Directly) */}
+                      {newQuestion.questionType === "MATCHING" && (
+                        <div className="p-3.5 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200/90 dark:border-emerald-800/50 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-xs font-black text-slate-800 dark:text-slate-100 block">
+                                  বাম-ডান মিলকরণ বিল্ডার (Left-Right Pair Builder):
+                                </label>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 font-bold">
+                                  {newQuestion.matchingPairs.length} টি জোড়া
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-500 block mt-0.5">
+                                সরাসরি সঠিক মিল জোড়া লিখুন (ডেটাবেজে JSON অ্যারে হিসেবে সেভ হবে এবং শিক্ষার্থীর জন্য ডান পাশ স্বয়ংক্রিয়ভাবে এলোমেলো হবে)
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setNewQuestion({
+                                  ...newQuestion,
+                                  matchingPairs: [
+                                    ...newQuestion.matchingPairs,
+                                    { left: "", right: "" },
+                                  ],
+                                })
+                              }
+                              className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-98 transition flex items-center gap-1.5 cursor-pointer px-3 py-1.5 rounded-xl shadow-xs"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>+ নতুন পেয়ার যোগ করুন</span>
+                            </button>
+                          </div>
+
+                          {/* Column Headers */}
+                          <div className="grid grid-cols-[20px_1fr_24px_1fr_28px] items-center gap-2 px-1 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                            <span className="text-center">#</span>
+                            <span>Left Side Item (বাম পাশ)</span>
+                            <span className="text-center">ম্যাচ</span>
+                            <span>Right Side Match (ডান পাশ)</span>
+                            <span className="text-center">মুছুন</span>
+                          </div>
+
+                          {/* Dynamic Pair Rows */}
+                          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                            {newQuestion.matchingPairs.map((pair, pIdx) => (
+                              <div key={pIdx} className="grid grid-cols-[20px_1fr_24px_1fr_28px] items-center gap-2">
+                                <span className="text-[11px] font-black text-slate-400 text-center">
+                                  {pIdx + 1}.
+                                </span>
+                                <input
+                                  type="text"
+                                  placeholder="যেমন: ভোল্টমিটার / Apple"
+                                  value={pair.left}
+                                  onChange={(e) => {
+                                    const updated = [...newQuestion.matchingPairs];
+                                    updated[pIdx].left = e.target.value;
+                                    setNewQuestion({ ...newQuestion, matchingPairs: updated });
+                                  }}
+                                  className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500/20"
+                                />
+                                <span className="text-emerald-500 font-bold text-center text-sm">⇄</span>
+                                <input
+                                  type="text"
+                                  placeholder="যেমন: ভোল্টেজ পরিমাপক / Red"
+                                  value={pair.right}
+                                  onChange={(e) => {
+                                    const updated = [...newQuestion.matchingPairs];
+                                    updated[pIdx].right = e.target.value;
+                                    setNewQuestion({ ...newQuestion, matchingPairs: updated });
+                                  }}
+                                  className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500/20"
+                                />
+                                <div className="flex items-center justify-center">
+                                  {newQuestion.matchingPairs.length > 2 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = newQuestion.matchingPairs.filter(
+                                          (_, idx) => idx !== pIdx
+                                        );
+                                        setNewQuestion({ ...newQuestion, matchingPairs: updated });
+                                      }}
+                                      className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition"
+                                      title="পেয়ার মুছুন"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-300 dark:text-slate-700 text-center" title="অন্তত ২টি পেয়ার প্রয়োজন">
+                                      -
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 5. REORDERING (Teacher Inputs Items in CORRECT Sequence) */}
+                      {newQuestion.questionType === "REORDER" && (
+                        <div className="p-3 bg-teal-50/50 dark:bg-teal-950/20 rounded-xl border border-teal-200/80 dark:border-teal-800/40 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                                সঠিক পর্যায়ক্রমিক তালিকা (Correct Sequence Order):
+                              </label>
+                              <span className="text-[10px] text-slate-500">
+                                সঠিক ক্রমে (১, ২, ৩...) সাজিয়ে লিখুন। শিক্ষার্থীর সামনে এগুলো এলোমেলো থাকবে।
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setNewQuestion({
+                                  ...newQuestion,
+                                  reorderItems: [
+                                    ...(newQuestion.reorderItems || []),
+                                    `ধাপ ${(newQuestion.reorderItems?.length || 0) + 1}`,
+                                  ],
+                                })
+                              }
+                              className="text-[11px] font-bold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 cursor-pointer bg-teal-100/70 dark:bg-teal-900/40 px-2.5 py-1 rounded-lg"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>+ নতুন আইটেম যোগ করুন</span>
+                            </button>
+                          </div>
+
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {(newQuestion.reorderItems || []).map((item, rIdx) => (
+                              <div key={rIdx} className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-md bg-teal-200 dark:bg-teal-900 text-teal-800 dark:text-teal-200 text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  {rIdx + 1}
+                                </span>
+                                <input
+                                  type="text"
+                                  placeholder={`ধাপ ${rIdx + 1} এর বিবরণ লিখুন...`}
+                                  value={item}
+                                  onChange={(e) => {
+                                    const updated = [...(newQuestion.reorderItems || [])];
+                                    updated[rIdx] = e.target.value;
+                                    setNewQuestion({ ...newQuestion, reorderItems: updated });
+                                  }}
+                                  className="flex-1 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium"
+                                />
+                                <div className="flex items-center gap-0.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    disabled={rIdx === 0}
+                                    onClick={() => {
+                                      if (rIdx === 0) return;
+                                      const updated = [...newQuestion.reorderItems];
+                                      const temp = updated[rIdx - 1];
+                                      updated[rIdx - 1] = updated[rIdx];
+                                      updated[rIdx] = temp;
+                                      setNewQuestion({ ...newQuestion, reorderItems: updated });
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+                                    title="উপরে নিন"
+                                  >
+                                    <ArrowUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={rIdx === (newQuestion.reorderItems?.length || 0) - 1}
+                                    onClick={() => {
+                                      if (rIdx >= (newQuestion.reorderItems?.length || 0) - 1) return;
+                                      const updated = [...newQuestion.reorderItems];
+                                      const temp = updated[rIdx + 1];
+                                      updated[rIdx + 1] = updated[rIdx];
+                                      updated[rIdx] = temp;
+                                      setNewQuestion({ ...newQuestion, reorderItems: updated });
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+                                    title="নিচে নিন"
+                                  >
+                                    <ArrowDown className="w-3.5 h-3.5" />
+                                  </button>
+                                  {(newQuestion.reorderItems || []).length > 2 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = newQuestion.reorderItems.filter(
+                                          (_, idx) => idx !== rIdx
+                                        );
+                                        setNewQuestion({ ...newQuestion, reorderItems: updated });
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-rose-500 cursor-pointer"
+                                      title="আইটেম মুছুন"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Explanation Input */}
                       <input
                         type="text"
-                        placeholder="প্রশ্নটি লিখুন..."
-                        value={newQuestion.questionText}
+                        placeholder="উত্তরের বিস্তারিত ব্যাখ্যা (অপশনাল)..."
+                        value={newQuestion.explanation}
                         onChange={(e) =>
-                          setNewQuestion({ ...newQuestion, questionText: e.target.value })
+                          setNewQuestion({ ...newQuestion, explanation: e.target.value })
                         }
-                        className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
                       />
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          placeholder="অপশন A"
-                          value={newQuestion.optionA}
-                          onChange={(e) =>
-                            setNewQuestion({ ...newQuestion, optionA: e.target.value })
-                          }
-                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                        />
-                        <input
-                          type="text"
-                          placeholder="অপশন B"
-                          value={newQuestion.optionB}
-                          onChange={(e) =>
-                            setNewQuestion({ ...newQuestion, optionB: e.target.value })
-                          }
-                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                        />
-                        <input
-                          type="text"
-                          placeholder="অপশন C"
-                          value={newQuestion.optionC}
-                          onChange={(e) =>
-                            setNewQuestion({ ...newQuestion, optionC: e.target.value })
-                          }
-                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                        />
-                        <input
-                          type="text"
-                          placeholder="অপশন D"
-                          value={newQuestion.optionD}
-                          onChange={(e) =>
-                            setNewQuestion({ ...newQuestion, optionD: e.target.value })
-                          }
-                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 items-center">
-                        <select
-                          value={newQuestion.correctOptionIndex}
-                          onChange={(e) =>
-                            setNewQuestion({
-                              ...newQuestion,
-                              correctOptionIndex: Number(e.target.value),
-                            })
-                          }
-                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold"
-                        >
-                          <option value={0}>অপশন A সঠিক</option>
-                          <option value={1}>অপশন B সঠিক</option>
-                          <option value={2}>অপশন C সঠিক</option>
-                          <option value={3}>অপশন D সঠিক</option>
-                        </select>
-                        <input
-                          type="text"
-                          placeholder="উত্তরের ব্যাখ্যা..."
-                          value={newQuestion.explanation}
-                          onChange={(e) =>
-                            setNewQuestion({ ...newQuestion, explanation: e.target.value })
-                          }
-                          className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
+
+                      <div className="flex items-center gap-2 pt-1">
                         <button
                           type="button"
+                          disabled={isSavingQuestionItem}
                           onClick={handleAddQuestionToQuiz}
-                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer transition shadow-xs active:scale-95"
+                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95 text-xs"
                         >
-                          {editingQuestionId ? <Save className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                          <span>{editingQuestionId ? "প্রশ্ন আপডেট সংরক্ষণ" : "প্রশ্নটি যোগ করুন"}</span>
+                          {isSavingQuestionItem ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                          ) : editingQuestionId ? (
+                            <Save className="w-3.5 h-3.5" />
+                          ) : (
+                            <Plus className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {isSavingQuestionItem
+                              ? "সংরক্ষণ হচ্ছে..."
+                              : editingQuestionId
+                              ? "প্রশ্ন আপডেট সংরক্ষণ"
+                              : "প্রশ্নটি যোগ করুন"}
+                          </span>
                         </button>
                         {editingQuestionId && (
                           <button
@@ -2932,12 +3715,20 @@ export default function CourseContentBuilderAdmin({
                             onClick={() => {
                               setEditingQuestionId(null);
                               setNewQuestion({
+                                questionType: "MCQ",
                                 questionText: "",
                                 optionA: "",
                                 optionB: "",
                                 optionC: "",
                                 optionD: "",
                                 correctOptionIndex: 0,
+                                correctBoolean: true,
+                                acceptedAnswersText: "",
+                                matchingPairs: [
+                                  { left: "", right: "" },
+                                  { left: "", right: "" },
+                                ],
+                                reorderItems: ["প্রথম ধাপ / উপাদান ১", "দ্বিতীয় ধাপ / উপাদান ২", "তৃতীয় ধাপ / উপাদান ৩"],
                                 explanation: "",
                               });
                             }}
@@ -2952,30 +3743,56 @@ export default function CourseContentBuilderAdmin({
                 </div>
               )}
 
+              </fieldset>
+
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
+                  disabled={isUpdating}
                   onClick={() => {
                     setShowItemModal(false);
                     setEditingItem(null);
                     setEditingQuestionId(null);
                   }}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer transition"
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer transition"
                 >
                   বাতিল
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition active:scale-95"
+                  disabled={isUpdating}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-2 transition active:scale-95"
                 >
-                  <Save className="w-4 h-4" />
-                  <span>{editingItem ? "আপডেট সংরক্ষণ করুন ✏️" : "ব্লক যোগ করুন"}</span>
+                  {isUpdating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>{editingItem ? "আপডেট সংরক্ষণ করা হচ্ছে..." : "সংরক্ষণ হচ্ছে..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>{editingItem ? "আপডেট সংরক্ষণ করুন ✏️" : "ব্লক যোগ করুন"}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Custom Animated Delete Confirmation Modal (Replaces all native confirm() dialogs) */}
+      <DeleteConfirmationModal
+        isOpen={deleteModalState.isOpen}
+        onClose={() =>
+          setDeleteModalState((prev) => ({ ...prev, isOpen: false, id: null }))
+        }
+        onConfirm={handleExecuteDelete}
+        title={deleteModalState.title}
+        description={deleteModalState.description}
+        itemName={deleteModalState.itemName}
+        isDeleting={isDeletingEntity}
+      />
     </div>
   );
 }

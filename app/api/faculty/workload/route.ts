@@ -162,25 +162,44 @@ export async function GET(req: NextRequest) {
       teachers = teachers.filter((t: any) => t.department === department);
     }
 
-    const processedTeachers = teachers.map((t: any) => ({
-      ...t,
-      monthlyWorkloadEstimated: Math.round(t.totalWeeklyPeriods * 4.2),
-      totalTeachingHours: Number((t.totalMinutes / 60).toFixed(1)),
-      freePeriodsCount: Math.max(0, 35 - t.totalWeeklyPeriods),
-    }));
+    // Explicitly select and sanitize faculty workload properties to strictly prevent sensitive data leaks
+    const processedTeachers = teachers.map((t: any) => {
+      const weeklyPeriods = Number(t.totalWeeklyPeriods) || 0;
+      const totalMinutes = Number(t.totalMinutes) || 0;
+      const isOverloaded = weeklyPeriods > 22;
+      const isLight = weeklyPeriods < 12;
 
-    return apiSuccess({
+      return {
+        id: t.id,
+        teacherId: t.id,
+        name: t.name,
+        nameBangla: t.nameBangla || t.name,
+        designation: t.designation,
+        department: t.department,
+        tradeCode: t.tradeCode || null,
+        totalWeeklyPeriods: weeklyPeriods,
+        totalMinutes,
+        monthlyWorkloadEstimated: Math.round(weeklyPeriods * 4.2),
+        totalTeachingHours: Number((totalMinutes / 60).toFixed(1)),
+        freePeriodsCount: Math.max(0, 35 - weeklyPeriods),
+        status: isOverloaded ? "Overloaded" : isLight ? "Light Workload" : "Optimal Workload",
+        statusBangla: isOverloaded
+          ? "অতিরিক্ত কাজের চাপ (>২২ পিরিয়ড)"
+          : isLight
+          ? "হালকা কাজের চাপ (<১২ পিরিয়ড)"
+          : "সুষম কাজের চাপ (Optimal)",
+      };
+    });
+
+    const responsePayload = {
       institutionalAverage: workloadData.institutionalAverage || 18,
-      recommendations: workloadData.recommendations || [],
+      recommendations: workloadData.recommendations || ["শিক্ষক কর্মভার বণ্টন পর্যালোচনা সম্পন্ন হয়েছে।"],
       teachers: processedTeachers,
-      totalFacultyEvaluated: teachers.length,
-    }, {
-      extraKeys: {
-        institutionalAverage: workloadData.institutionalAverage || 18,
-        recommendations: workloadData.recommendations || [],
-        teachers: processedTeachers,
-        totalFacultyEvaluated: teachers.length,
-      },
+      totalFacultyEvaluated: processedTeachers.length,
+    };
+
+    return apiSuccess(responsePayload, {
+      extraKeys: responsePayload,
     });
   } catch (error: any) {
     return apiError(error, { fallbackMessage: "শিক্ষক কর্মভার হিসাব করতে ব্যর্থ হয়েছে" });

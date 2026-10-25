@@ -1,20 +1,35 @@
 import { NextResponse } from "next/server";
 import { institutionalDb, FacultyMember } from "@/lib/database";
+import { extractRequestIdentity, requireAdmin } from "@/lib/serverAuthGuard";
+import { isAuthorizedStaff } from "@/lib/rbac";
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type"); // faculty or staff
 
+    const identity = extractRequestIdentity(req);
+    const isStaff = identity.isAuthenticated && isAuthorizedStaff(identity.userRole);
+
     let list = [...institutionalDb.faculty];
     if (type) {
       list = list.filter((f) => f.type === type);
     }
 
+    // Contact Privacy: Redact private phone numbers for unauthenticated public viewers
+    const sanitizedList = list.map((f) => {
+      if (isStaff) return f;
+      return {
+        ...f,
+        mobile: "",
+        email: f.email ? `${f.email.slice(0, 3)}***@pgtsc.gov.bd` : "",
+      };
+    });
+
     return NextResponse.json({
       success: true,
-      items: list,
-      total: list.length,
+      items: sanitizedList,
+      total: sanitizedList.length,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -22,6 +37,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = requireAdmin(req, "/api/faculty (POST)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const newMember: FacultyMember = {
@@ -56,6 +76,11 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const auth = requireAdmin(req, "/api/faculty (PUT)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const idx = institutionalDb.faculty.findIndex((f) => f.id === Number(body.id));
@@ -79,6 +104,11 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const auth = requireAdmin(req, "/api/faculty (DELETE)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");

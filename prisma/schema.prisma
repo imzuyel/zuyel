@@ -52,6 +52,14 @@ enum QuizStatus {
   CANCELLED  // বাতিল
 }
 
+enum QuestionType {
+  MCQ         // বহুনির্বাচনী প্রশ্ন
+  TRUE_FALSE  // সত্য / মিথ্যা
+  FILL_BLANKS // শূন্যস্থান পূরণ
+  MATCHING    // বাম-ডান মিলকরণ
+  REORDER     // সঠিক ক্রমে সাজানো
+}
+
 enum SessionStatus {
   WAITING      // লবিতে অপেক্ষমাণ
   ACTIVE       // চলমান
@@ -630,24 +638,28 @@ model Quiz {
   @@map("quizzes")
 }
 
-/// কুইজের বহুনির্বাচনী প্রশ্নাবলি (MCQ Question Bank)
+/// কুইজের প্রশ্নাবলি (MCQ, True/False, Fill in Blanks, Matching)
 model QuizQuestion {
-  id            Int      @id @default(autoincrement())
+  id            Int          @id @default(autoincrement())
   quizId        Int
-  quiz          Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  questionText  String   @db.Text
-  optionA       String   @db.VarChar(255)
-  optionB       String   @db.VarChar(255)
-  optionC       String   @db.VarChar(255)
-  optionD       String   @db.VarChar(255)
-  correctOption String   @db.VarChar(10) // "A", "B", "C", "D"
-  explanation   String?  @db.Text
-  marks         Int      @default(1)
-  order         Int      @default(1)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  quiz          Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  questionType  QuestionType @default(MCQ)
+  questionText  String       @db.Text
+  optionA       String?      @db.VarChar(255)
+  optionB       String?      @db.VarChar(255)
+  optionC       String?      @db.VarChar(255)
+  optionD       String?      @db.VarChar(255)
+  optionsJson   String?      @db.LongText // Flexible options array / matching pairs
+  correctOption String?      @db.VarChar(50) // "A", "B", "C", "D" or "TRUE" / "FALSE"
+  correctAnswer String?      @db.Text // Accepted answer string/JSON array or matching pairs JSON
+  explanation   String?      @db.Text
+  marks         Int          @default(1)
+  order         Int          @default(1)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   @@index([quizId])
+  @@index([questionType])
   @@map("quiz_questions")
 }
 
@@ -1004,6 +1016,7 @@ model StudentItemProgress {
   lastScore        Int                @default(0)
   isPassed         Boolean            @default(false)
   xpEarned         Int                @default(0)
+  stars            Int                @default(1) // 1 to 5 Stars rating based on student engagement
   completedAt      DateTime?
   timeSpentSeconds Int                @default(0)
   answersJson      String?            @db.LongText
@@ -1013,6 +1026,7 @@ model StudentItemProgress {
   @@unique([studentRoll, itemId])
   @@index([studentRoll])
   @@index([itemId])
+  @@index([stars])
   @@map("student_item_progress")
 }
 
@@ -1174,4 +1188,35 @@ model SecurityAuditEntry {
   @@index([createdAt])
   @@map("security_audit_log")
 }
+
+// ==========================================
+// CHAPTER-BASED LEARNING SYSTEM (GAMIFICATION & STARS)
+// ==========================================
+
+/// শিক্ষার্থী লার্নিং আইটেম প্রগ্রেস ও স্টার রেটিং (Chapter Content Progress & Star Rating)
+model ChapterContentItemProgress {
+  id               Int       @id @default(autoincrement())
+  studentRoll      String    @db.VarChar(50)
+  studentName      String?   @db.VarChar(150)
+  itemId           Int
+  status           String    @default("COMPLETED") @db.VarChar(30) // COMPLETED, FAILED, IN_PROGRESS
+  attemptsCount    Int       @default(1)
+  bestScore        Int       @default(0) // Percentage score
+  lastScore        Int       @default(0)
+  isPassed         Boolean   @default(false)
+  xpEarned         Int       @default(0)
+  stars            Int       @default(1) // 1 to 5 Stars based on engagement and score
+  timeSpentSeconds Int       @default(0)
+  answersJson      String?   @db.LongText // Stored JSON of student answers across diverse question types
+  completedAt      DateTime? @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([studentRoll, itemId], name: "unique_student_item_progress")
+  @@index([studentRoll])
+  @@index([itemId])
+  @@index([stars])
+  @@map("chapter_content_item_progress")
+}
+
 

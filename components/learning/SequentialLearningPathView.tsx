@@ -46,7 +46,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
+import { triggerBlockCompletionCelebration } from "@/lib/confetti";
 import { motion, AnimatePresence } from "motion/react";
+import { CourseCertificateModal } from "@/components/learning/CourseCertificateModal";
 import {
   CourseItem,
   EnrichedCourse,
@@ -78,6 +80,63 @@ export const getSubjectIcon = (tradeCode?: string | null, code?: string | null) 
 };
 
 import { InternationalStoryLessonRenderer } from "@/components/learning/InternationalStoryLessonRenderer";
+import { DynamicQuizQuestionView } from "./DynamicQuizQuestionView";
+
+// Minimalist Smart Time Formatter (e.g., "35s", "5m")
+export function formatSmartTime(item: {
+  durationMinutes?: number;
+  timeLimitSeconds?: number;
+  readTimeMinutes?: number;
+}): string {
+  if (item.timeLimitSeconds && item.timeLimitSeconds > 0) {
+    if (item.timeLimitSeconds < 60) return `${item.timeLimitSeconds}s`;
+    const m = Math.floor(item.timeLimitSeconds / 60);
+    const s = item.timeLimitSeconds % 60;
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  }
+  const mins = item.readTimeMinutes || item.durationMinutes;
+  if (mins && mins > 0) {
+    if (mins < 1) return `${Math.round(mins * 60)}s`;
+    return `${mins}m`;
+  }
+  return "35s";
+}
+
+// Minimalist Marks Formatter
+export function getItemMarks(item: {
+  quizQuestions?: Array<{ marks?: number }>;
+  passingScore?: number;
+}): number {
+  if (item.quizQuestions && item.quizQuestions.length > 0) {
+    return item.quizQuestions.reduce((acc, q) => acc + (q.marks || 10), 0);
+  }
+  return item.passingScore || 10;
+}
+
+// Framer Motion Timeline Roadmap Animation Variants
+export const roadmapTimelineContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.05,
+    },
+  },
+};
+
+export const roadmapTimelineBlockVariants: any = {
+  hidden: { opacity: 0, y: 12 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      type: "spring",
+      stiffness: 300,
+      damping: 24,
+    },
+  },
+};
 
 // =========================================================================
 // INTERNATIONAL STORY / LESSON ARTICLE RENDERER (Exported for compatibility)
@@ -89,6 +148,9 @@ export default function SequentialLearningPathView() {
   const [loading, setLoading] = useState(true);
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
   const chaptersSectionRef = useRef<HTMLDivElement>(null);
+
+  // Active block DOM reference for smooth auto-centering (Task 1: Auto-Scroll UX Fix)
+  const activeRoadmapBlockRef = useRef<HTMLDivElement | null>(null);
 
   // Smooth scroll handler when a subject card is clicked
   const handleSelectSubject = (courseId: number) => {
@@ -138,12 +200,13 @@ export default function SequentialLearningPathView() {
   const [hoveredNodeItem, setHoveredNodeItem] = useState<EnrichedContentItem | null>(null);
   const [miniQuizSelectedOpt, setMiniQuizSelectedOpt] = useState<number | null>(null);
   const [miniQuizSubmitted, setMiniQuizSubmitted] = useState<boolean>(false);
+  const blogReadingStartTimeRef = useRef<number>(Date.now());
 
   // Step-by-Step Interactive Quiz Arena States (One Question at a Time)
   const [activeQuizItem, setActiveQuizItem] = useState<EnrichedContentItem | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, number>>({});
-  const [selectedOptionForCurrent, setSelectedOptionForCurrent] = useState<number | null>(null);
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, any>>({});
+  const [selectedOptionForCurrent, setSelectedOptionForCurrent] = useState<any>(null);
   const [confirmedQuestions, setConfirmedQuestions] = useState<Record<string, boolean>>({});
   const [consecutiveStreak, setConsecutiveStreak] = useState<number>(0);
   const [highestStreak, setHighestStreak] = useState<number>(0);
@@ -159,6 +222,7 @@ export default function SequentialLearningPathView() {
 
   // SoloLearn Friendly Locked Modal Item
   const [lockedModalItem, setLockedModalItem] = useState<EnrichedContentItem | null>(null);
+  const [certificateModalOpen, setCertificateModalOpen] = useState(false);
 
   // Student Roll
   const studentRoll = activeStudent ? activeStudent.rollNumber : "10";
@@ -169,6 +233,25 @@ export default function SequentialLearningPathView() {
     const student = getActiveStudentAccount();
     setActiveStudent(student);
   }, []);
+
+  // Auto-scroll smoothly to center the active block whenever selected course, chapter, or active items change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const activeEl =
+        activeRoadmapBlockRef.current ||
+        (activeBlogItem?.id && document.getElementById(`slp-roadmap-node-${activeBlogItem.id}`)) ||
+        (activeQuizItem?.id && document.getElementById(`slp-roadmap-node-${activeQuizItem.id}`));
+      if (activeEl) {
+        activeEl.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest",
+        });
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [selectedCourseId, selectedChapterFilter, activeBlogItem?.id, activeQuizItem?.id]);
 
   const fetchCoursesWithProgress = async () => {
     try {
@@ -351,7 +434,12 @@ export default function SequentialLearningPathView() {
       return;
     }
 
+    // Auto-scroll smoothly to center the clicked active block (Task 1: Auto-Scroll UX Fix)
+    const blockEl = document.getElementById(`slp-roadmap-node-${item.id}`);
+    blockEl?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+
     if (item.itemType === "BLOG_PART") {
+      blogReadingStartTimeRef.current = Date.now();
       setActiveBlogItem(item);
       setMiniQuizSelectedOpt(null);
       setMiniQuizSubmitted(false);
@@ -394,27 +482,23 @@ export default function SequentialLearningPathView() {
 
     try {
       setCompletingBlog(true);
+      const elapsedSeconds = Math.max(1, Math.round((Date.now() - blogReadingStartTimeRef.current) / 1000));
       const res = await fetch(`/api/learning/items/${activeBlogItem.id}/complete-blog`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           studentRoll,
           studentName,
-          timeSpentSeconds: (activeBlogItem.readTimeMinutes || 5) * 60,
+          timeSpentSeconds: elapsedSeconds,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
         try {
-          confetti({
-            particleCount: 80,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ["#06b6d4", "#10b981", "#6366f1", "#f59e0b", "#ec4899"],
-          });
+          triggerBlockCompletionCelebration();
         } catch {}
-        toast.success(`অভিনন্দন! পাঠ সম্পন্ন হয়েছে (+${data.xpAwarded || activeBlogItem.xpReward} XP)`);
+        toast.success(`অভিনন্দন! পাঠ সম্পন্ন হয়েছে (+${data.xpAwarded || activeBlogItem.xpReward} XP, ${data.stars || 5}★)`);
         setActiveBlogItem(null);
         await fetchCoursesWithProgress();
       } else {
@@ -429,8 +513,13 @@ export default function SequentialLearningPathView() {
 
   // Step-by-Step: Confirm Current Question (Cannot go to #2 until #1 is confirmed!)
   const handleConfirmCurrentQuestion = () => {
-    if (!activeQuizItem || selectedOptionForCurrent === null) {
-      toast.error("অনুগ্রহ করে একটি উত্তর নির্বাচন করুন!");
+    if (
+      !activeQuizItem ||
+      selectedOptionForCurrent === null ||
+      selectedOptionForCurrent === undefined ||
+      selectedOptionForCurrent === ""
+    ) {
+      toast.error("অনুগ্রহ করে একটি উত্তর নির্বাচন বা পূরণ করুন!");
       return;
     }
 
@@ -438,7 +527,58 @@ export default function SequentialLearningPathView() {
     const currentQ = questions[currentQuestionIndex];
     if (!currentQ) return;
 
-    const isCorrect = selectedOptionForCurrent === currentQ.correctOptionIndex;
+    let isCorrect = false;
+    const qType = currentQ.questionType || "MCQ";
+
+    if (qType === "TRUE_FALSE") {
+      const studentBool =
+        typeof selectedOptionForCurrent === "boolean"
+          ? selectedOptionForCurrent
+          : selectedOptionForCurrent === 0 ||
+            String(selectedOptionForCurrent).toLowerCase() === "true" ||
+            String(selectedOptionForCurrent) === "সত্য";
+      const expectedBool =
+        currentQ.correctBoolean !== undefined
+          ? currentQ.correctBoolean
+          : currentQ.correctOptionIndex === 0;
+      isCorrect = studentBool === expectedBool;
+    } else if (qType === "FILL_BLANKS") {
+      const studentText = String(selectedOptionForCurrent || "")
+        .trim()
+        .toLowerCase();
+      const accepted = (currentQ.acceptedAnswers || currentQ.options || []).map((a) =>
+        a.trim().toLowerCase()
+      );
+      isCorrect = accepted.includes(studentText);
+    } else if (qType === "MATCHING") {
+      let pairs = currentQ.matchingPairs || [];
+      if ((!pairs || pairs.length === 0) && typeof currentQ.correctAnswer === "string" && currentQ.correctAnswer.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(currentQ.correctAnswer);
+          if (Array.isArray(parsed)) pairs = parsed;
+        } catch {}
+      }
+      if (pairs.length > 0) {
+        if (Array.isArray(selectedOptionForCurrent)) {
+          isCorrect = pairs.every((p, idx) => {
+            const item = selectedOptionForCurrent[idx];
+            if (typeof item === "object" && item !== null) {
+              return (item.left || "").trim().toLowerCase() === p.left.trim().toLowerCase() &&
+                     (item.right || "").trim().toLowerCase() === p.right.trim().toLowerCase();
+            }
+            return false;
+          });
+        } else if (typeof selectedOptionForCurrent === "object" && selectedOptionForCurrent !== null) {
+          const userPairs = selectedOptionForCurrent as Record<string, string>;
+          isCorrect = pairs.every((p, idx) => {
+            const val = userPairs[p.left] ?? userPairs[`drop-${idx}`] ?? userPairs[idx];
+            return typeof val === "string" && val.trim().toLowerCase() === p.right.trim().toLowerCase();
+          });
+        }
+      }
+    } else {
+      isCorrect = Number(selectedOptionForCurrent) === currentQ.correctOptionIndex;
+    }
 
     // Lock in answer for current question
     setQuizAnswers((prev) => ({ ...prev, [currentQ.id]: selectedOptionForCurrent }));
@@ -548,14 +688,9 @@ export default function SequentialLearningPathView() {
         setQuizResult(data);
         if (data.isPassed) {
           try {
-            confetti({
-              particleCount: 100,
-              spread: 80,
-              origin: { y: 0.5 },
-              colors: ["#10b981", "#06b6d4", "#f59e0b", "#ec4899", "#8b5cf6"],
-            });
+            triggerBlockCompletionCelebration();
           } catch {}
-          toast.success(`🎉 অভিনন্দন! আপনি সফলভাবে পাস করেছেন (+${data.xpAwarded} XP)`);
+          toast.success(`🎉 অভিনন্দন! আপনি সফলভাবে পাস করেছেন (+${data.xpAwarded} XP, ${data.stars || 4}★)`);
         } else {
           toast.error("পাস মার্ক অর্জিত হয়নি। নিয়ম অনুযায়ী পুনরায় চেষ্টা করুন।");
         }
@@ -661,10 +796,12 @@ export default function SequentialLearningPathView() {
                   <h3 className="text-sm sm:text-base font-extrabold text-white truncate">
                     {nextActiveLesson.item.titleBangla}
                   </h3>
-                  <p className="text-xs text-slate-300 flex items-center gap-2">
-                    <span>{nextActiveLesson.item.durationMinutes} মিনিট</span>
+                  <p className="text-xs text-slate-300 flex items-center gap-2 font-mono">
+                    <span className="text-amber-400 font-bold">+{nextActiveLesson.item.xpReward} XP</span>
                     <span>•</span>
-                    <span className="text-amber-400 font-bold">+{nextActiveLesson.item.xpReward} XP পুরস্কার</span>
+                    <span className="text-cyan-400 font-semibold">{getItemMarks(nextActiveLesson.item)} Marks</span>
+                    <span>•</span>
+                    <span>{formatSmartTime(nextActiveLesson.item)}</span>
                   </p>
                 </div>
               </div>
@@ -681,23 +818,63 @@ export default function SequentialLearningPathView() {
 
           {/* Active Course Progress Bar & Metrics */}
           {activeCourse && (
-            <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between text-xs font-bold">
-                <div className="flex items-center gap-2 text-slate-300">
-                  <GraduationCap className="w-4 h-4 text-cyan-400" />
+            <div className="p-4 sm:p-5 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 shadow-lg space-y-3 relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                {/* Step Count Pill Badge */}
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-200 text-xs font-bold shadow-xs">
+                  <Sparkles className="w-4 h-4 text-cyan-300 animate-pulse shrink-0" />
                   <span>
-                    বর্তমান কোর্স অগ্রগতি: <strong>{activeCourse.completedCourseItems}</strong> / {activeCourse.totalCourseItems} টি পাঠ সম্পন্ন
+                    বর্তমান কোর্স অগ্রগতি: <strong className="font-mono font-black text-cyan-100">{activeCourse.completedCourseItems}</strong> / {activeCourse.totalCourseItems} টি পাঠ সম্পন্ন
                   </span>
                 </div>
-                <span className="text-cyan-400 font-mono font-black text-sm">
-                  {activeCourse.courseProgressPercentage}% সম্পন্ন
-                </span>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Total Course Stars Earned Badge */}
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-bold shadow-[0_0_12px_rgba(245,158,11,0.2)]">
+                    <Star className="w-4 h-4 text-amber-400 fill-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.7)] shrink-0 animate-pulse" />
+                    <span>
+                      মোট অর্জন: <strong className="font-mono font-black text-sm text-amber-200">{activeCourse.totalEarnedStars || 0}</strong> / {activeCourse.maxPossibleStars || activeCourse.totalCourseItems * 5} স্টার
+                    </span>
+                  </div>
+
+                  {/* Standout Percentage Badge with Bold Gradient Text & Certificate Button */}
+                  <div className="flex items-center gap-2">
+                    {activeCourse.courseProgressPercentage === 100 && (
+                      <button
+                        type="button"
+                        onClick={() => setCertificateModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-500 to-emerald-600 hover:from-amber-400 hover:to-emerald-500 text-white font-black text-xs shadow-md transition-all cursor-pointer hover:scale-105 active:scale-95"
+                      >
+                        <Award className="w-3.5 h-3.5" />
+                        <span>সার্টিফিকেট 🎓</span>
+                      </button>
+                    )}
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 shadow-[0_0_12px_rgba(16,185,129,0.2)]">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                        সম্পূর্ণ
+                      </span>
+                      <span className="text-sm sm:text-base font-black font-mono tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-emerald-300 via-teal-300 to-cyan-300">
+                        {activeCourse.courseProgressPercentage}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="h-2.5 w-full bg-slate-800/80 rounded-full overflow-hidden border border-slate-700/60 p-0.5">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-400 via-indigo-500 to-emerald-400 transition-all duration-700 rounded-full shadow-sm"
-                  style={{ width: `${activeCourse.courseProgressPercentage}%` }}
-                />
+
+              {/* Premium Animated Gradient Progress Bar with Soft Glow & Light Sheen */}
+              <div className="h-3.5 w-full bg-slate-900/80 rounded-full overflow-hidden border border-white/10 p-0.5 shadow-inner relative">
+                <motion.div
+                  className="h-full bg-gradient-to-r from-cyan-400 via-indigo-400 to-emerald-400 rounded-full relative overflow-hidden shadow-[0_0_14px_rgba(6,182,212,0.5)]"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${activeCourse.courseProgressPercentage}%` }}
+                  transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <motion.div
+                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent pointer-events-none -skew-x-12"
+                    animate={{ x: ["-100%", "200%"] }}
+                    transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
+                  />
+                </motion.div>
               </div>
             </div>
           )}
@@ -934,10 +1111,10 @@ export default function SequentialLearningPathView() {
                   <div
                     key={c.id}
                     onClick={() => handleSelectSubject(c.id)}
-                    className={`cursor-pointer transition-all duration-300 relative group transform hover:-translate-y-1 ${
+                    className={`cursor-pointer transition-all duration-300 relative group transform hover:-translate-y-0.5 ${
                       isSelected
-                        ? "animated-gradient-card animate-pulse-glow-ring scale-[1.01]"
-                        : "rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/90 hover:border-cyan-500/60 hover:shadow-lg hover:shadow-cyan-500/10"
+                        ? "animated-gradient-card scale-[1.01] ring-2 ring-cyan-400/30"
+                        : "rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/90 hover:border-cyan-500/60 hover:ring-1 hover:ring-cyan-500/30"
                     }`}
                   >
                     <div
@@ -1005,18 +1182,20 @@ export default function SequentialLearningPathView() {
                         </div>
                       </div>
 
-                      {/* Progress bar */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px] font-bold">
-                          <span className="text-slate-400">অগ্রগতি:</span>
-                          <span className={c.courseProgressPercentage === 100 ? "text-emerald-400 font-bold" : "text-cyan-400 font-mono font-black"}>
+                      {/* Progress bar with animated gradient and soft glow */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] font-bold">
+                          <span className="text-slate-400">কোর্স অগ্রগতি:</span>
+                          <span className={c.courseProgressPercentage === 100 ? "text-emerald-500 dark:text-emerald-400 font-bold" : "text-cyan-600 dark:text-cyan-400 font-mono font-black"}>
                             {c.courseProgressPercentage}% সম্পন্ন
                           </span>
                         </div>
-                        <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 rounded-full transition-all duration-500"
-                            style={{ width: `${c.courseProgressPercentage}%` }}
+                        <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-200/60 dark:border-slate-700/60 relative">
+                          <motion.div
+                            className="h-full bg-gradient-to-r from-cyan-400 via-indigo-500 to-emerald-400 rounded-full shadow-[0_0_8px_rgba(6,182,212,0.4)]"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${c.courseProgressPercentage}%` }}
+                            transition={{ duration: 0.8, ease: "easeOut" }}
                           />
                         </div>
                       </div>
@@ -1116,37 +1295,76 @@ export default function SequentialLearningPathView() {
                   </div>
 
                   <div>
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                      <span className="font-extrabold uppercase">অধ্যায় {chapter.chapterNumber}</span>
-                      <span>·</span>
-                      <span>{chapter.completedItemsCount} / {chapter.totalItemsCount} সম্পন্ন</span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-mono font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 uppercase text-[10px]">
+                        অধ্যায় {chapter.chapterNumber}
+                      </span>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 shadow-xs font-bold text-[11px]">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400 shrink-0" />
+                        <span>
+                          <strong className="font-mono font-black text-emerald-600 dark:text-emerald-300">{chapter.completedItemsCount}</strong> / {chapter.totalItemsCount} সম্পন্ন
+                        </span>
+                      </div>
+
+                      {/* Chapter Stars Pill Badge */}
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-800/60 shadow-xs font-bold text-[11px]">
+                        <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.7)] shrink-0" />
+                        <span>
+                          <strong className="font-mono font-black text-amber-600 dark:text-amber-300">
+                            {chapter.totalEarnedStars !== undefined
+                              ? chapter.totalEarnedStars
+                              : chapter.items.reduce((acc, it) => {
+                                  const p = it.progress;
+                                  if (p?.isPassed || p?.status === "COMPLETED") {
+                                    const val = p.stars !== undefined && p.stars !== null && Number(p.stars) > 0
+                                      ? Math.max(1, Math.min(5, Number(p.stars)))
+                                      : 1;
+                                    return acc + val;
+                                  }
+                                  return acc;
+                                }, 0)}
+                          </strong> / {chapter.maxPossibleStars || chapter.items.length * 5} স্টার
+                        </span>
+                      </div>
+
                       {chapter.isLocked && (
-                        <>
-                          <span>·</span>
-                          <span className="text-rose-500 font-bold flex items-center gap-1">
-                            <Lock className="w-3 h-3" />
-                            <span>লক করা (পূর্ববর্তী অধ্যায় আবশ্যক)</span>
-                          </span>
-                        </>
+                        <span className="text-rose-500 font-bold flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60">
+                          <Lock className="w-3 h-3" />
+                          <span>লক করা (পূর্ববর্তী অধ্যায় আবশ্যক)</span>
+                        </span>
                       )}
                     </div>
-                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-0.5">
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1">
                       {chapter.titleBangla}
                     </h2>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <span className="text-xs font-mono font-bold text-slate-500">
-                      {chapter.progressPercentage}% সম্পন্ন
+                {/* Chapter Progress Stats with Bold Gradient Text and Animated Glow Bar */}
+                <div className="flex flex-col sm:items-end gap-1.5 min-w-[130px] sm:min-w-[160px]">
+                  <div className="flex items-center justify-between sm:justify-end gap-2 w-full">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      অগ্রগতি
                     </span>
-                    <div className="w-24 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mt-1">
-                      <div
-                        className="h-full bg-emerald-500 rounded-full"
-                        style={{ width: `${chapter.progressPercentage}%` }}
+                    <span className="text-sm sm:text-base font-black font-mono tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 dark:from-emerald-400 dark:via-teal-300 dark:to-cyan-400">
+                      {chapter.progressPercentage}%
+                    </span>
+                  </div>
+
+                  {/* Animated gradient progress track with soft glow and light sheen */}
+                  <div className="w-full h-3 bg-slate-200/80 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-300/60 dark:border-slate-700 shadow-inner relative">
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-green-500 rounded-full relative overflow-hidden shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${chapter.progressPercentage}%` }}
+                      transition={{ duration: 0.85, ease: "easeOut" }}
+                    >
+                      <motion.div
+                        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent pointer-events-none -skew-x-12"
+                        animate={{ x: ["-100%", "200%"] }}
+                        transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
                       />
-                    </div>
+                    </motion.div>
                   </div>
                 </div>
               </div>
@@ -1155,7 +1373,12 @@ export default function SequentialLearningPathView() {
               {/* DUOLINGO-STYLE SERPENTINE CURVED ZIGZAG ROADMAP                          */}
               {/* ========================================================================= */}
               <div className="p-6 sm:p-10 relative overflow-hidden bg-radial from-slate-50/50 to-white dark:from-slate-900/60 dark:to-slate-950">
-                  <div className="max-w-md mx-auto space-y-10 sm:space-y-12 relative">
+                  <motion.div
+                    variants={roadmapTimelineContainerVariants}
+                    initial="hidden"
+                    animate="visible"
+                    className="max-w-md mx-auto space-y-10 sm:space-y-12 relative"
+                  >
                     {chapter.items.map((item, idx) => {
                       const isPassed = item.progress?.isPassed || item.progress?.status === "COMPLETED";
                       const isLocked = item.isLocked;
@@ -1173,86 +1396,128 @@ export default function SequentialLearningPathView() {
 
                       return (
                         <React.Fragment key={item.id}>
-                          <div className={`flex ${alignClass} relative z-10`}>
-                            {/* 3D Duolingo Milestone Node */}
-                            <div className="flex flex-col items-center group relative">
-                              {/* Floating Speech Bubble Indicator for Current Active Step */}
+                          <motion.div
+                            variants={roadmapTimelineBlockVariants}
+                            className={`flex ${alignClass} relative z-10`}
+                          >
+                            {/* Minimalist Timeline Node */}
+                            <div
+                              ref={(isCurrentNext || activeBlogItem?.id === item.id || activeQuizItem?.id === item.id) ? activeRoadmapBlockRef : null}
+                              id={`slp-roadmap-node-${item.id}`}
+                              className="flex flex-col items-center group relative scroll-mt-28"
+                            >
+                              {/* Current Indicator */}
                               {isCurrentNext && (
                                 <motion.div
                                   initial={{ y: -6, opacity: 0 }}
                                   animate={{ y: 0, opacity: 1 }}
                                   transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
-                                  className="mb-2 px-3 py-1 rounded-full bg-cyan-400 text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-lg shadow-cyan-400/40 flex items-center gap-1 z-20 cursor-pointer"
+                                  className="mb-2 px-2.5 py-0.5 rounded-full bg-indigo-600 text-white text-[9px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 z-20 cursor-pointer"
                                   onClick={() => handleItemClick(item)}
                                 >
-                                  <Play className="w-2.5 h-2.5 fill-current" />
-                                  <span>এখানেই আছো! 🚀</span>
+                                  <Play className="w-2 h-2 fill-current" />
+                                  <span>Current</span>
                                 </motion.div>
                               )}
 
-                              {/* Subtle Micro-Pulse Ring for Current Step */}
+                              {/* Subtle Pulse Halo for Active */}
                               {isCurrentNext && (
                                 <motion.div
-                                  className="absolute -inset-1 rounded-full pointer-events-none z-0 ring-2 ring-cyan-500/60"
+                                  className="absolute -inset-1.5 rounded-full pointer-events-none z-0 ring-2 ring-indigo-500/50"
                                   animate={{
-                                    opacity: [0.5, 1, 0.5],
+                                    opacity: [0.4, 0.8, 0.4],
                                     scale: [1, 1.06, 1],
                                   }}
                                   transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
                                 />
                               )}
 
-                              {/* Compact Circular Button with Sleek Micro-Interactions */}
+                              {/* Node Button: Gamified 3 Visual States (Completed / Active / Locked) */}
                               <motion.button
                                 type="button"
-                                whileHover={{ scale: isLocked ? 1 : 1.06 }}
-                                whileTap={{ scale: isLocked ? 1 : 0.95 }}
+                                whileTap={!isLocked ? { scale: 0.95 } : {}}
                                 onClick={() => handleItemClick(item)}
-                                className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center font-black transition-all cursor-pointer relative z-10 border-2 ${
+                                className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center font-black transition-all cursor-pointer relative z-10 border-2 select-none ${
                                   isPassed
-                                    ? "bg-gradient-to-b from-emerald-400 to-emerald-600 text-white shadow-md shadow-emerald-500/20 border-emerald-500"
+                                    ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-500/60 dark:border-emerald-500/50 ring-2 ring-emerald-500/20 hover:-translate-y-0.5 hover:ring-emerald-500/40 transition-transform duration-200"
                                     : isCurrentNext
-                                    ? "bg-gradient-to-b from-cyan-500 to-indigo-600 text-white border-cyan-300 ring-2 ring-cyan-500/40 shadow-md shadow-cyan-500/25"
+                                    ? "bg-indigo-600 text-white border-indigo-400 animate-pulse ring-2 ring-indigo-400/30 hover:-translate-y-0.5 hover:ring-indigo-400/50 transition-transform duration-200"
                                     : isLocked
-                                    ? "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-300 dark:border-slate-700 cursor-not-allowed opacity-75"
-                                    : "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border-indigo-400 shadow-sm"
+                                    ? "bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700/60 opacity-60 cursor-not-allowed"
+                                    : "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border-indigo-300 dark:border-indigo-700/60 hover:-translate-y-0.5 hover:border-indigo-400 hover:ring-1 hover:ring-indigo-400/30 transition-transform duration-200"
                                 }`}
                                 title={isLocked ? "লক করা ধাপ (পূর্ববর্তী পাঠ শেষ করুন)" : item.titleBangla}
                               >
                                 {isPassed ? (
-                                  <div className="flex flex-col items-center">
-                                    <CheckCircle2 className="w-5 h-5 text-white filter drop-shadow-sm" />
-                                  </div>
+                                  <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                                 ) : isCurrentNext ? (
-                                  <div className="flex flex-col items-center">
-                                    {isQuiz ? <Award className="w-5 h-5 text-white filter drop-shadow-sm" /> : <BookOpen className="w-5 h-5 text-white filter drop-shadow-sm" />}
-                                  </div>
+                                  <Play className="w-5 h-5 text-white fill-current" />
                                 ) : isLocked ? (
-                                  <Lock className="w-4 h-4 text-slate-400" />
+                                  <Lock className="w-5 h-5 text-slate-400 dark:text-slate-500" />
                                 ) : (
                                   <span className="text-xs font-black">{item.orderIndex}</span>
                                 )}
                               </motion.button>
 
-                              {/* Node Title & XP Label Below */}
+                              {/* Minimalist Block Card: strictly displays ONLY XP, Marks, and Smart Time */}
                               <div
-                                onClick={() => handleItemClick(item)}
-                                className="mt-2 text-center max-w-[160px] cursor-pointer group-hover:scale-105 transition-transform"
+                                onClick={() => !isLocked && handleItemClick(item)}
+                                className={`mt-2.5 px-3 py-1 rounded-full text-center max-w-[150px] transition-transform duration-200 ${
+                                  isLocked
+                                    ? "opacity-60 cursor-not-allowed bg-slate-100/60 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-700/40"
+                                    : isPassed
+                                    ? "cursor-pointer bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 hover:-translate-y-0.5 hover:border-emerald-400/60"
+                                    : isCurrentNext
+                                    ? "cursor-pointer bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-800/40 hover:-translate-y-0.5 hover:border-indigo-400/60"
+                                    : "cursor-pointer bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800/60 hover:-translate-y-0.5 hover:border-indigo-400/60"
+                                }`}
                               >
-                                <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[9px] font-bold uppercase text-slate-500 tracking-wider">
-                                  {isQuiz ? "কুইজ" : `ব্লগ পার্ট ${item.blogPartNumber || item.orderIndex}`}
-                                </span>
-                                <p className="text-xs font-black text-slate-900 dark:text-white truncate mt-0.5">
-                                  {item.titleBangla}
-                                </p>
-                                <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-500 mt-0.5">
-                                  <span className="font-bold text-amber-500">+{item.xpReward} XP</span>
-                                  <span>•</span>
-                                  <span>{item.durationMinutes} মি.</span>
+                                <div className="flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] font-mono tracking-tight select-none">
+                                  <span className="font-semibold text-amber-500 dark:text-amber-400">+{item.xpReward || 10} XP</span>
+                                  <span className="text-slate-300 dark:text-slate-600 font-normal">•</span>
+                                  <span className="font-semibold text-cyan-600 dark:text-cyan-400">{getItemMarks(item)} Marks</span>
+                                  <span className="text-slate-300 dark:text-slate-600 font-normal">•</span>
+                                  <span className="text-slate-500 dark:text-slate-400 font-medium">{formatSmartTime(item)}</span>
                                 </div>
                               </div>
+
+                              {/* 1-to-5 Star Rating Display for Completed Blocks with Staggered Pop Animation */}
+                              {isPassed && (() => {
+                                const earnedStars = Math.max(1, Math.min(5, Number(item.progress?.stars) || 1));
+                                return (
+                                  <div
+                                    className="mt-1 flex items-center justify-center gap-0.5"
+                                    title={`${earnedStars} / 5 স্টার অর্জিত`}
+                                  >
+                                    {[1, 2, 3, 4, 5].map((starIdx) => {
+                                      const isEarned = starIdx <= earnedStars;
+                                      return (
+                                        <motion.span
+                                          key={starIdx}
+                                          initial={{ scale: 0, opacity: 0 }}
+                                          animate={{ scale: 1, opacity: 1 }}
+                                          transition={{
+                                            type: "spring",
+                                            stiffness: 450,
+                                            damping: 18,
+                                            delay: starIdx * 0.05,
+                                          }}
+                                        >
+                                          <Star
+                                            className={`w-3 h-3 ${
+                                              isEarned
+                                                ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.7)]"
+                                                : "text-slate-300 dark:text-slate-700 fill-transparent"
+                                            }`}
+                                          />
+                                        </motion.span>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
                             </div>
-                          </div>
+                          </motion.div>
 
                           {/* Curved Serpentine SVG Road Connector to Next Node with Framer Motion Draw Animation */}
                           {idx < chapter.items.length - 1 && (() => {
@@ -1294,34 +1559,40 @@ export default function SequentialLearningPathView() {
                                     strokeLinecap="round"
                                   />
 
-                                  {/* Completed solid sleek track (Thin 2.5px) */}
+                                  {/* Completed solid sleek track with smooth pathLength draw animation */}
                                   {isPassed && (
-                                    <path
+                                    <motion.path
                                       d={pathD}
                                       fill="none"
                                       stroke="#10b981"
                                       strokeWidth="2.5"
                                       strokeLinecap="round"
                                       className="filter drop-shadow-[0_0_3px_rgba(16,185,129,0.5)]"
+                                      initial={{ pathLength: 0 }}
+                                      animate={{ pathLength: 1 }}
+                                      transition={{ duration: 0.8, ease: "easeOut" }}
                                     />
                                   )}
 
                                   {/* Active Electric Glowing SVG Line */}
                                   {isCurrentNext && (
                                     <>
-                                      {/* Glowing Underlayer */}
-                                      <path
+                                      {/* Glowing Underlayer with path drawing effect */}
+                                      <motion.path
                                         d={pathD}
                                         fill="none"
                                         stroke={`url(#road-grad-${item.id})`}
-                                        strokeWidth="3"
+                                        strokeWidth="3.5"
                                         strokeLinecap="round"
                                         opacity="0.6"
                                         filter={`url(#electric-glow-slp-${item.id})`}
+                                        initial={{ pathLength: 0 }}
+                                        animate={{ pathLength: 1 }}
+                                        transition={{ duration: 1, ease: "easeOut" }}
                                       />
 
                                       {/* Moving Electric Line */}
-                                      <path
+                                      <motion.path
                                         d={pathD}
                                         fill="none"
                                         stroke={`url(#road-grad-${item.id})`}
@@ -1329,6 +1600,9 @@ export default function SequentialLearningPathView() {
                                         strokeLinecap="round"
                                         strokeDasharray="8 6"
                                         className="animate-svg-dash-flow filter drop-shadow-[0_0_5px_rgba(6,182,212,0.9)]"
+                                        initial={{ pathLength: 0 }}
+                                        animate={{ pathLength: 1 }}
+                                        transition={{ duration: 0.9, ease: "easeOut" }}
                                       >
                                         <animate
                                           attributeName="stroke-dashoffset"
@@ -1337,7 +1611,7 @@ export default function SequentialLearningPathView() {
                                           dur="1.2s"
                                           repeatCount="indefinite"
                                         />
-                                      </path>
+                                      </motion.path>
 
                                       {/* Traveling Energy Light Photon */}
                                       <circle r="3" fill="#38bdf8" filter={`url(#electric-glow-slp-${item.id})`}>
@@ -1363,7 +1637,7 @@ export default function SequentialLearningPathView() {
                         </React.Fragment>
                       );
                     })}
-                  </div>
+                  </motion.div>
                 </div>
             </div>
           ))}
@@ -1439,7 +1713,7 @@ export default function SequentialLearningPathView() {
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {activeMiniQuiz.options.map((opt, optIdx) => {
+                  {(activeMiniQuiz.options || []).map((opt, optIdx) => {
                     const isSelected = miniQuizSelectedOpt === optIdx;
                     const isCorrect = optIdx === activeMiniQuiz.correctOptionIndex;
                     let style =
@@ -1766,11 +2040,11 @@ export default function SequentialLearningPathView() {
                             <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
                               <p>
                                 <strong>আপনার উত্তর:</strong>{" "}
-                                {chosenOpt !== undefined ? q.options[chosenOpt] : "উত্তর দেওয়া হয়নি"}
+                                {chosenOpt !== undefined && q.options ? q.options[chosenOpt] : "উত্তর দেওয়া হয়নি"}
                               </p>
                               {!isCorrect && (
                                 <p className="text-emerald-700 dark:text-emerald-400 font-bold">
-                                  <strong>সঠিক উত্তর:</strong> {q.options[q.correctOptionIndex]}
+                                  <strong>সঠিক উত্তর:</strong> {q.options ? q.options[q.correctOptionIndex ?? 0] : "N/A"}
                                 </p>
                               )}
                               {q.explanation && (
@@ -1982,96 +2256,90 @@ export default function SequentialLearningPathView() {
                       </div>
                     </div>
 
-                    {/* Active Question Box */}
+                    {/* Active Question Box with Dynamic Multi-Type Quiz Engine */}
                     <div className="p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 bg-slate-50/70 dark:bg-slate-800/40">
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white leading-snug">
-                          {currentQuestionIndex + 1}. {currentQ.questionText}
-                        </h4>
-                        <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-[10px] font-black shrink-0 border border-indigo-200 dark:border-indigo-800">
-                          মান: ১০
-                        </span>
-                      </div>
-
-                      {/* Option Choices */}
-                      <div className="space-y-2.5">
-                        {currentQ.options.map((opt, optIdx) => {
-                          const isSelected = isConfirmed
-                            ? quizAnswers[currentQ.id] === optIdx
-                            : selectedOptionForCurrent === optIdx;
-                          const isCorrectOption = currentQ.correctOptionIndex === optIdx;
-
-                          // Option styling based on state
-                          let optionStyle =
-                            "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/80 hover:border-indigo-300 text-slate-700 dark:text-slate-300";
-
+                      <DynamicQuizQuestionView
+                        question={currentQ}
+                        questionIndex={currentQuestionIndex}
+                        totalQuestions={totalQ}
+                        selectedAnswer={isConfirmed ? quizAnswers[currentQ.id] : selectedOptionForCurrent}
+                        onSelectAnswer={(ans) => {
                           if (!isConfirmed) {
-                            if (isSelected) {
-                              optionStyle =
-                                "bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-bold shadow-xs";
-                            }
-                          } else {
-                            // After confirmation
-                            if (isCorrectOption) {
-                              optionStyle =
-                                "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-bold";
-                            } else if (isSelected && !isCorrectOption) {
-                              optionStyle =
-                                "bg-rose-50 dark:bg-rose-950/50 border-rose-500 text-rose-800 dark:text-rose-200 font-bold";
-                            } else {
-                              optionStyle =
-                                "bg-slate-100/60 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60";
-                            }
+                            setSelectedOptionForCurrent(ans);
                           }
-
-                          return (
-                            <div
-                              key={optIdx}
-                              onClick={() => {
-                                if (!isConfirmed) {
-                                  setSelectedOptionForCurrent(optIdx);
+                        }}
+                        onConfirmAnswer={(ans) => {
+                          if (ans !== undefined) {
+                            setSelectedOptionForCurrent(ans);
+                          }
+                          handleConfirmCurrentQuestion();
+                        }}
+                        isConfirmed={isConfirmed}
+                        isCorrect={
+                          isConfirmed
+                            ? (() => {
+                                const qType = currentQ.questionType || "MCQ";
+                                const ans = quizAnswers[currentQ.id];
+                                if (qType === "TRUE_FALSE") {
+                                  const studentBool =
+                                    typeof ans === "boolean"
+                                      ? ans
+                                      : ans === 0 || String(ans).toLowerCase() === "true" || String(ans) === "সত্য";
+                                  const exp =
+                                    currentQ.correctBoolean !== undefined
+                                      ? currentQ.correctBoolean
+                                      : currentQ.correctOptionIndex === 0;
+                                  return studentBool === exp;
                                 }
-                              }}
-                              className={`p-3.5 rounded-xl border text-xs font-semibold transition flex items-center justify-between gap-3 ${
-                                !isConfirmed ? "cursor-pointer" : "cursor-default"
-                              } ${optionStyle}`}
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <span className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-[11px] flex items-center justify-center shrink-0">
-                                  {String.fromCharCode(65 + optIdx)}
-                                </span>
-                                <span className="leading-snug">{opt}</span>
-                              </div>
+                                if (qType === "FILL_BLANKS") {
+                                  const bracketMatches = Array.from(
+                                    currentQ.questionText.matchAll(/\[(.*?)\]/g)
+                                  ).map((m) => m[1].trim());
+                                  const targetBlanks =
+                                    bracketMatches.length > 0
+                                      ? bracketMatches
+                                      : currentQ.acceptedAnswers || currentQ.options || [];
 
-                              <div className="shrink-0">
-                                {isConfirmed ? (
-                                  isCorrectOption ? (
-                                    <span className="text-[10px] font-black text-emerald-600 flex items-center gap-1">
-                                      <CheckCircle2 className="w-4 h-4" />
-                                      <span>সঠিক</span>
-                                    </span>
-                                  ) : isSelected ? (
-                                    <span className="text-[10px] font-black text-rose-600 flex items-center gap-1">
-                                      <XCircle className="w-4 h-4" />
-                                      <span>ভুল (-৫)</span>
-                                    </span>
-                                  ) : null
-                                ) : (
-                                  <div
-                                    className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                                      isSelected
-                                        ? "border-indigo-600 bg-indigo-600 text-white"
-                                        : "border-slate-300 dark:border-slate-600"
-                                    }`}
-                                  >
-                                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                                  if (typeof ans === "object" && ans !== null && !Array.isArray(ans)) {
+                                    return targetBlanks.every((target, bIdx) => {
+                                      const val = ans[bIdx] ?? ans[String(bIdx)] ?? ans[`blank_${bIdx}`] ?? "";
+                                      return String(val).trim().toLowerCase() === target.trim().toLowerCase();
+                                    });
+                                  }
+                                  const text = String(ans || "").trim().toLowerCase();
+                                  const accepted = targetBlanks.map((a) => a.trim().toLowerCase());
+                                  return accepted.includes(text);
+                                }
+                                if (qType === "MATCHING") {
+                                  const userPairs = (ans as Record<string, string>) || {};
+                                  const pairs = currentQ.matchingPairs || [];
+                                  return (
+                                    pairs.length > 0 &&
+                                    pairs.every(
+                                      (p) =>
+                                        (userPairs[p.left] || "").trim().toLowerCase() ===
+                                        p.right.trim().toLowerCase()
+                                    )
+                                  );
+                                }
+                                if (qType === "REORDER") {
+                                  const expected = currentQ.correctOrder || currentQ.options || [];
+                                  const studentArr = Array.isArray(ans) ? ans : [];
+                                  return (
+                                    expected.length > 0 &&
+                                    studentArr.length === expected.length &&
+                                    expected.every(
+                                      (exp, i) =>
+                                        String(exp).trim().toLowerCase() ===
+                                        String(studentArr[i] || "").trim().toLowerCase()
+                                    )
+                                  );
+                                }
+                                return Number(ans) === currentQ.correctOptionIndex;
+                              })()
+                            : undefined
+                        }
+                      />
 
                       {/* Explanation Feedback Strip (Revealed after confirmation) */}
                       {isConfirmed && currentQ.explanation && (
@@ -2124,7 +2392,11 @@ export default function SequentialLearningPathView() {
                           <button
                             type="button"
                             onClick={handleConfirmCurrentQuestion}
-                            disabled={selectedOptionForCurrent === null}
+                            disabled={
+                              selectedOptionForCurrent === null ||
+                              selectedOptionForCurrent === undefined ||
+                              selectedOptionForCurrent === ""
+                            }
                             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
                           >
                             <Check className="w-4 h-4" />
@@ -2221,6 +2493,22 @@ export default function SequentialLearningPathView() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Course Completion Certificate Modal */}
+      {activeCourse && (
+        <CourseCertificateModal
+          isOpen={certificateModalOpen}
+          onClose={() => setCertificateModalOpen(false)}
+          studentName={studentName}
+          studentRoll={studentRoll}
+          courseTitle={activeCourse.title || activeCourse.titleBangla}
+          courseTitleBangla={activeCourse.titleBangla}
+          className={activeCourse.className || "কারিগরি শাখা"}
+          tradeName={activeCourse.tradeName || "জেনারেল ভোকেশনাল"}
+          earnedXp={activeCourse.totalEarnedXp || 350}
+          totalStars={activeCourse.totalEarnedStars || 5}
+        />
       )}
     </div>
   );

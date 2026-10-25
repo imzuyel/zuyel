@@ -21,6 +21,42 @@ import {
 import { parseClassNumeric, doesClassHaveTrade, getApplicableTradesForClass, ALL_TRADES } from "@/lib/academicStructure";
 import { requireAdmin } from "@/lib/serverAuthGuard";
 
+/**
+ * Explicit Safe Projections for Class and Trade Configurations.
+ * Prevents internal administrative metadata or teacher mapping configs from leaking.
+ */
+function sanitizeClassConfig(c: any) {
+  if (!c) return null;
+  return {
+    id: Number(c.id),
+    numericValue: Number(c.numericValue),
+    name: String(c.name || ""),
+    nameBangla: String(c.nameBangla || ""),
+    tier: c.tier,
+    hasTrade: Boolean(c.hasTrade),
+    totalSeats: Number(c.totalSeats) || 0,
+    sections: Array.isArray(c.sections) ? c.sections : [],
+    shifts: Array.isArray(c.shifts) ? c.shifts : [],
+    status: c.status === "Inactive" ? "Inactive" : "Active",
+  };
+}
+
+function sanitizeTradeConfig(t: any) {
+  if (!t) return null;
+  return {
+    id: Number(t.id),
+    tradeNumber: t.tradeNumber,
+    code: String(t.code),
+    name: String(t.name),
+    nameBangla: String(t.nameBangla),
+    seats: Number(t.seats) || 0,
+    level: t.level,
+    applicableClass: Number(t.applicableClass) || 9,
+    descriptionBangla: String(t.descriptionBangla || ""),
+    status: t.status === "Inactive" ? "Inactive" : "Active",
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -29,13 +65,15 @@ export async function GET(req: NextRequest) {
 
     // 1. Overview summary stats
     if (action === "overview") {
-      const classes = getAllClassConfigurations();
-      const trades = getAllTradeConfigurations();
+      const rawClasses = getAllClassConfigurations();
+      const rawTrades = getAllTradeConfigurations();
+      const classes = rawClasses.map(sanitizeClassConfig).filter(Boolean);
+      const trades = rawTrades.map(sanitizeTradeConfig).filter(Boolean);
       const masters = getSubjectMasters({ status: "Active" });
       const mappings = getSubjectMappings({ academicYear });
 
-      const totalSeats = classes.reduce((sum, c) => sum + (c.totalSeats || 0), 0);
-      const totalTradeSeats = trades.reduce((sum, t) => sum + (t.seats || 0), 0);
+      const totalSeats = classes.reduce((sum: number, c: any) => sum + (c.totalSeats || 0), 0);
+      const totalTradeSeats = trades.reduce((sum: number, t: any) => sum + (t.seats || 0), 0);
 
       return NextResponse.json({
         success: true,
@@ -55,8 +93,8 @@ export async function GET(req: NextRequest) {
 
     // 2. Class & Trade configurations
     if (action === "classes") {
-      const classes = getAllClassConfigurations();
-      const trades = getAllTradeConfigurations();
+      const classes = getAllClassConfigurations().map(sanitizeClassConfig).filter(Boolean);
+      const trades = getAllTradeConfigurations().map(sanitizeTradeConfig).filter(Boolean);
       return NextResponse.json({
         success: true,
         classes,

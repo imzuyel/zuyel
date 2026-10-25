@@ -41,6 +41,9 @@ interface QuizSessionContextType extends QuizSessionState {
   displayName: string;
   handleJoin: (e?: React.FormEvent, studentIdParam?: string | number, avatarParam?: string) => Promise<void>;
   handleSubmitAnswer: (answer: any) => Promise<void>;
+  handleNextQuestion: () => Promise<void>;
+  handlePreviousQuestion: () => void;
+  setCurrentQuestionIdx: React.Dispatch<React.SetStateAction<number>>;
   handleLeave: () => void;
   setErrorMessage: (msg: string | null) => void;
   setActiveMotivation: (msg: any | null) => void;
@@ -272,10 +275,16 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
           }
 
           const qIdx = data.state?.session?.currentQuestionIndex ?? data.currentQuestionIndex;
-          if (qIdx !== undefined && qIdx !== currentQuestionIdx) {
-            setCurrentQuestionIdx(qIdx);
-            setPlayerAnswered(false);
-            setSelectedOption("");
+          if (qIdx !== undefined) {
+            const nextIdx = Number(qIdx);
+            setCurrentQuestionIdx((prev) => {
+              if (prev !== nextIdx) {
+                setPlayerAnswered(false);
+                setSelectedOption("");
+                return nextIdx;
+              }
+              return prev;
+            });
           }
 
           if (data.currentQuestion) setCurrentQuestion(data.currentQuestion);
@@ -300,7 +309,7 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     return () => {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
-  }, [joined, activeSession, participantId, currentQuestionIdx]);
+  }, [joined, activeSession?.id, participantId]);
 
   // Actions
   const handleJoin = async (e?: React.FormEvent, studentIdParam?: string | number, avatarParam?: string) => {
@@ -433,6 +442,43 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     }
   };
 
+  const handleNextQuestion = useCallback(async () => {
+    // 1. Functional state update ensuring state update succeeds and triggers re-render
+    setCurrentQuestionIdx((prev) => {
+      const next = prev + 1;
+      return totalQuestions > 0 && next >= totalQuestions ? prev : next;
+    });
+    setPlayerAnswered(false);
+    setSelectedOption("");
+
+    // 2. Server synchronization if active live session is running
+    if (activeSession?.id) {
+      try {
+        const res = await fetch(`/api/live-quizzes/sessions/${activeSession.id}/next`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        });
+        const data = await res.json();
+        if (data.success && data.session) {
+          if (data.session.currentQuestionIndex !== undefined) {
+            setCurrentQuestionIdx(Number(data.session.currentQuestionIndex));
+          }
+          if (data.session.status) {
+            setSessionStatus(data.session.status);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to synchronize next question with server:", err);
+      }
+    }
+  }, [activeSession, totalQuestions]);
+
+  const handlePreviousQuestion = useCallback(() => {
+    setCurrentQuestionIdx((prev) => Math.max(0, prev - 1));
+    setPlayerAnswered(false);
+    setSelectedOption("");
+  }, []);
+
   const handleLeave = () => {
     localStorage.removeItem("pgtsc_live_quiz_player");
     setJoined(false);
@@ -450,7 +496,8 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     totalQuestions, playerAnswered, timeLeft, selectedOption, isSubmitting,
     answeredCount, playerCount, studentStats, registeredStudents, activeMotivation,
     sessionCode, setSessionCode, displayName, setDisplayName,
-    handleJoin, handleSubmitAnswer, handlePreQuizResponse, handleLeave, setErrorMessage, setActiveMotivation
+    handleJoin, handleSubmitAnswer, handleNextQuestion, handlePreviousQuestion, setCurrentQuestionIdx,
+    handlePreQuizResponse, handleLeave, setErrorMessage, setActiveMotivation
   };
 
   return (

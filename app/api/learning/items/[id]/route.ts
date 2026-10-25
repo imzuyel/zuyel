@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(
   req: NextRequest,
@@ -33,6 +34,11 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireTeacherOrAdmin(req, "/api/learning/items/[id] (PUT)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { id } = await params;
     const body = await req.json();
@@ -66,6 +72,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireTeacherOrAdmin(req, "/api/learning/items/[id] (DELETE)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { id } = await params;
     const success = chapterLearningStore.deleteContentItem(Number(id));

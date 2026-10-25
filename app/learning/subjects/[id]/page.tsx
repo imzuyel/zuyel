@@ -32,6 +32,7 @@ import {
 } from "@/lib/studentIntelligenceStore";
 import { CourseItem, CourseChapterItem } from "@/lib/chapterLearningEngine";
 import { buildSubjectUrl, buildChapterUrl, buildLessonUrl } from "@/lib/learningSlugService";
+import ChapterCard from "@/components/learning/ChapterCard";
 
 
 interface SubjectPageProps {
@@ -311,135 +312,17 @@ export default function SubjectLessonsPage({ params }: SubjectPageProps) {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                  {course.chapters.map((chapter, idx) => {
-                    const blogParts = chapter.items?.filter((it) => it.itemType === "BLOG_PART") || [];
-                    const quizzes = chapter.items?.filter((it) => it.itemType === "QUIZ") || [];
-                    const totalMarks = quizzes.reduce((sum, qz) => {
-                      const marks = qz.quizQuestions?.reduce((qm, q) => qm + (q.marks || 1), 0) || (qz.quizQuestions?.length ? qz.quizQuestions.length * 1 : 5);
-                      return sum + marks;
-                    }, 0);
-                    const totalChapterXp = chapter.items?.reduce((s, it) => s + (it.xpReward || 0), 0) || 0;
-
-                    const enrichedChapter = chapter as any;
-                    const isCompleted = enrichedChapter.isCompleted ?? false;
-                    const isNavigating = navigatingChapterId === chapter.id;
-
-                    return (
-                      <div
-                        key={chapter.id}
-                        onClick={() => !navigatingChapterId && handleNavigateToChapter(chapter.id)}
-                        className={`rgb-neon-border-card group flex flex-col h-full cursor-pointer ${
-                          isNavigating ? "opacity-80 pointer-events-none" : ""
-                        }`}
-                      >
-                        <div className="rgb-neon-border-inner p-5 sm:p-5 flex flex-col justify-between h-full space-y-4">
-                          <div className="space-y-3 flex-1 min-w-0">
-                            {/* Badges Row */}
-                            <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
-                              <span className="px-2.5 py-1 rounded-xl bg-indigo-100/90 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-300 text-[11px] font-black border border-indigo-300/70 dark:border-indigo-800/80 shadow-xs">
-                                অধ্যায় {chapter.chapterNumber || idx + 1}
-                              </span>
-                              {isCompleted ? (
-                                <span className="px-2.5 py-1 rounded-xl bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-400 text-[10px] font-black border border-emerald-300/70 dark:border-emerald-800/80 flex items-center gap-1 shadow-xs">
-                                  <CheckCircle2 className="w-3 h-3" />
-                                  <span>সম্পন্ন ✨</span>
-                                </span>
-                              ) : (
-                                <span className="px-2.5 py-1 rounded-xl bg-cyan-100/80 dark:bg-cyan-950/70 text-cyan-800 dark:text-cyan-300 text-[10px] font-bold border border-cyan-300/60 dark:border-cyan-800/60">
-                                  শিখন প্রস্তুত
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Chapter Title */}
-                            <h3 className="text-base font-black text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors leading-snug line-clamp-2">
-                              {chapter.titleBangla}
-                            </h3>
-
-                            {/* Chapter Description */}
-                            {chapter.description && (
-                              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-sans line-clamp-2 font-medium">
-                                {chapter.description}
-                              </p>
-                            )}
-
-                            {/* Clean Chapter Summary Metrics */}
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 pb-0.5">
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-900 dark:text-cyan-200">
-                                <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 shrink-0">
-                                  <BookOpen className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">ব্লগ পাঠ</div>
-                                  <div className="text-xs font-black truncate">{blogParts.length} টি</div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-900 dark:text-indigo-200">
-                                <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0">
-                                  <Award className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">কুইজ পরীক্ষা</div>
-                                  <div className="text-xs font-black truncate">{quizzes.length} টি</div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-900 dark:text-purple-200">
-                                <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-600 dark:text-purple-400 shrink-0">
-                                  <Zap className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">মোট নম্বর</div>
-                                  <div className="text-xs font-black truncate">{totalMarks} নম্বর</div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200">
-                                <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
-                                  <Flame className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">মোট রিওয়ার্ড</div>
-                                  <div className="text-xs font-black truncate">+{totalChapterXp} XP</div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Action CTA with Instant Loading Feedback */}
-                          <div className="pt-3 border-t border-slate-200/70 dark:border-slate-800">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleNavigateToChapter(chapter.id);
-                              }}
-                              disabled={navigatingChapterId !== null}
-                              className={`w-full py-2.5 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
-                                isNavigating
-                                  ? "bg-cyan-500 text-slate-950 opacity-90 cursor-wait shadow-cyan-500/25"
-                                  : "bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:via-indigo-500 hover:to-purple-500 text-white shadow-cyan-500/20 hover:shadow-cyan-500/35 active:scale-95"
-                              }`}
-                            >
-                              {isNavigating ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  <span>লোড হচ্ছে...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span>শুরু করুন</span>
-                                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1.5 transition-transform" />
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {course.chapters.map((chapter, idx) => (
+                    <ChapterCard
+                      key={chapter.id}
+                      chapter={chapter}
+                      idx={idx}
+                      activeStudent={activeStudent}
+                      onNavigate={(ch) => !navigatingChapterId && handleNavigateToChapter(ch.id)}
+                      isNavigating={navigatingChapterId === chapter.id}
+                    />
+                  ))}
                 </div>
               )}
             </div>

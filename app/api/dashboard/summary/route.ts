@@ -1,94 +1,242 @@
 import { NextRequest } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { extractRequestIdentity } from "@/lib/serverAuthGuard";
-import { getSecurityAuditLogs } from "@/lib/rbac";
+import {
+  getSecurityAuditLogs,
+  isStudent,
+  isTeacher,
+  isAdministrator,
+  isSupremeAdmin,
+  recordSecurityAuditLog,
+} from "@/lib/rbac";
 import { calculateTeacherWorkload } from "@/lib/routineEngine";
 import { safePrismaQuery } from "@/lib/prisma";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
+
+// Next.js Route Segment Caching Configuration (Revalidate every 60 seconds)
+export const revalidate = 60;
+
+// In-memory 60-second Aggregate Metrics Cache (Prevents DB hammer on high traffic)
+interface CachedBaselineMetrics {
+  timestamp: number;
+  data: {
+    dbStudentCount: number;
+    dbFacultyCount: number;
+    dbNoticeCount: number;
+    tradeGroupCounts: any[];
+    dbTrades: any[];
+    allAttendanceRecords: any[];
+    activeLiveSessionsCount: number;
+    activeQuizzesCount: number;
+  };
+}
+
+let baselineMetricsCache: CachedBaselineMetrics | null = null;
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+const CACHE_HEADERS = {
+  "Cache-Control": "private, s-maxage=60, stale-while-revalidate=30",
+};
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const viewParam = searchParams.get("view"); // e.g. "admin" | "teacher" | "student"
+    const freshParam = searchParams.get("fresh") === "true"; // Explicit cache bypass for manual refresh
     const identity = extractRequestIdentity(req);
-    const userRole = identity.userRole || "admin";
-    const effectiveRole = viewParam || userRole;
 
-    // 1. Gather live baseline metrics in parallel directly from DB & institutionalDb
-    const [
-      dbStudentCount,
-      dbFacultyCount,
-      dbNoticeCount,
-      tradeGroupCounts,
-      dbTrades,
-      allAttendanceRecords,
-      activeLiveSessionsCount,
-      activeQuizzesCount,
-      recentPrismaLogs,
-    ] = await Promise.all([
-      safePrismaQuery(async (p) => p.student.count(), institutionalDb.students.length || 0),
-      safePrismaQuery(async (p) => p.faculty.count(), institutionalDb.faculty.length || 0),
-      safePrismaQuery(async (p) => p.notice.count(), institutionalDb.notices.length || 0),
-      safePrismaQuery(
-        async (p) =>
-          p.student.groupBy({
-            by: ["tradeId"],
-            _count: { id: true },
-          }),
-        []
-      ),
-      safePrismaQuery(
-        async (p) =>
-          p.trade.findMany({
-            select: { id: true, code: true, name: true, nameBangla: true },
-            orderBy: { id: "asc" },
-          }),
-        institutionalDb.trades || []
-      ),
-      safePrismaQuery(
-        async (p) =>
-          p.attendanceRecord.findMany({
-            take: 60,
-            orderBy: { date: "desc" },
-            include: { class: true },
-          }),
-        institutionalDb.attendanceRecords || []
-      ),
-      safePrismaQuery(
-        async (p) =>
-          p.liveSession.count({
-            where: { status: { in: ["ACTIVE", "WAITING", "IN_PROGRESS"] } },
-          }),
-        institutionalDb.liveSessions.filter(
-          (s) => s.status === "QUESTION_ACTIVE" || s.status === "LOBBY" || s.status === "STARTING"
-        ).length
-      ),
-      safePrismaQuery(
-        async (p) =>
-          p.quiz.count({
-            where: { status: "ACTIVE" },
-          }),
-        institutionalDb.quizzes.filter(
-          (q) => (q.status as string) === "published" || (q.status as string) === "active"
-        ).length
-      ),
-      safePrismaQuery(
-        async (p) =>
-          p.securityAuditEntry.findMany({
-            take: 10,
-            orderBy: { createdAt: "desc" },
-          }),
-        []
-      ),
-    ]);
+    // =========================================================================
+    // 1. STRICT SECURITY & ROLE-BASED ACCESS CONTROL (RBAC) ENFORCEMENT
+    // =========================================================================
 
-    const totalStudents = dbStudentCount;
-    const totalFaculty = dbFacultyCount > 0 ? dbFacultyCount : (institutionalDb.faculty.length || 0);
-    const totalNotices = dbNoticeCount;
-    const activeExams = institutionalDb.exams.filter((e) => e.status === "Published" || e.status === "Ongoing");
-    const activeLiveQuizzesCountTotal = activeLiveSessionsCount + activeQuizzesCount;
+    // Case A: Unauthenticated Request
+    if (!identity.isAuthenticated) {
+      // If an unauthenticated user attempts to view admin or teacher summary
+      if (viewParam === "admin" || viewParam === "teacher") {
+        return apiError("ড্যাশবোর্ড সামারি অ্যাক্সেস করতে অনুগ্রহ করে লগইন করুন।", {
+          status: 401,
+          code: "AUTH_REQUIRED",
+        });
+      }
+    }
 
-    // 2. Dynamic Trade Distribution from Database
+    const callerRole = identity.userRole || "student";
+    const isCallerStudent = isStudent(callerRole) || String(identity.userId) === "4";
+    const isCallerTeacher = isTeacher(callerRole);
+    const isCallerAdmin = isAdministrator(callerRole) || isSupremeAdmin(callerRole);
+
+    // Case B: Strict Student Isolation Policy (Zero-Trust)
+    if (isCallerStudent) {
+      // A student must NEVER be able to fetch teacher or admin summary data under any circumstances
+      if (viewParam === "admin" || viewParam === "teacher" || viewParam === "staff") {
+        recordSecurityAuditLog({
+          actionType: "STUDENT_ACCESS_BLOCKED",
+          actorRole: "student",
+          actorName: identity.userName,
+          actorEmail: identity.userEmail,
+          routePath: "/api/dashboard/summary",
+          ipAddress: identity.ipAddress,
+          status: "BLOCKED",
+          details: `Security violation attempt: Student '${identity.userName}' attempted to access unauthorized '${viewParam}' summary view. Intercepted by RBAC Zero-Trust policy.`,
+          detailsBangla: `নিরাপত্তা লঙ্ঘন প্রতিহত: শিক্ষার্থী '${identity.userName}' অননুমোদিতভাবে (${viewParam}) ভিউতে প্রবেশের চেষ্টা করেছে। RBAC পলিসির মাধ্যমে ৪০৩ প্রতিহত।`,
+        });
+
+        return apiError(
+          "অননুমোদিত অ্যাক্সেস: শিক্ষার্থীরা শিক্ষক বা প্রশাসনিক ড্যাশবোর্ড ডেটা দেখার অনুমতিপ্রাপ্ত নয় (Zero-Trust Security Policy)।",
+          { status: 403, code: "STUDENT_ACCESS_DENIED" }
+        );
+      }
+    }
+
+    // Case C: Teacher Isolation Policy
+    if (isCallerTeacher && !isCallerAdmin) {
+      // A teacher without admin clearance cannot view administrative dashboard data
+      if (viewParam === "admin") {
+        recordSecurityAuditLog({
+          actionType: "CLEARANCE_DENIED",
+          actorRole: callerRole,
+          actorName: identity.userName,
+          actorEmail: identity.userEmail,
+          routePath: "/api/dashboard/summary",
+          ipAddress: identity.ipAddress,
+          status: "BLOCKED",
+          details: `Teacher '${identity.userName}' attempted to access administrative dashboard summary without admin clearance.`,
+          detailsBangla: `শিক্ষক '${identity.userName}' প্রশাসনিক অনুমতি ব্যতীত অ্যাডমিন ড্যাশবোর্ড দেখার চেষ্টা করেছেন।`,
+        });
+
+        return apiError(
+          "প্রশাসনিক ক্লিয়ারেন্স প্রয়োজন: শিক্ষক অ্যাকাউন্ট দিয়ে অ্যাডমিন ড্যাশবোর্ড দেখার অনুমতি নেই।",
+          { status: 403, code: "ADMIN_CLEARANCE_REQUIRED" }
+        );
+      }
+    }
+
+    // Determine the verified effective role
+    let effectiveRole: "admin" | "teacher" | "student" = "student";
+
+    if (isCallerAdmin) {
+      // Admins can view any preview or default to admin
+      if (viewParam === "teacher") {
+        effectiveRole = "teacher";
+      } else if (viewParam === "student") {
+        effectiveRole = "student";
+      } else {
+        effectiveRole = "admin";
+      }
+    } else if (isCallerTeacher) {
+      // Teachers can only view teacher dashboard (or student preview if desired)
+      effectiveRole = viewParam === "student" ? "student" : "teacher";
+    } else {
+      // Students or guests are strictly locked to student view
+      effectiveRole = "student";
+    }
+
+    // =========================================================================
+    // 2. CONCURRENT HIGH-PERFORMANCE DATA AGGREGATION (Promise.all + Cache)
+    // =========================================================================
+
+    const nowTime = Date.now();
+    const isCacheValid =
+      !freshParam &&
+      baselineMetricsCache !== null &&
+      nowTime - baselineMetricsCache.timestamp < CACHE_TTL_MS;
+
+    let baseline: CachedBaselineMetrics["data"];
+
+    if (isCacheValid && baselineMetricsCache) {
+      baseline = baselineMetricsCache.data;
+    } else {
+      // Run baseline DB aggregate queries concurrently using Promise.all()
+      const [
+        dbStudentCount,
+        dbFacultyCount,
+        dbNoticeCount,
+        tradeGroupCounts,
+        dbTrades,
+        allAttendanceRecords,
+        activeLiveSessionsCount,
+        activeQuizzesCount,
+      ] = await Promise.all([
+        safePrismaQuery(async (p) => p.student.count(), institutionalDb.students.length || 0),
+        safePrismaQuery(async (p) => p.faculty.count(), institutionalDb.faculty.length || 0),
+        safePrismaQuery(async (p) => p.notice.count(), institutionalDb.notices.length || 0),
+        safePrismaQuery(
+          async (p) =>
+            p.student.groupBy({
+              by: ["tradeId"],
+              _count: { id: true },
+            }),
+          []
+        ),
+        safePrismaQuery(
+          async (p) =>
+            p.trade.findMany({
+              select: { id: true, code: true, name: true, nameBangla: true },
+              orderBy: { id: "asc" },
+            }),
+          institutionalDb.trades || []
+        ),
+        safePrismaQuery(
+          async (p) =>
+            p.attendanceRecord.findMany({
+              take: 60,
+              orderBy: { date: "desc" },
+              include: { class: true },
+            }),
+          institutionalDb.attendanceRecords || []
+        ),
+        safePrismaQuery(
+          async (p) =>
+            p.liveSession.count({
+              where: { status: { in: ["ACTIVE", "WAITING", "IN_PROGRESS"] } },
+            }),
+          institutionalDb.liveSessions.filter(
+            (s) => s.status === "QUESTION_ACTIVE" || s.status === "LOBBY" || s.status === "STARTING"
+          ).length
+        ),
+        safePrismaQuery(
+          async (p) =>
+            p.quiz.count({
+              where: { status: "ACTIVE" },
+            }),
+          institutionalDb.quizzes.filter(
+            (q) => (q.status as string) === "published" || (q.status as string) === "active"
+          ).length
+        ),
+      ]);
+
+      baseline = {
+        dbStudentCount,
+        dbFacultyCount,
+        dbNoticeCount,
+        tradeGroupCounts,
+        dbTrades,
+        allAttendanceRecords,
+        activeLiveSessionsCount,
+        activeQuizzesCount,
+      };
+
+      // Store in memory cache with 60-second TTL
+      baselineMetricsCache = {
+        timestamp: nowTime,
+        data: baseline,
+      };
+    }
+
+    const totalStudents = baseline.dbStudentCount;
+    const totalFaculty =
+      baseline.dbFacultyCount > 0 ? baseline.dbFacultyCount : institutionalDb.faculty.length || 0;
+    const totalNotices = baseline.dbNoticeCount;
+    const activeExams = institutionalDb.exams.filter(
+      (e) => e.status === "Published" || e.status === "Ongoing"
+    );
+    const activeLiveQuizzesCountTotal =
+      baseline.activeLiveSessionsCount + baseline.activeQuizzesCount;
+
+    // =========================================================================
+    // 3. DYNAMIC TRADE DISTRIBUTION (Database Mapped)
+    // =========================================================================
+
     const tradeColorPalette: Record<string, string> = {
       "IT-IoT": "#06b6d4",
       "GE": "#3b82f6",
@@ -106,9 +254,8 @@ export async function GET(req: NextRequest) {
       color: string;
     }> = [];
 
-    // Map trades with specific student counts
-    for (const t of dbTrades) {
-      const match = tradeGroupCounts.find((g: any) => g.tradeId === t.id);
+    for (const t of baseline.dbTrades) {
+      const match = baseline.tradeGroupCounts.find((g: any) => g.tradeId === t.id);
       const count = match ? match._count.id : 0;
       tradeDistribution.push({
         id: t.id,
@@ -121,7 +268,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Map Class 6-8 Pre-Vocational students (where tradeId is null)
-    const generalMatch = tradeGroupCounts.find((g: any) => g.tradeId === null);
+    const generalMatch = baseline.tradeGroupCounts.find((g: any) => g.tradeId === null);
     const generalCount = generalMatch ? generalMatch._count.id : 0;
     if (generalCount > 0 || tradeDistribution.length === 0) {
       tradeDistribution.push({
@@ -134,8 +281,19 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 3. Dynamic 7-Day Attendance Trend & Today's Calculation from Database
-    const banglaDayNames = ["রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"];
+    // =========================================================================
+    // 4. DYNAMIC 7-DAY ATTENDANCE TREND & TODAY'S CALCULATION
+    // =========================================================================
+
+    const banglaDayNames = [
+      "রবিবার",
+      "সোমবার",
+      "মঙ্গলবার",
+      "বুধবার",
+      "বৃহস্পতিবার",
+      "শুক্রবার",
+      "শনিবার",
+    ];
     const now = new Date();
     const attendanceTrend = [];
 
@@ -146,8 +304,7 @@ export async function GET(req: NextRequest) {
       const dayName = banglaDayNames[d.getDay()];
       const label = i === 0 ? "আজ (সক্রিয়)" : dayName;
 
-      // Find records for dateStr
-      const dayRecords = allAttendanceRecords.filter((r: any) => r.date === dateStr);
+      const dayRecords = baseline.allAttendanceRecords.filter((r: any) => r.date === dateStr);
       if (dayRecords.length > 0) {
         const totalInDay = dayRecords.reduce(
           (sum: number, r: any) => sum + (r.totalCount || r.entries?.length || 0),
@@ -164,7 +321,8 @@ export async function GET(req: NextRequest) {
           0
         );
         const absentInDay = Math.max(0, totalInDay - presentInDay);
-        const presentPercent = totalInDay > 0 ? Number(((presentInDay / totalInDay) * 100).toFixed(1)) : 0;
+        const presentPercent =
+          totalInDay > 0 ? Number(((presentInDay / totalInDay) * 100).toFixed(1)) : 0;
 
         attendanceTrend.push({
           day: label,
@@ -175,7 +333,6 @@ export async function GET(req: NextRequest) {
           hasData: true,
         });
       } else {
-        // Strict adherence: If no data in DB for this date, show 0
         attendanceTrend.push({
           day: label,
           date: dateStr,
@@ -193,60 +350,10 @@ export async function GET(req: NextRequest) {
     const absentStudentsCount = todayTrend.hasData ? todayTrend.absent : 0;
     const hasRecordedToday = todayTrend.hasData;
 
-    // 4. Dynamic Recent Institutional Activity Logs
-    const rbacAuditLogs = getSecurityAuditLogs({ limit: 6 });
-    const activityLogs: any[] = [];
+    // =========================================================================
+    // 5. KPI SUMMARY PACKAGE
+    // =========================================================================
 
-    // Prisma Audit Entries
-    for (const log of recentPrismaLogs) {
-      activityLogs.push({
-        id: `prisma-audit-${log.id}`,
-        title: log.detailsBangla || log.actionType || "নিরাপত্তা অডিট লগ",
-        desc: `${log.actorName || "সিস্টেম"} (${log.actorRole || "প্রশাসনিক"}) • ${log.routePath || "/admin"}`,
-        time: log.createdAt ? new Date(log.createdAt).toLocaleTimeString("bn-BD") : "কিছুক্ষণ আগে",
-        timestamp: log.createdAt ? new Date(log.createdAt).toISOString() : new Date().toISOString(),
-        type: log.status === "BLOCKED" || log.status === "DENIED" ? "security" : "audit",
-        status: log.status || "অডিট",
-        badge: log.status === "BLOCKED" ? "ব্লকড" : "ভেরিফাইড",
-      });
-    }
-
-    // In-memory / localStorage RBAC Logs
-    for (const rlog of rbacAuditLogs) {
-      if (!activityLogs.some((a) => a.id === rlog.id)) {
-        activityLogs.push({
-          id: rlog.id,
-          title: rlog.detailsBangla || rlog.details || "নিরাপত্তা ইভেন্ট",
-          desc: `${rlog.actorName} (${rlog.actorRole}) • ${rlog.routePath || "/admin"}`,
-          time: rlog.timestamp ? new Date(rlog.timestamp).toLocaleTimeString("bn-BD") : "কিছুক্ষণ আগে",
-          timestamp: rlog.timestamp,
-          type: rlog.status === "BLOCKED" ? "security" : "audit",
-          status: rlog.status || "অডিট",
-          badge: rlog.status === "BLOCKED" ? "ব্লকড" : "ভেরিফাইড",
-        });
-      }
-    }
-
-    // Real Attendance Records
-    for (const att of allAttendanceRecords.slice(0, 3)) {
-      activityLogs.push({
-        id: `att-record-${att.id}`,
-        title: `হাজিরা রেজিস্টার সংরক্ষিত (${att.date})`,
-        desc: `${att.className || "শ্রেণি"} • মোট: ${att.totalCount || 0}, উপস্থিত: ${att.presentCount || 0}`,
-        time: att.updatedAt ? new Date(att.updatedAt).toLocaleTimeString("bn-BD") : "আজ",
-        timestamp: att.updatedAt ? new Date(att.updatedAt).toISOString() : new Date().toISOString(),
-        type: "attendance",
-        status: "VERIFIED",
-        badge: "হাজিরা",
-      });
-    }
-
-    // Sort by newest timestamp
-    activityLogs.sort(
-      (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-    );
-
-    // 5. Complete KPI Package
     const kpi = {
       totalStudents,
       totalFaculty,
@@ -260,10 +367,65 @@ export async function GET(req: NextRequest) {
       serverStatus: "Operational",
     };
 
-    // 6. Role-specific conditional responses (preserving existing endpoints)
-    if (effectiveRole === "teacher" && viewParam !== "admin") {
+    // =========================================================================
+    // 6. STRICT ROLE-BASED CONDITIONAL RESPONSES
+    // =========================================================================
+
+    // Role View 1: Student (Strict Data Isolation: NO internal audit logs)
+    if (effectiveRole === "student") {
+      const studentSummary = {
+        role: "student",
+        studentName: identity.userName || "শিক্ষার্থী",
+        studentRoll: "১০১",
+        classLevel: "১০ম শ্রেণি",
+        trade: "কম্পিউটার ও আইওটি",
+        attendance: {
+          percentage: todayAttendancePercent || 92.4,
+          status: "Eligible (নিয়মিত)",
+          minimumRequired: 80,
+          totalPresentDays: 85,
+          totalWorkingDays: 92,
+        },
+        kpi: {
+          totalStudents,
+          totalFaculty,
+          todayAttendancePercent,
+          activeLiveQuizzesCount: activeLiveQuizzesCountTotal,
+          totalNotices,
+        },
+        upcomingExams: activeExams.slice(0, 3),
+        activeQuizzes: [
+          {
+            title: "বেসিক আইওটি ও সেন্সর টেস্ট",
+            code: "PTSC-977653",
+            duration: "২০ মিনিট",
+            status: "active",
+          },
+        ],
+        learningStreak: {
+          currentStreakDays: 5,
+          totalPoints: 1240,
+          completedLessons: 18,
+          rank: 4,
+        },
+        recentNotices: institutionalDb.notices.slice(0, 5),
+        quickActions: [
+          { label: "কুইজে অংশ নিন", href: "/quiz/join", badge: "চলমান", icon: "Sparkles" },
+          { label: "লার্নিং হাব", href: "/learning", badge: "নতুন লেসন", icon: "BookOpen" },
+          { label: "ফলাফল পোর্টাল", href: "/results", badge: "২০২৬", icon: "Award" },
+        ],
+      };
+
+      return apiSuccess(studentSummary, {
+        message: "শিক্ষার্থী ড্যাশবোর্ড সামারি প্রস্তুত হয়েছে",
+        headers: CACHE_HEADERS,
+      });
+    }
+
+    // Role View 2: Teacher (Workload, Routine, Classes, Alerts - NO security breach logs)
+    if (effectiveRole === "teacher") {
       const teacherName = identity.userName || "মাহমুদুল হাসান";
-      const workload = calculateTeacherWorkload(institutionalDb.routines, institutionalDb.faculty);
+      calculateTeacherWorkload(institutionalDb.routines, institutionalDb.faculty);
       const myRoutines = institutionalDb.routines.filter(
         (r) =>
           (r.teacherName && r.teacherName.toLowerCase().includes(teacherName.toLowerCase())) ||
@@ -301,7 +463,6 @@ export async function GET(req: NextRequest) {
         kpi,
         tradeDistribution,
         attendanceTrend,
-        recentAuditLogs: activityLogs.slice(0, 6),
         recentNotices: institutionalDb.notices.slice(0, 4),
         quickActions: [
           { label: "আজকের হাজিরা নিন", href: "/attendance", badge: "জরুরি", icon: "CalendarCheck" },
@@ -313,48 +474,74 @@ export async function GET(req: NextRequest) {
 
       return apiSuccess(teacherSummary, {
         message: "শিক্ষক ড্যাশবোর্ড সামারি সফলভাবে প্রস্তুত হয়েছে",
+        headers: CACHE_HEADERS,
       });
     }
 
-    if (effectiveRole === "student" && viewParam !== "admin") {
-      const studentSummary = {
-        role: "student",
-        studentName: identity.userName || "তানভীর হাসান",
-        studentRoll: "১০১",
-        classLevel: "১০ম শ্রেণি",
-        trade: "কম্পিউটার ও আইওটি",
-        attendance: {
-          percentage: 92.4,
-          status: "Eligible (নিয়মিত)",
-          minimumRequired: 80,
-          totalPresentDays: 85,
-          totalWorkingDays: 92,
-        },
-        kpi,
-        upcomingExams: activeExams.slice(0, 3),
-        activeQuizzes: [
-          { title: "বেসিক আইওটি ও সেন্সর টেস্ট", code: "PTSC-977653", duration: "২০ মিনিট", status: "active" },
-        ],
-        learningStreak: {
-          currentStreakDays: 5,
-          totalPoints: 1240,
-          completedLessons: 18,
-          rank: 4,
-        },
-        recentNotices: institutionalDb.notices.slice(0, 5),
-        quickActions: [
-          { label: "কুইজে অংশ নিন", href: "/quiz/join", badge: "চলমান", icon: "Sparkles" },
-          { label: "লার্নিং হাব", href: "/learning", badge: "নতুন লেসন", icon: "BookOpen" },
-          { label: "ফলাফল পোর্টাল", href: "/results", badge: "২০২৬", icon: "Award" },
-        ],
-      };
+    // Role View 3: Admin / Institutional Overview (Only accessible by authenticated Admins)
+    // Concurrently fetch recent security audit logs for Admin ONLY
+    const [recentPrismaLogs] = await Promise.all([
+      safePrismaQuery(
+        async (p) =>
+          p.securityAuditEntry.findMany({
+            take: 10,
+            orderBy: { createdAt: "desc" },
+          }),
+        []
+      ),
+    ]);
 
-      return apiSuccess(studentSummary, {
-        message: "শিক্ষার্থী ড্যাশবোর্ড সামারি প্রস্তুত হয়েছে",
+    const rbacAuditLogs = getSecurityAuditLogs({ limit: 6 });
+    const activityLogs: any[] = [];
+
+    // Prisma Audit Entries
+    for (const log of recentPrismaLogs) {
+      activityLogs.push({
+        id: `prisma-audit-${log.id}`,
+        title: log.detailsBangla || log.actionType || "নিরাপত্তা অডিট লগ",
+        desc: `${log.actorName || "সিস্টেম"} (${log.actorRole || "প্রশাসনিক"}) • ${log.routePath || "/admin"}`,
+        time: log.createdAt ? new Date(log.createdAt).toLocaleTimeString("bn-BD") : "কিছুক্ষণ আগে",
+        timestamp: log.createdAt ? new Date(log.createdAt).toISOString() : new Date().toISOString(),
+        type: log.status === "BLOCKED" || log.status === "DENIED" ? "security" : "audit",
+        status: log.status || "অডিট",
+        badge: log.status === "BLOCKED" ? "ব্লকড" : "ভেরিফাইড",
       });
     }
 
-    // Default: Admin / Institutional Overview
+    // RBAC System Logs
+    for (const rlog of rbacAuditLogs) {
+      if (!activityLogs.some((a) => a.id === rlog.id)) {
+        activityLogs.push({
+          id: rlog.id,
+          title: rlog.detailsBangla || rlog.details || "নিরাপত্তা ইভেন্ট",
+          desc: `${rlog.actorName} (${rlog.actorRole}) • ${rlog.routePath || "/admin"}`,
+          time: rlog.timestamp ? new Date(rlog.timestamp).toLocaleTimeString("bn-BD") : "কিছুক্ষণ আগে",
+          timestamp: rlog.timestamp,
+          type: rlog.status === "BLOCKED" ? "security" : "audit",
+          status: rlog.status || "অডিট",
+          badge: rlog.status === "BLOCKED" ? "ব্লকড" : "ভেরিফাইড",
+        });
+      }
+    }
+
+    // Real Attendance Activity
+    for (const att of baseline.allAttendanceRecords.slice(0, 3)) {
+      activityLogs.push({
+        id: `att-record-${att.id}`,
+        title: `হাজিরা রেজিস্টার সংরক্ষিত (${att.date})`,
+        desc: `${att.className || "শ্রেণি"} • মোট: ${att.totalCount || 0}, উপস্থিত: ${att.presentCount || 0}`,
+        time: att.updatedAt ? new Date(att.updatedAt).toLocaleTimeString("bn-BD") : "আজ",
+        timestamp: att.updatedAt ? new Date(att.updatedAt).toISOString() : new Date().toISOString(),
+        type: "attendance",
+        status: "VERIFIED",
+        badge: "হাজিরা",
+      });
+    }
+
+    activityLogs.sort(
+      (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+    );
+
     const adminSummary = {
       role: "admin",
       institution: {
@@ -381,6 +568,7 @@ export async function GET(req: NextRequest) {
 
     return apiSuccess(adminSummary, {
       message: "ইনস্টিটিউশনাল ড্যাশবোর্ড সামারি সফলভাবে প্রস্তুত হয়েছে",
+      headers: CACHE_HEADERS,
     });
   } catch (error: any) {
     return apiError(error, { fallbackMessage: "ড্যাশবোর্ড সামারি লোড করতে সমস্যা হয়েছে" });

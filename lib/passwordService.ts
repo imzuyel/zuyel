@@ -5,11 +5,7 @@ import { PRESET_USERS } from "./presetUsers";
 import { updateStudentPassword } from "./studentIntelligenceStore";
 import { recordSecurityAuditLog } from "./rbac";
 
-const SESSION_SECRET =
-  process.env.SESSION_SECRET ||
-  process.env.NEXTAUTH_SECRET ||
-  process.env.AUTH_SECRET ||
-  "pgtsc-institutional-erp-secure-session-key-2026-ptsc-gov-bd";
+import { getSessionSecret } from "./tokenService";
 
 export interface PasswordResetRecord {
   email: string;
@@ -113,6 +109,11 @@ export function verifyPassword(
   }
 
   // 3. Constant-time fallback for plaintext dev seeds (e.g., "password", "admin123", "1234")
+  // STRICT SECURITY RULE: Plaintext credentials are fundamentally forbidden in production.
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+
   const pBuf = Buffer.from(cleanPass);
   const sBuf = Buffer.from(cleanStored);
   if (pBuf.length === sBuf.length) {
@@ -150,7 +151,7 @@ export function createPasswordResetToken(
 
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = crypto
-    .createHmac("sha256", SESSION_SECRET)
+    .createHmac("sha256", getSessionSecret())
     .update(encodedPayload)
     .digest("base64url");
 
@@ -235,7 +236,7 @@ export function verifyPasswordResetToken(
 
     try {
       const expectedSignature = crypto
-        .createHmac("sha256", SESSION_SECRET)
+        .createHmac("sha256", getSessionSecret())
         .update(encodedPayload)
         .digest("base64url");
 

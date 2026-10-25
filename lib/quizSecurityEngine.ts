@@ -10,6 +10,7 @@
  */
 
 import { institutionalDb, LiveParticipant, LiveTeam } from "./database";
+import { AnswerEvaluator } from "./scoringService";
 
 export const MIN_HUMAN_RESPONSE_TIME_MS = 500;
 export const DEFAULT_QUESTION_TIME_LIMIT_MS = 30000;
@@ -18,6 +19,8 @@ export const MAX_BASE_POINTS = 1000;
 export interface AntiCheatEvaluationParams {
   playerId: string;
   questionId: string;
+  questionType?: string;
+  questionSnapshot?: any;
   answerPayload: any;
   correctAnswer: any;
   responseTimeMs: number;
@@ -65,6 +68,8 @@ export class QuizSecurityEngine {
       timeLimitMs = DEFAULT_QUESTION_TIME_LIMIT_MS,
       currentStreak = 0,
       tabSwitchCount = 0,
+      questionType,
+      questionSnapshot,
     } = params;
 
     // 1. Bot & Spam Clicker Protection (<500ms reaction threshold)
@@ -84,7 +89,7 @@ export class QuizSecurityEngine {
     }
 
     // 2. Answer Correctness Check
-    const isCorrect = this.checkCorrectness(answerPayload, correctAnswer);
+    const isCorrect = this.checkCorrectness(answerPayload, correctAnswer, questionType, questionSnapshot);
 
     if (!isCorrect) {
       return {
@@ -151,20 +156,63 @@ export class QuizSecurityEngine {
   }
 
   /**
-   * Robust comparison of user payload with correct answer (supports indices, numbers, arrays, strings)
+   * Robust comparison of user payload with correct answer (supports indices, numbers, arrays, strings, pairs, objects)
    */
-  private static checkCorrectness(submitted: any, correct: any): boolean {
+  private static checkCorrectness(
+    submitted: any,
+    correct: any,
+    questionType?: string,
+    questionSnapshot?: any
+  ): boolean {
     if (submitted === null || submitted === undefined || correct === null || correct === undefined) {
       return false;
     }
 
-    if (Array.isArray(submitted) && Array.isArray(correct)) {
-      if (submitted.length !== correct.length) return false;
-      const sSorted = [...submitted].sort();
-      const cSorted = [...correct].sort();
-      return sSorted.every((val, idx) => String(val).trim() === String(cSorted[idx]).trim());
+    if (questionType) {
+      const evalRes = AnswerEvaluator.evaluate(questionType, submitted, correct, questionSnapshot);
+      if (evalRes.isCorrect !== null) {
+        return evalRes.isCorrect;
+      }
     }
 
+    // Try parsing if correct or submitted is JSON string
+    let parsedCorrect = correct;
+    if (typeof correct === "string" && (correct.trim().startsWith("[") || correct.trim().startsWith("{"))) {
+      try { parsedCorrect = JSON.parse(correct); } catch {}
+    }
+    let parsedSubmitted = submitted;
+    if (typeof submitted === "string" && (submitted.trim().startsWith("[") || submitted.trim().startsWith("{"))) {
+      try { parsedSubmitted = JSON.parse(submitted); } catch {}
+    }
+
+    // If both are arrays
+    if (Array.isArray(parsedSubmitted) && Array.isArray(parsedCorrect)) {
+      if (parsedSubmitted.length !== parsedCorrect.length) return false;
+      const sSorted = [...parsedSubmitted].map(s => (typeof s === "object" ? JSON.stringify(s) : String(s).trim().toLowerCase())).sort();
+      const cSorted = [...parsedCorrect].map(c => (typeof c === "object" ? JSON.stringify(c) : String(c).trim().toLowerCase())).sort();
+      return sSorted.every((val, idx) => String(val) === String(cSorted[idx]));
+    }
+
+    // If both are objects (e.g. matching pairs map)
+    if (
+      typeof parsedSubmitted === "object" && parsedSubmitted !== null &&
+      typeof parsedCorrect === "object" && parsedCorrect !== null
+    ) {
+      const sKeys = Object.keys(parsedSubmitted).sort();
+      const cKeys = Object.keys(parsedCorrect).sort();
+      if (sKeys.length === cKeys.length && sKeys.every((k, i) => k === cKeys[i])) {
+        return sKeys.every(k => String(parsedSubmitted[k]).trim().toLowerCase() === String(parsedCorrect[k]).trim().toLowerCase());
+      }
+    }
+
+    // Explicit numeric casting check
+    const sNum = Number(submitted);
+    const cNum = Number(correct);
+    if (!isNaN(sNum) && !isNaN(cNum) && String(sNum) === String(cNum)) {
+      return true;
+    }
+
+    // Explicit string normalization check
     return String(submitted).trim().toLowerCase() === String(correct).trim().toLowerCase();
   }
 

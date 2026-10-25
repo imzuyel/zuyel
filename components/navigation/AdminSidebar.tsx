@@ -54,7 +54,6 @@ export type AdminTab =
   | "quiz_admin"
   | "quiz_studio"
   | "ai_quiz_import"
-
   | "prepare_class"
   | "slide_to_blog"
   | "student_doubts"
@@ -67,10 +66,14 @@ export type AdminTab =
   | "marks_results"
   | "bteb_annual_ledger"
   | "classes_trades"
+  | "academic_years"
+  | "classes_sections"
+  | "trades_management"
   | "subjects"
   | "lab_inventory"
   | "fee_collection"
   | "students"
+  | "student_promotion"
   | "id_cards"
   | "bangla_docs"
   | "excel_wizard"
@@ -381,6 +384,24 @@ export default function AdminSidebar({
               activeText: "text-white",
               indicatorColor: "bg-sky-400 shadow-[0_0_8px_#38bdf8]",
               glowShadow: "group-hover:shadow-[0_0_15px_rgba(14,165,233,0.4)]",
+            },
+          },
+          {
+            id: "student_promotion",
+            label: "শিক্ষার্থী ব্যাচ প্রমোশন",
+            icon: GraduationCap,
+            highlight: true,
+            badge: "রোলওভার",
+            badgeColor: "bg-indigo-600 text-white font-black shadow-xs",
+            keywords: ["promotion", "rollover", "batch", "প্রমোশন", "রোলওভার", "শিক্ষার্থী প্রমোশন"],
+            colorTheme: {
+              iconText: "text-indigo-600 dark:text-indigo-400",
+              iconBg: "bg-indigo-500/10 border-indigo-500/20 dark:bg-indigo-500/15 dark:border-indigo-500/30",
+              activeBg: "bg-indigo-600 text-white shadow-indigo-600/30",
+              activeBorder: "border-indigo-400/40",
+              activeText: "text-white",
+              indicatorColor: "bg-indigo-400 shadow-[0_0_8px_#818cf8]",
+              glowShadow: "group-hover:shadow-[0_0_15px_rgba(99,102,241,0.4)]",
             },
           },
           {

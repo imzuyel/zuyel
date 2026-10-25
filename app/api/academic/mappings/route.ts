@@ -12,8 +12,36 @@ import { requireAdmin } from "@/lib/serverAuthGuard";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 /**
+ * Explicit Projection for Academic Mapping.
+ * Strictly isolates sensitive backend metadata, internal database flags, and teacher configs.
+ */
+export function selectSafeAcademicMapping(m: any) {
+  if (!m) return null;
+  return {
+    id: String(m.id),
+    academicYear: String(m.academicYear || ""),
+    programId: Number(m.programId) || 0,
+    programCode: String(m.programCode || ""),
+    programName: String(m.programName || ""),
+    classNumeric: Number(m.classNumeric) || 0,
+    className: String(m.className || ""),
+    tradeId: m.tradeId !== null && m.tradeId !== undefined ? Number(m.tradeId) : null,
+    tradeCode: m.tradeCode || null,
+    tradeName: m.tradeName || null,
+    section: String(m.section || "all"),
+    shift: String(m.shift || "FIRST_SHIFT"),
+    shiftNameBangla: String(m.shiftNameBangla || ""),
+    capacity: Number(m.capacity) || 0,
+    enrolledStudentsCount: Number(m.enrolledStudentsCount) || 0,
+    status: (m.status === "Inactive" ? "Inactive" : "Active") as "Active" | "Inactive",
+    createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : undefined,
+    updatedAt: m.updatedAt ? new Date(m.updatedAt).toISOString() : undefined,
+  };
+}
+
+/**
  * GET /api/academic/mappings
- * Filters academic mappings by year, program, class, and trade
+ * Filters academic mappings by year, program, class, and trade with strict explicit field selection
  * Or check usage if ?check_usage=id is provided
  */
 export async function GET(req: NextRequest) {
@@ -33,7 +61,7 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status") || undefined;
 
     const snapshot = await getMasterDataSnapshot(year);
-    let results = snapshot.mappings;
+    let results = snapshot.mappings || [];
 
     if (program) {
       results = results.filter((m) => m.programCode === program || String(m.programId) === program);
@@ -48,11 +76,14 @@ export async function GET(req: NextRequest) {
       results = results.filter((m) => m.status.toLowerCase() === status.toLowerCase());
     }
 
-    return apiSuccess(results, {
+    // Apply explicit select to prevent any internal data or sensitive configs from leaking
+    const safeResults = results.map(selectSafeAcademicMapping).filter(Boolean);
+
+    return apiSuccess(safeResults, {
       extraKeys: {
-        total: results.length,
+        total: safeResults.length,
         academicYear: year,
-        activeCount: results.filter((m) => m.status === "Active").length,
+        activeCount: safeResults.filter((m: any) => m.status === "Active").length,
       },
     });
   } catch (error: any) {
@@ -84,7 +115,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return apiSuccess(result.mapping, {
+    return apiSuccess(selectSafeAcademicMapping(result.mapping), {
       message: "একাডেমিক ম্যাপিং সফলভাবে সংরক্ষিত হয়েছে।",
     });
   } catch (error: any) {
@@ -116,7 +147,7 @@ export async function PUT(req: NextRequest) {
       });
     }
 
-    return apiSuccess(result.mapping, {
+    return apiSuccess(selectSafeAcademicMapping(result.mapping), {
       message: "একাডেমিক ম্যাপিং সফলভাবে হালনাগাদ করা হয়েছে।",
     });
   } catch (error: any) {
@@ -149,7 +180,7 @@ export async function DELETE(req: NextRequest) {
       if (!result.success) {
         return apiError(result.error || "ম্যাপিং নিষ্ক্রিয় করতে সমস্যা হয়েছে", { status: 404 });
       }
-      return apiSuccess(result.mapping, {
+      return apiSuccess(selectSafeAcademicMapping(result.mapping), {
         message: "ম্যাপিং রেকর্ডটি সফলভাবে নিষ্ক্রিয় করা হয়েছে (হিস্টোরিক্যাল ডাটা অক্ষত রয়েছে)।",
       });
     }
@@ -167,7 +198,7 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
-    return apiSuccess(deleteRes.deletedMapping, {
+    return apiSuccess(selectSafeAcademicMapping(deleteRes.deletedMapping), {
       message: "একাডেমিক ম্যাপিং সফলভাবে মুছে ফেলা হয়েছে (Permanently deleted)।",
     });
   } catch (error: any) {

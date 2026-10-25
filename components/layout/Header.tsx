@@ -18,11 +18,18 @@ import {
   ExternalLink,
   User,
   ChevronRight,
+  GraduationCap,
+  BookOpen,
 } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import GlobalSearchBar from "@/components/common/GlobalSearchBar";
+import {
+  getActiveStudentAccount,
+  logoutStudentAccount,
+  StudentAuthAccount,
+} from "@/lib/studentIntelligenceStore";
 import { toast } from "sonner";
 
 interface HeaderProps {
@@ -38,12 +45,31 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(null);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notifMenuRef = useRef<HTMLDivElement>(null);
 
   const activeUser = currentUser || user;
+  const isStudentPersona = activeStudent || activeUser?.role?.toLowerCase() === "student";
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  // Sync Student Authentication on mount & storage events
+  useEffect(() => {
+    const syncStudent = () => {
+      setActiveStudent(getActiveStudentAccount());
+    };
+    syncStudent();
+
+    window.addEventListener("ptsc_student_auth_changed", syncStudent);
+    window.addEventListener("ptsc_student_logout", syncStudent);
+    window.addEventListener("storage", syncStudent);
+    return () => {
+      window.removeEventListener("ptsc_student_auth_changed", syncStudent);
+      window.removeEventListener("ptsc_student_logout", syncStudent);
+      window.removeEventListener("storage", syncStudent);
+    };
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -209,18 +235,28 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
               setShowUserMenu(!showUserMenu);
               setShowNotifications(false);
             }}
-            className="flex items-center gap-2 p-1 pl-1.5 pr-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition"
-            title="ইউজার প্রোফাইল ও সেটিংস"
+            className="flex items-center gap-2 p-1 pl-1.5 pr-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+            title={isStudentPersona ? "শিক্ষার্থী প্রোফাইল ও সেটিংস" : "ইউজার প্রোফাইল ও সেটিংস"}
           >
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 text-white font-black text-xs flex items-center justify-center shrink-0">
-              {activeUser?.nameBangla?.charAt(0) || activeUser?.role?.charAt(0).toUpperCase()}
+            <div
+              className={`w-7 h-7 rounded-lg text-white font-black text-xs flex items-center justify-center shrink-0 shadow-xs ${
+                isStudentPersona
+                  ? "bg-gradient-to-tr from-cyan-500 to-indigo-600 ring-2 ring-cyan-400/30"
+                  : "bg-gradient-to-tr from-indigo-600 to-cyan-500"
+              }`}
+            >
+              {isStudentPersona
+                ? (activeStudent?.studentName?.charAt(0) || activeUser?.nameBangla?.charAt(0) || "S")
+                : (activeUser?.nameBangla?.charAt(0) || activeUser?.role?.charAt(0).toUpperCase())}
             </div>
             <div className="hidden md:block text-left min-w-0 max-w-[120px] lg:max-w-[150px]">
-              <p className="text-[10px] text-indigo-500 dark:text-cyan-400 uppercase tracking-wider font-extrabold leading-none truncate">
-                {activeUser?.role}
+              <p className="text-[10px] text-cyan-600 dark:text-cyan-400 uppercase tracking-wider font-extrabold leading-none truncate">
+                {isStudentPersona ? `রোল: ${activeStudent?.rollNumber || "১০১"}` : activeUser?.role}
               </p>
               <p className="text-[11px] font-black text-slate-800 dark:text-white truncate max-w-[120px] lg:max-w-[150px]">
-                {activeUser?.nameBangla || activeUser?.fullName || "ব্যবহারকারী"}
+                {isStudentPersona
+                  ? (activeStudent?.studentName || activeUser?.nameBangla || "শিক্ষার্থী")
+                  : (activeUser?.nameBangla || activeUser?.fullName || "ব্যবহারকারী")}
               </p>
             </div>
             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${showUserMenu ? "rotate-180" : ""}`} />
@@ -228,59 +264,136 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
 
           {showUserMenu && (
             <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-3 text-xs z-50 animate-in fade-in zoom-in-95 duration-150">
-              {/* Profile Card Header */}
-              <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl mb-2">
-                <p className="font-extrabold text-slate-900 dark:text-white truncate">
-                  {activeUser?.nameBangla || activeUser?.fullName}
-                </p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                  {activeUser?.email || "user@pgtsc.gov.bd"}
-                </p>
-                <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase">
-                  রোল: {activeUser?.role}
-                </span>
-              </div>
+              {isStudentPersona ? (
+                <>
+                  {/* Student Profile Card Header */}
+                  <div className="p-3 bg-gradient-to-br from-cyan-50/80 to-indigo-50/80 dark:from-cyan-950/40 dark:to-indigo-950/40 rounded-xl mb-2.5 border border-cyan-200/50 dark:border-cyan-800/40">
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 text-[10px] font-black">
+                        শিক্ষার্থী অ্যাকাউন্ট
+                      </span>
+                      <span className="font-mono text-[10px] font-extrabold text-slate-500 dark:text-slate-400">
+                        রোল: {activeStudent?.rollNumber || "১০১"}
+                      </span>
+                    </div>
+                    <p className="font-extrabold text-slate-900 dark:text-white truncate text-sm">
+                      {activeStudent?.studentName || activeUser?.nameBangla || activeUser?.fullName}
+                    </p>
+                    <p className="text-[10px] text-slate-600 dark:text-slate-400 font-medium truncate mt-0.5">
+                      {activeStudent?.trade ? `${activeStudent.trade} • ` : ""}
+                      {activeStudent?.classLevel?.replace("class-", "") || "১০"}ম শ্রেণি
+                    </p>
+                  </div>
 
-              {/* Profile & Settings Navigation */}
-              <div className="space-y-1 mb-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowUserMenu(false);
-                    if (onNavigate) {
-                      onNavigate("profile");
-                    } else {
-                      window.location.href = "/admin?tab=profile";
-                    }
-                  }}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-800 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-cyan-400 font-bold transition cursor-pointer text-left"
-                >
-                  <span className="flex items-center gap-2">
-                    <User className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>আমার প্রোফাইল ও সেটিংস</span>
-                  </span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </button>
+                  {/* Student Navigation Links */}
+                  <div className="space-y-1.5 mb-2.5">
+                    <Link
+                      href="/student/profile"
+                      onClick={() => setShowUserMenu(false)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/70 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 font-black transition cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <User className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span>আমার শিক্ষার্থী প্রোফাইল</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-emerald-500" />
+                    </Link>
 
-                <Link
-                  href="/"
-                  target="_blank"
-                  onClick={() => setShowUserMenu(false)}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
-                >
-                  <span className="flex items-center gap-2">
-                    <ExternalLink className="w-3.5 h-3.5 text-cyan-500" />
-                    <span>পাবলিক ওয়েবসাইট দেখুন</span>
-                  </span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </Link>
-              </div>
+                    <Link
+                      href="/learning"
+                      onClick={() => setShowUserMenu(false)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-bold transition"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <BookOpen className="w-4 h-4 text-cyan-500 shrink-0" />
+                        <span>আমার বিষয় ও পাঠ্যসূচি</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
+
+                    <Link
+                      href="/results"
+                      onClick={() => setShowUserMenu(false)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-bold transition"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <GraduationCap className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <span>ফলাফল ও গ্রেডশিট</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
+
+                    <Link
+                      href="/"
+                      target="_blank"
+                      onClick={() => setShowUserMenu(false)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <ExternalLink className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span>পাবলিক পোর্টাল দেখুন</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Admin / Teacher Profile Header */}
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl mb-2">
+                    <p className="font-extrabold text-slate-900 dark:text-white truncate">
+                      {activeUser?.nameBangla || activeUser?.fullName}
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                      {activeUser?.email || "user@pgtsc.gov.bd"}
+                    </p>
+                    <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase">
+                      রোল: {activeUser?.role}
+                    </span>
+                  </div>
+
+                  {/* Profile & Settings Navigation */}
+                  <div className="space-y-1 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        if (onNavigate) {
+                          onNavigate("profile");
+                        } else {
+                          window.location.href = "/admin?tab=profile";
+                        }
+                      }}
+                      className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-800 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-cyan-400 font-bold transition cursor-pointer text-left"
+                    >
+                      <span className="flex items-center gap-2">
+                        <User className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>আমার প্রোফাইল ও সেটিংস</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </button>
+
+                    <Link
+                      href="/"
+                      target="_blank"
+                      onClick={() => setShowUserMenu(false)}
+                      className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold transition"
+                    >
+                      <span className="flex items-center gap-2">
+                        <ExternalLink className="w-3.5 h-3.5 text-cyan-500" />
+                        <span>পাবলিক ওয়েবসাইট দেখুন</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
+                  </div>
+                </>
+              )}
 
               {/* Institutional Session Security Notice */}
               <div className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between mb-2">
                 <span className="flex items-center gap-1.5 font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>সেশন: জিরো-ট্রাস্ট সুরক্ষিত</span>
+                  <span>সেশন: সুরক্ষিত শিক্ষার্থী সেলফ-সার্ভিস</span>
                 </span>
                 <span className="font-mono text-[9px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-bold">
                   Active
@@ -290,7 +403,11 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
               {/* Logout Button */}
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
-                  onClick={handleLogout}
+                  onClick={async () => {
+                    setShowUserMenu(false);
+                    logoutStudentAccount();
+                    await handleLogout();
+                  }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition text-left cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />

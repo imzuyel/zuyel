@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Save,
   FileQuestion,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -781,7 +782,11 @@ export default function ManualQuestionCreatorModal({
               disabled={isSubmitting}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-black shadow-lg shadow-indigo-500/25 flex items-center gap-2 transition disabled:opacity-50 cursor-pointer"
             >
-              <Save className="w-4 h-4" />
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
               <span>{isSubmitting ? "সংরক্ষণ হচ্ছে..." : "প্রশ্ন সংরক্ষণ করুন"}</span>
             </button>
           </div>

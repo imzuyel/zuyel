@@ -62,3 +62,71 @@ export const triggerFireworks = () => {
     console.warn("Fireworks error:", e);
   }
 };
+
+/**
+ * Premium Multi-Stage Block Completion Celebration
+ * Triggers a satisfying, gamified confetti explosion (Center Burst + Angled Side Cannons + Star Sparkles)
+ */
+export const triggerBlockCompletionCelebration = () => {
+  if (typeof window === "undefined") return;
+  try {
+    // Stage 1: High-energy central burst with colorful confetti and stars
+    confetti({
+      particleCount: 85,
+      spread: 75,
+      startVelocity: 42,
+      origin: { y: 0.62 },
+      colors: ["#10b981", "#06b6d4", "#f59e0b", "#6366f1", "#ec4899", "#3b82f6"],
+      shapes: ["circle", "square"],
+      scalar: 1.15,
+      zIndex: 9999,
+      disableForReducedMotion: true,
+    });
+
+    // Stage 2: Dual angled side cannons (120ms delay)
+    setTimeout(() => {
+      // Left cannon firing diagonally right-upwards
+      confetti({
+        particleCount: 50,
+        angle: 60,
+        spread: 55,
+        startVelocity: 50,
+        origin: { x: 0.1, y: 0.8 },
+        colors: ["#10b981", "#06b6d4", "#eab308", "#f43f5e"],
+        zIndex: 9999,
+        disableForReducedMotion: true,
+      });
+
+      // Right cannon firing diagonally left-upwards
+      confetti({
+        particleCount: 50,
+        angle: 120,
+        spread: 55,
+        startVelocity: 50,
+        origin: { x: 0.9, y: 0.8 },
+        colors: ["#6366f1", "#a855f7", "#3b82f6", "#14b8a6"],
+        zIndex: 9999,
+        disableForReducedMotion: true,
+      });
+    }, 120);
+
+    // Stage 3: Golden milestone sparkle shower (260ms delay)
+    setTimeout(() => {
+      confetti({
+        particleCount: 35,
+        spread: 100,
+        startVelocity: 25,
+        origin: { y: 0.45 },
+        colors: ["#fbbf24", "#f59e0b", "#fde047", "#ffffff"],
+        shapes: ["circle"],
+        scalar: 0.9,
+        ticks: 90,
+        gravity: 0.8,
+        zIndex: 9999,
+        disableForReducedMotion: true,
+      });
+    }, 260);
+  } catch (err) {
+    console.warn("Block completion celebration error:", err);
+  }
+};

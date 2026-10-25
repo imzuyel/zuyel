@@ -21,6 +21,20 @@
   --surface-border-subtle: rgba(241, 245, 249, 0.9);
   --ring-focus: rgba(16, 185, 129, 0.25);
   --border-focus: #059669;
+
+  /* Quiz & Random Theme Contrast Tokens (Light Mode - WCAG AAA Compliant) */
+  --quiz-surface-bg: #ffffff;
+  --quiz-surface-muted: #f8fafc;
+  --quiz-border: #cbd5e1;
+  --quiz-text-primary: #020617;
+  --quiz-text-secondary: #1e293b;
+  --quiz-text-muted: #475569;
+  --quiz-option-bg: #ffffff;
+  --quiz-option-hover: #f1f5f9;
+  --quiz-option-border: #94a3b8;
+  --quiz-option-text: #020617;
+  --quiz-plate-bg: #ffffff;
+  --quiz-plate-fg: #020617;
 }
 
 .dark, [data-mode="dark"] {
@@ -32,6 +46,36 @@
   --surface-border-subtle: rgba(30, 41, 59, 0.8);
   --ring-focus: rgba(16, 185, 129, 0.35);
   --border-focus: #10b981;
+
+  /* Quiz & Random Theme Contrast Tokens (Dark Mode - WCAG AAA Compliant) */
+  --quiz-surface-bg: #090d16;
+  --quiz-surface-muted: #0f172a;
+  --quiz-border: #334155;
+  --quiz-text-primary: #f8fafc;
+  --quiz-text-secondary: #e2e8f0;
+  --quiz-text-muted: #94a3b8;
+  --quiz-option-bg: #0f172a;
+  --quiz-option-hover: #1e293b;
+  --quiz-option-border: #475569;
+  --quiz-option-text: #f8fafc;
+  --quiz-plate-bg: #090d16;
+  --quiz-plate-fg: #f8fafc;
+}
+
+/* Quiz Accessibility & High-Contrast Typography */
+.quiz-text-contrast-primary {
+  color: var(--quiz-text-primary) !important;
+}
+.quiz-text-contrast-secondary {
+  color: var(--quiz-text-secondary) !important;
+}
+.quiz-text-contrast-muted {
+  color: var(--quiz-text-muted) !important;
+}
+.quiz-option-contrast {
+  background-color: var(--quiz-option-bg) !important;
+  color: var(--quiz-option-text) !important;
+  border-color: var(--quiz-option-border) !important;
 }
 
 /* Strict Viewport & Anti-Horizontal Scroll Rules (Safe for CSS Sticky) */
@@ -1208,4 +1252,123 @@ button, .btn, .badge, th, td {
   background: #0f172a;
   color: #38bdf8;
 }
+
+/* ==============================================================
+   TIPTAP CUSTOM CALLOUT BLOCKS (SURFACE, BORDER & ACCENTS)
+   ============================================================== */
+.callout-block {
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+  border-radius: 0.875rem;
+  border-left-width: 4px;
+  border-left-style: solid;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.callout-block .callout-header {
+  font-weight: 800;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.callout-block p {
+  margin: 0.35rem 0;
+  line-height: 1.65;
+}
+
+.callout-block p:last-child {
+  margin-bottom: 0;
+}
+
+/* 1. সারসংক্ষেপ (Summary) - Amber / Warm Glow */
+.callout-summary {
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.65) 0%, rgba(254, 252, 232, 0.4) 100%);
+  border-left-color: #d97706;
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
+  border-right: 1px solid rgba(245, 158, 11, 0.2);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  color: #78350f;
+}
+
+.callout-summary .callout-header {
+  color: #b45309;
+}
+
+.dark .callout-summary,
+[data-mode="dark"] .callout-summary {
+  background: linear-gradient(135deg, rgba(120, 53, 15, 0.25) 0%, rgba(69, 26, 3, 0.15) 100%);
+  border-left-color: #f59e0b;
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
+  border-right: 1px solid rgba(245, 158, 11, 0.2);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  color: #fef3c7;
+}
+
+.dark .callout-summary .callout-header,
+[data-mode="dark"] .callout-summary .callout-header {
+  color: #fbbf24;
+}
+
+/* 2. গুরুত্বপূর্ণ পয়েন্টসমূহ (Key Points) - Indigo / Purple Tech Accent */
+.callout-keypoints {
+  background: linear-gradient(135deg, rgba(224, 231, 255, 0.65) 0%, rgba(238, 242, 255, 0.4) 100%);
+  border-left-color: #4f46e5;
+  border-top: 1px solid rgba(99, 102, 241, 0.2);
+  border-right: 1px solid rgba(99, 102, 241, 0.2);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+  color: #1e1b4b;
+}
+
+.callout-keypoints .callout-header {
+  color: #4338ca;
+}
+
+.dark .callout-keypoints,
+[data-mode="dark"] .callout-keypoints {
+  background: linear-gradient(135deg, rgba(49, 46, 129, 0.25) 0%, rgba(30, 27, 75, 0.15) 100%);
+  border-left-color: #6366f1;
+  border-top: 1px solid rgba(99, 102, 241, 0.25);
+  border-right: 1px solid rgba(99, 102, 241, 0.25);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+  color: #e0e7ff;
+}
+
+.dark .callout-keypoints .callout-header,
+[data-mode="dark"] .callout-keypoints .callout-header {
+  color: #818cf8;
+}
+
+/* 3. গুরুত্বপূর্ণ প্রশ্নসমূহ (Important Questions) - Emerald / Teal Matrix Accent */
+.callout-questions {
+  background: linear-gradient(135deg, rgba(209, 250, 229, 0.65) 0%, rgba(236, 253, 245, 0.4) 100%);
+  border-left-color: #059669;
+  border-top: 1px solid rgba(16, 185, 129, 0.2);
+  border-right: 1px solid rgba(16, 185, 129, 0.2);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+  color: #064e3b;
+}
+
+.callout-questions .callout-header {
+  color: #047857;
+}
+
+.dark .callout-questions,
+[data-mode="dark"] .callout-questions {
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.25) 0%, rgba(4, 47, 46, 0.15) 100%);
+  border-left-color: #10b981;
+  border-top: 1px solid rgba(16, 185, 129, 0.25);
+  border-right: 1px solid rgba(16, 185, 129, 0.25);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.25);
+  color: #d1fae5;
+}
+
+.dark .callout-questions .callout-header,
+[data-mode="dark"] .callout-questions .callout-header {
+  color: #34d399;
+}
+
 

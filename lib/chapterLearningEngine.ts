@@ -4,12 +4,27 @@
 
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
 
+export type QuizQuestionType = "MCQ" | "TRUE_FALSE" | "FILL_BLANKS" | "MATCHING" | "REORDER";
+
+export interface MatchingPair {
+  id?: string | number;
+  left: string;
+  right: string;
+}
+
 export interface QuizQuestionItem {
   id: string;
+  questionType?: QuizQuestionType;
   questionText: string;
   options: string[];
   correctOptionIndex: number;
-  explanation: string;
+  correctBoolean?: boolean;
+  acceptedAnswers?: string[];
+  matchingPairs?: MatchingPair[];
+  correctOrder?: string[];
+  correctAnswer?: string;
+  optionsJson?: string;
+  explanation?: string;
   marks: number;
 }
 
@@ -111,6 +126,7 @@ export interface StudentItemProgressData {
   lastScore: number;
   isPassed: boolean;
   xpEarned: number;
+  stars?: number; // 1 to 5 Stars rating based on student engagement
   completedAt?: string;
   timeSpentSeconds: number;
   answers?: Record<string, number | string>;
@@ -131,6 +147,9 @@ export interface EnrichedCourseChapter extends Omit<CourseChapterItem, "items"> 
   completedItemsCount: number;
   totalItemsCount: number;
   progressPercentage: number;
+  isCompleted?: boolean;
+  totalEarnedStars: number; // Sum of 1-5 stars earned across items
+  maxPossibleStars: number; // totalItemsCount * 5
   items: EnrichedContentItem[];
 }
 
@@ -140,7 +159,83 @@ export interface EnrichedCourse extends Omit<CourseItem, "chapters"> {
   completedCourseItems: number;
   courseProgressPercentage: number;
   totalEarnedXp: number;
+  totalEarnedStars: number; // Sum of all stars earned in course
+  maxPossibleStars: number; // totalCourseItems * 5
   isCompleted: boolean;
+}
+
+/**
+ * Calculates a 1 to 5 Star Rating for Blog / Lesson reading based on strict minimum reading time.
+ * - Minimum Reading Time Threshold: 60% of estimated reading time (minimum 30 seconds).
+ * - If timeSpentSeconds >= minReadingTimeThreshold: awards exactly 5 Stars (⭐⭐⭐⭐⭐)
+ * - If student clicks Next prematurely (rushing), dynamically scales down stars (1 to 4 stars)
+ *   based on how early they skipped:
+ *     - ratio >= 0.75: 4 Stars ⭐⭐⭐⭐
+ *     - ratio >= 0.50: 3 Stars ⭐⭐⭐
+ *     - ratio >= 0.25: 2 Stars ⭐⭐
+ *     - ratio < 0.25: 1 Star ⭐
+ */
+export function calculateBlogStars(timeSpentSeconds: number, estimatedMinutes: number = 3): number {
+  const safeTimeSpent = Math.max(0, Number(timeSpentSeconds) || 0);
+  const safeEstimatedMinutes = Math.max(0.5, Number(estimatedMinutes) || 3);
+
+  // Strict minimum reading time threshold (60% of estimated time, minimum 30s)
+  const minReadingTimeThreshold = Math.max(30, Math.round(safeEstimatedMinutes * 60 * 0.6));
+
+  if (safeTimeSpent >= minReadingTimeThreshold) {
+    return 5;
+  }
+
+  // Dynamically scale down stars based on premature skip
+  const ratio = safeTimeSpent / minReadingTimeThreshold;
+  if (ratio >= 0.75) {
+    return 4;
+  } else if (ratio >= 0.50) {
+    return 3;
+  } else if (ratio >= 0.25) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+
+/**
+ * Calculates a 1 to 5 Star Rating for Quiz based on score accuracy and allotted time.
+ * BUG FIX: If a student achieves 100% correct answers within the allotted time, they MUST receive exactly 5 stars.
+ * - 100% score within allotted time: strictly 5 Stars ⭐⭐⭐⭐⭐
+ * - 90%+ score: 5 Stars ⭐⭐⭐⭐⭐ (Full mastery)
+ * - 80%+ score: 4 Stars ⭐⭐⭐⭐ (Proficient)
+ * - 65%+ score: 3 Stars ⭐⭐⭐ (Solid pass)
+ * - 50%+ score: 2 Stars ⭐⭐ (Minimum pass threshold)
+ * - Below 50%: 1 Star ⭐ (Needs review)
+ */
+export function calculateQuizStars(
+  scorePercentage: number,
+  timeSpentSeconds: number = 60,
+  timeLimitSeconds: number = 300
+): number {
+  const safeScore = Math.max(0, Math.min(100, Math.round(Number(scorePercentage) || 0)));
+  const safeTimeSpent = Math.max(0, Number(timeSpentSeconds) || 0);
+  const safeTimeLimit = Number(timeLimitSeconds) > 0 ? Number(timeLimitSeconds) : 0;
+
+  const isWithinTime = safeTimeLimit === 0 || safeTimeSpent <= safeTimeLimit;
+
+  // STRICT GUARANTEE: 100% correct answers within allotted time MUST receive 5 stars!
+  if (safeScore >= 100 && isWithinTime) {
+    return 5;
+  }
+
+  if (safeScore >= 90 && isWithinTime) {
+    return 5;
+  } else if (safeScore >= 80) {
+    return 4;
+  } else if (safeScore >= 65) {
+    return 3;
+  } else if (safeScore >= 50) {
+    return 2;
+  } else {
+    return 1;
+  }
 }
 
 // ==========================================
@@ -1884,8 +1979,9 @@ class ChapterLearningStore {
             lastScore: data.lastScore,
             isPassed: data.isPassed,
             xpEarned: data.xpEarned,
+            stars: data.stars || 1,
             timeSpentSeconds: data.timeSpentSeconds,
-            answers: data.answers ? JSON.stringify(data.answers) : null,
+            answersJson: data.answers ? JSON.stringify(data.answers) : null,
             completedAt: data.completedAt ? new Date(data.completedAt) : null,
           },
           create: {
@@ -1898,8 +1994,9 @@ class ChapterLearningStore {
             lastScore: data.lastScore,
             isPassed: data.isPassed,
             xpEarned: data.xpEarned,
+            stars: data.stars || 1,
             timeSpentSeconds: data.timeSpentSeconds,
-            answers: data.answers ? JSON.stringify(data.answers) : null,
+            answersJson: data.answers ? JSON.stringify(data.answers) : null,
             completedAt: data.completedAt ? new Date(data.completedAt) : null,
           },
         }).catch((err: any) => {
@@ -1909,6 +2006,40 @@ class ChapterLearningStore {
         console.warn("[Prisma Progress Catch]", err?.message);
       }
     }
+  }
+
+  /**
+   * Merges persistent student progress records loaded from Prisma database
+   */
+  public mergeStudentProgressFromPrisma(studentRoll: string, prismaRecords: any[]): void {
+    if (!studentRoll || !Array.isArray(prismaRecords)) return;
+    const list = this.getStudentProgressList(studentRoll);
+    for (const record of prismaRecords) {
+      const existingIdx = list.findIndex(p => p.itemId === record.itemId);
+      const converted: StudentItemProgressData = {
+        id: record.id || Date.now(),
+        studentRoll: record.studentRoll,
+        studentName: record.studentName || undefined,
+        itemId: record.itemId,
+        status: record.status as any,
+        attemptsCount: record.attemptsCount || 0,
+        bestScore: record.bestScore || 0,
+        lastScore: record.lastScore || 0,
+        isPassed: Boolean(record.isPassed),
+        xpEarned: record.xpEarned || 0,
+        stars: (record.stars !== null && record.stars !== undefined && Number(record.stars) > 0)
+          ? Number(record.stars)
+          : (record.isPassed ? 1 : 1),
+        completedAt: record.completedAt ? new Date(record.completedAt).toISOString() : undefined,
+        timeSpentSeconds: record.timeSpentSeconds || 0,
+      };
+      if (existingIdx !== -1) {
+        list[existingIdx] = { ...list[existingIdx], ...converted };
+      } else {
+        list.push(converted);
+      }
+    }
+    this.progressStore.set(studentRoll, list);
   }
 
   /**
@@ -1923,6 +2054,7 @@ class ChapterLearningStore {
     let totalCourseItems = 0;
     let completedCourseItems = 0;
     let totalEarnedXp = 0;
+    let totalCourseEarnedStars = 0;
 
     let previousChapterCompleted = true; // Chapter 1 starts unlocked
     let firstPendingItemMarked = false;
@@ -1936,6 +2068,7 @@ class ChapterLearningStore {
         let chapterAllMandatoryCompleted = true;
         let previousItemSatisfied = !isChapterLocked; // First item in chapter is unlocked if chapter is unlocked
         let completedInChapter = 0;
+        let chapterEarnedStars = 0;
 
         const enrichedItems: EnrichedContentItem[] = chapter.items
           .sort((a, b) => a.orderIndex - b.orderIndex)
@@ -1948,6 +2081,9 @@ class ChapterLearningStore {
               completedInChapter++;
               completedCourseItems++;
               totalEarnedXp += progress.xpEarned;
+              const itemStars = progress.stars || 1;
+              chapterEarnedStars += itemStars;
+              totalCourseEarnedStars += itemStars;
             }
 
             // Determine locked state
@@ -2014,13 +2150,21 @@ class ChapterLearningStore {
 
         previousChapterCompleted = chapterAllMandatoryCompleted;
 
+        const isChapterFullyCompleted = chapter.items.length > 0 && completedInChapter >= chapter.items.length;
+        const chapterProgressPercentage = chapter.items.length > 0 
+          ? Math.round((completedInChapter / chapter.items.length) * 100) 
+          : 0;
+
         return {
           ...chapter,
           isLocked: isChapterLocked,
           lockReason: chapterLockReason,
           completedItemsCount: completedInChapter,
           totalItemsCount: chapter.items.length,
-          progressPercentage: chapter.items.length > 0 ? Math.round((completedInChapter / chapter.items.length) * 100) : 0,
+          progressPercentage: chapterProgressPercentage,
+          isCompleted: isChapterFullyCompleted,
+          totalEarnedStars: chapterEarnedStars,
+          maxPossibleStars: chapter.items.length * 5,
           items: enrichedItems,
         };
       });
@@ -2036,6 +2180,8 @@ class ChapterLearningStore {
       completedCourseItems,
       courseProgressPercentage,
       totalEarnedXp,
+      totalEarnedStars: totalCourseEarnedStars,
+      maxPossibleStars: totalCourseItems * 5,
       isCompleted: totalCourseItems > 0 && completedCourseItems >= totalCourseItems,
     };
   }
@@ -2049,7 +2195,7 @@ class ChapterLearningStore {
     studentRoll: string,
     studentName?: string,
     timeSpentSeconds: number = 60
-  ): { success: boolean; error?: string; progress?: StudentItemProgressData; xpAwarded?: number } {
+  ): { success: boolean; error?: string; progress?: StudentItemProgressData; xpAwarded?: number; stars?: number } {
     let targetItem: ChapterContentItemData | null = null;
     let targetCourse: CourseItem | null = null;
 
@@ -2105,6 +2251,13 @@ class ChapterLearningStore {
     const existingProgress = this.getStudentItemProgress(studentRoll, resolvedItemId);
     const alreadyCompleted = existingProgress && existingProgress.status === "COMPLETED";
 
+    // Dynamic 1-5 Star calculation based on reading engagement duration
+    const calculatedStars = calculateBlogStars(
+      timeSpentSeconds,
+      targetItem.readTimeMinutes || targetItem.durationMinutes || 3
+    );
+    const finalStars = Math.max(existingProgress?.stars || 0, calculatedStars);
+
     const nextProgressId = Date.now();
     const updatedProgress: StudentItemProgressData = {
       id: existingProgress ? existingProgress.id : nextProgressId,
@@ -2117,6 +2270,7 @@ class ChapterLearningStore {
       lastScore: 100,
       isPassed: true,
       xpEarned: alreadyCompleted ? existingProgress.xpEarned : targetItem.xpReward,
+      stars: finalStars,
       completedAt: new Date().toISOString(),
       timeSpentSeconds: (existingProgress?.timeSpentSeconds || 0) + timeSpentSeconds,
     };
@@ -2127,6 +2281,7 @@ class ChapterLearningStore {
       success: true,
       progress: updatedProgress,
       xpAwarded: alreadyCompleted ? 0 : targetItem.xpReward,
+      stars: finalStars,
     };
   }
 
@@ -2151,6 +2306,7 @@ class ChapterLearningStore {
     disqualifiedQuestionIds?: string[];
     totalQuestions?: number;
     xpAwarded?: number;
+    stars?: number;
     progress?: StudentItemProgressData;
     attemptsRemaining?: number | null;
   } {
@@ -2231,25 +2387,176 @@ class ChapterLearningStore {
         // Rule: Marks for this specific question MUST be 0 (zero), disqualified from score
         disqualifiedQuestionIds.push(qIdStr);
       } else {
-        // Normal grading: support both numeric index (0, 1, 2) and stable option ID ("opt_0", "opt_1")
-        const selectedIdx =
-          typeof selected === "number"
-            ? selected
-            : typeof selected === "string" && selected.startsWith("opt_")
-              ? parseInt(selected.replace("opt_", ""), 10)
-              : typeof selected === "string" && !isNaN(parseInt(selected, 10))
-                ? parseInt(selected, 10)
-                : -1;
+        const qType = q.questionType || "MCQ";
+        let isCorrect = false;
 
-        if (selectedIdx !== -1 && selectedIdx === q.correctOptionIndex) {
+        if (qType === "TRUE_FALSE") {
+          // True/False: support boolean, string ("true"/"false"/"সত্য"/"মিথ্যা"), or option index (0=true, 1=false)
+          let studentBool: boolean | null = null;
+          if (typeof selected === "boolean") {
+            studentBool = selected;
+          } else if (typeof selected === "string") {
+            const lower = selected.toLowerCase().trim();
+            if (lower === "true" || lower === "সত্য" || lower === "1") studentBool = true;
+            else if (lower === "false" || lower === "মিথ্যা" || lower === "0") studentBool = false;
+          } else if (typeof selected === "number") {
+            studentBool = selected === 0;
+          }
+
+          const expectedBool = q.correctBoolean !== undefined
+            ? q.correctBoolean
+            : (q.correctOptionIndex === 0);
+          if (studentBool !== null && studentBool === expectedBool) {
+            isCorrect = true;
+          }
+        } else if (qType === "FILL_BLANKS") {
+          // Fill in the blanks: case-insensitive, trimmed check supporting both single and multi-blank sentences
+          const bracketMatches = Array.from(
+            q.questionText.matchAll(/\[(.*?)\]/g)
+          ).map(m => m[1].trim());
+
+          const targetBlanks = bracketMatches.length > 0
+            ? bracketMatches
+            : (q.acceptedAnswers && q.acceptedAnswers.length > 0 ? q.acceptedAnswers : (q.options || []));
+
+          if (selected !== undefined && selected !== null) {
+            if (typeof selected === "object" && !Array.isArray(selected)) {
+              // Payload as object: { 0: "ans1", 1: "ans2" } or { blank_0: "ans1" }
+              const selMap = selected as Record<string, any>;
+              if (targetBlanks.length > 0) {
+                const allMatch = targetBlanks.every((target, bIdx) => {
+                  const val = selMap[bIdx] ?? selMap[String(bIdx)] ?? selMap[`blank_${bIdx}`] ?? selMap[target];
+                  return typeof val === "string" && val.trim().toLowerCase() === target.trim().toLowerCase();
+                });
+                if (allMatch) isCorrect = true;
+              }
+            } else if (Array.isArray(selected)) {
+              // Payload as array: ["ans1", "ans2"]
+              if (targetBlanks.length > 0 && selected.length >= targetBlanks.length) {
+                const allMatch = targetBlanks.every((target, bIdx) => {
+                  const val = selected[bIdx];
+                  return typeof val === "string" && val.trim().toLowerCase() === target.trim().toLowerCase();
+                });
+                if (allMatch) isCorrect = true;
+              }
+            } else if (typeof selected === "string" && selected.trim() !== "") {
+              const studentText = selected.trim().toLowerCase();
+              if (targetBlanks.length === 1) {
+                isCorrect = targetBlanks[0].trim().toLowerCase() === studentText;
+              } else if (targetBlanks.length > 1) {
+                // Check comma-separated inputs
+                const studentParts = studentText.split(",").map(s => s.trim());
+                if (studentParts.length === targetBlanks.length) {
+                  isCorrect = targetBlanks.every((target, bIdx) => target.trim().toLowerCase() === studentParts[bIdx]);
+                }
+              }
+              // Fallback to accepted answers pool
+              if (!isCorrect) {
+                const acceptedPool = (q.acceptedAnswers && q.acceptedAnswers.length > 0) ? q.acceptedAnswers : (q.options || []);
+                isCorrect = acceptedPool.some(ans => ans.trim().toLowerCase() === studentText);
+              }
+            }
+          }
+        } else if (qType === "MATCHING") {
+          // Matching: exact pair comparison (case-insensitive & trimmed)
+          let pairs = q.matchingPairs || [];
+          if ((!pairs || pairs.length === 0) && typeof q.correctAnswer === "string" && q.correctAnswer.startsWith("[")) {
+            try {
+              const parsed = JSON.parse(q.correctAnswer);
+              if (Array.isArray(parsed)) pairs = parsed;
+            } catch {}
+          }
+          if ((!pairs || pairs.length === 0) && typeof q.optionsJson === "string" && q.optionsJson.startsWith("[")) {
+            try {
+              const parsed = JSON.parse(q.optionsJson);
+              if (Array.isArray(parsed)) pairs = parsed;
+            } catch {}
+          }
+          if (pairs.length > 0 && selected) {
+            if (Array.isArray(selected)) {
+              // Array of { left, right } or array of right-side values in left-order
+              if (selected.length === pairs.length) {
+                const allMatch = pairs.every((pair, idx) => {
+                  const selItem = selected[idx];
+                  if (typeof selItem === "object" && selItem !== null) {
+                    const l = (selItem.left || "").trim().toLowerCase();
+                    const r = (selItem.right || "").trim().toLowerCase();
+                    return l === pair.left.trim().toLowerCase() && r === pair.right.trim().toLowerCase();
+                  } else if (typeof selItem === "string") {
+                    return selItem.trim().toLowerCase() === pair.right.trim().toLowerCase();
+                  }
+                  return false;
+                });
+                if (allMatch) isCorrect = true;
+              }
+            } else if (typeof selected === "object") {
+              // Map: { [left]: right } or { [drop-X]: right } or { [pairId]: right }
+              const selMap = selected as Record<string, any>;
+              const allMatch = pairs.every((pair, idx) => {
+                const userChoice =
+                  selMap[pair.left] ??
+                  selMap[`drop-${idx}`] ??
+                  (pair.id !== undefined ? selMap[pair.id] : undefined) ??
+                  selMap[idx];
+                return typeof userChoice === "string" && userChoice.trim().toLowerCase() === pair.right.trim().toLowerCase();
+              });
+              if (allMatch) isCorrect = true;
+            }
+          }
+        } else if (qType === "REORDER") {
+          // Reorder: exact array sequence comparison
+          const expectedOrder = (q.correctOrder && q.correctOrder.length > 0)
+            ? q.correctOrder
+            : (q.options || []);
+
+          if (expectedOrder.length > 0 && selected) {
+            let studentOrder: string[] = [];
+            if (Array.isArray(selected)) {
+              studentOrder = selected.map(s => String(s).trim());
+            } else if (typeof selected === "string") {
+              studentOrder = selected.split(",").map(s => s.trim()).filter(Boolean);
+            } else if (typeof selected === "object") {
+              studentOrder = Object.values(selected).map(s => String(s).trim());
+            }
+
+            if (studentOrder.length === expectedOrder.length) {
+              const allItemsMatchInOrder = expectedOrder.every((expectedItem, idx) => {
+                return expectedItem.trim().toLowerCase() === (studentOrder[idx] || "").toLowerCase();
+              });
+              if (allItemsMatchInOrder) {
+                isCorrect = true;
+              }
+            }
+          }
+        } else {
+          // Standard MCQ
+          const selectedIdx =
+            typeof selected === "number"
+              ? selected
+              : typeof selected === "string" && selected.startsWith("opt_")
+                ? parseInt(selected.replace("opt_", ""), 10)
+                : typeof selected === "string" && !isNaN(parseInt(selected, 10))
+                  ? parseInt(selected, 10)
+                  : -1;
+
+          const expectedIdx = Number(q.correctOptionIndex);
+          if (selectedIdx !== -1 && (selectedIdx === q.correctOptionIndex || selectedIdx === expectedIdx)) {
+            isCorrect = true;
+          }
+        }
+
+        if (isCorrect) {
           correctCount++;
         }
       }
     });
 
     const totalQuestions = questions.length;
-    const scorePercentage = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
-    const isPassed = scorePercentage >= targetItem.passingScore;
+    const isPerfectScore = totalQuestions > 0 && correctCount === totalQuestions;
+    const scorePercentage = totalQuestions > 0
+      ? (isPerfectScore ? 100 : Math.round((correctCount / totalQuestions) * 100))
+      : 0;
+    const isPassed = isPerfectScore || scorePercentage >= targetItem.passingScore;
 
     const newAttemptsCount = currentAttempts + 1;
     const bestScore = Math.max(existingProgress?.bestScore || 0, scorePercentage);
@@ -2258,6 +2565,25 @@ class ChapterLearningStore {
     const xpEarned = isPassed && !wasAlreadyPassed
       ? targetItem.xpReward
       : (existingProgress?.xpEarned || 0);
+
+    const timeLimitSecs = targetItem.timeLimitSeconds || 300;
+    const isWithinTime = timeLimitSecs <= 0 || timeSpentSeconds <= timeLimitSecs;
+
+    // Dynamic 1-5 Star calculation based on score percentage and time spent
+    let calculatedStars = calculateQuizStars(
+      scorePercentage,
+      timeSpentSeconds,
+      timeLimitSecs
+    );
+
+    // STRICT GUARANTEE: If a student gets 100% correct answers within allotted time, they MUST receive exactly 5 stars!
+    if (isPerfectScore && isWithinTime) {
+      calculatedStars = 5;
+    }
+
+    const finalStars = isPassed
+      ? Math.max(existingProgress?.stars || 0, calculatedStars)
+      : Math.max(existingProgress?.stars || 0, 1);
 
     const updatedProgress: StudentItemProgressData = {
       id: existingProgress ? existingProgress.id : Date.now(),
@@ -2270,6 +2596,7 @@ class ChapterLearningStore {
       lastScore: scorePercentage,
       isPassed: isPassed || wasAlreadyPassed,
       xpEarned,
+      stars: finalStars,
       completedAt: isPassed ? new Date().toISOString() : existingProgress?.completedAt,
       timeSpentSeconds: (existingProgress?.timeSpentSeconds || 0) + timeSpentSeconds,
       answers,
@@ -2290,6 +2617,7 @@ class ChapterLearningStore {
       disqualifiedQuestionIds,
       totalQuestions,
       xpAwarded: isPassed && !wasAlreadyPassed ? targetItem.xpReward : 0,
+      stars: finalStars,
       progress: updatedProgress,
       attemptsRemaining,
     };

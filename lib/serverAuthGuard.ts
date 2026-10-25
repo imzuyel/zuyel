@@ -18,6 +18,7 @@ import {
   verifySessionToken,
   INTERNAL_SECRET_HEADER,
   INTERNAL_SERVICE_KEY,
+  getInternalServiceKey,
 } from "./tokenService";
 import { sanitizeErrorMessage } from "./utils";
 
@@ -130,10 +131,11 @@ export function extractRequestIdentity(req: Request): RequestIdentity {
   }
 
   // 2. Check for trusted internal service calls with shared secret
+  const internalKey = getInternalServiceKey();
   const internalSecret = headers.get(INTERNAL_SECRET_HEADER);
-  if (internalSecret && internalSecret === INTERNAL_SERVICE_KEY) {
+  if (internalKey && internalSecret && internalSecret === internalKey) {
     const rawRole = headers.get("x-user-role");
-    const headerId = headers.get("x-user-id") || "1";
+    const headerId = headers.get("x-user-id") || "internal_service";
     const headerName = headers.get("x-user-name") || "Internal System Service";
     return {
       userId: headerId,
@@ -146,86 +148,38 @@ export function extractRequestIdentity(req: Request): RequestIdentity {
     };
   }
 
-  // 3. Fallback for un-tokenized sessions: STRICT ANTI-SPOOFING VERIFICATION
+  // 3. Fallback for un-tokenized requests: STRICT ZERO-TRUST ENFORCEMENT
+  // Client-supplied headers or cookies CAN NEVER grant authenticated status or elevated staff access.
   const cookieRole = cookies["pgtsc_user_role"] || cookies["ptsc_user_role"] || null;
   const cookieId = cookies["pgtsc_user_id"] || cookies["ptsc_user_id"] || null;
   const cookieName = cookies["pgtsc_user_name"] || cookies["ptsc_user_name"] || null;
-
-  // Header values passed directly by client cannot elevate role without valid session
   const headerRole = headers.get("x-user-role");
   const headerId = headers.get("x-user-id");
 
-  const claimedId = String(cookieId || headerId || "4").trim();
-  const rawClaimedRole = String(cookieRole || headerRole || "student").trim();
-  const normalizedClaimedRole = normalizeRole(rawClaimedRole);
+  const claimedRole = (headerRole || cookieRole || "").toLowerCase().trim();
+  const claimedId = String(headerId || cookieId || "").trim();
 
-  // Zero-Trust Rule: Student ID 4 or any unrecognized ID can NEVER claim admin or teacher roles
-  if (claimedId === "4" || claimedId === "student") {
-    if (normalizedClaimedRole !== "student") {
-      recordSecurityAuditLog({
-        actionType: "STUDENT_ACCESS_BLOCKED",
-        actorRole: "student",
-        actorName: cookieName || "Anonymous Student",
-        routePath: new URL(req.url).pathname,
-        ipAddress,
-        status: "BLOCKED",
-        details: `Privilege escalation attempt intercepted: Student ID 4 attempted to assert elevated role '${normalizedClaimedRole}'.`,
-        detailsBangla: `সুযোগ বৃদ্ধির অপচেষ্টা প্রতিহত: শিক্ষার্থী আইডি ৪ '${normalizedClaimedRole}' রোল দাবি করেছিল।`,
-      });
-    }
-    return {
-      userId: "4",
-      userName: cookieName || "Kazi Tanvir Hasan (Student)",
-      userRole: "student",
-      ipAddress,
-      isAuthenticated: Boolean(cookieId),
-      isTokenVerified: false,
-    };
-  }
-
-  // Verify claimed staff/admin ID against known staff registry
-  if (AUTHORIZED_STAFF_ROLES.has(normalizedClaimedRole)) {
-    const staffMatch = KNOWN_STAFF_IDS[claimedId];
-    if (staffMatch && (staffMatch.role === normalizedClaimedRole || isAdministrator(normalizedClaimedRole))) {
-      return {
-        userId: claimedId,
-        userName: cookieName || staffMatch.name,
-        userRole: normalizedClaimedRole,
-        ipAddress,
-        isAuthenticated: true,
-        isTokenVerified: false,
-      };
-    }
-
-    // Role spoofing detected: Claimed an administrative role without matching known staff ID
+  // Audit any spoofing attempt where unverified client claims an elevated staff/admin role
+  if (claimedRole && AUTHORIZED_STAFF_ROLES.has(normalizeRole(claimedRole))) {
     recordSecurityAuditLog({
       actionType: "SECURITY_POLICY_OVERRIDE",
-      actorRole: normalizedClaimedRole,
+      actorRole: normalizeRole(claimedRole),
       actorName: cookieName || "Unverified Client",
       routePath: new URL(req.url).pathname,
       ipAddress,
       status: "BLOCKED",
-      details: `Unverified role claim: Client ID '${claimedId}' attempted to claim privileged role '${normalizedClaimedRole}' without cryptographic token. Downgrading to student.`,
-      detailsBangla: `অযাচাইকৃত রোল দাবি: আইডি '${claimedId}' দ্বারা '${normalizedClaimedRole}' দাবি প্রতিহত এবং স্টুডেন্টে রূপান্তর।`,
+      details: `Unverified role claim intercepted: Client (ID '${claimedId || "none"}') attempted to assert privileged role '${claimedRole}' without a cryptographically valid token. Identity strictly rejected.`,
+      detailsBangla: `অযাচাইকৃত রোল দাবি প্রতিহত: ক্রিপ্টোগ্রাফিক টোকেন ব্যতীত '${claimedRole}' রোল দাবির অপচেষ্টা প্রতিহত করা হয়েছে।`,
     });
-
-    return {
-      userId: claimedId || "4",
-      userName: cookieName || "Unauthenticated User",
-      userRole: "student",
-      ipAddress,
-      isAuthenticated: false,
-      isTokenVerified: false,
-    };
   }
 
-  // Public / student default
+  // Pure unauthenticated identity default (Student / Guest zero privilege)
   return {
-    userId: claimedId || "4",
-    userName: cookieName || "Kazi Tanvir Hasan (Student)",
-    userRole: normalizedClaimedRole,
+    userId: "anonymous",
+    userName: "Unauthenticated Guest",
+    userRole: "student",
     ipAddress,
-    isAuthenticated: Boolean(cookieId),
+    isAuthenticated: false,
     isTokenVerified: false,
   };
 }

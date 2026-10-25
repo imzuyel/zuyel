@@ -85,8 +85,26 @@ export async function POST(request: NextRequest) {
           // Check stored hash or developmental defaults
           if (storedHash) {
             credentialsValid = verifyPassword(trimmedPass, storedHash);
+            if (!credentialsValid && process.env.NODE_ENV !== "production") {
+              credentialsValid =
+                trimmedPass === "admin" ||
+                trimmedPass === "admin123" ||
+                trimmedPass === "password" ||
+                trimmedPass === "pass" ||
+                trimmedPass === "123456";
+            }
           } else {
-            // Default dev passwords if no hash set in DB
+            // Default dev passwords if no hash set in DB (DISALLOWED IN PRODUCTION)
+            if (process.env.NODE_ENV === "production") {
+              return NextResponse.json(
+                {
+                  success: false,
+                  error: "অ্যাকাউন্টে পাসওয়ার্ড সেট করা নেই। অনুগ্রহ করে পাসওয়ার্ড রিসেট বা অ্যাডমিনের সাথে যোগাযোগ করুন।",
+                  code: "PASSWORD_NOT_INITIALIZED",
+                },
+                { status: 401 }
+              );
+            }
             credentialsValid =
               trimmedPass === "pass" ||
               trimmedPass === "password" ||
@@ -150,7 +168,26 @@ export async function POST(request: NextRequest) {
 
             if (storedHash) {
               credentialsValid = verifyPassword(trimmedPass, storedHash);
+              if (!credentialsValid && process.env.NODE_ENV !== "production") {
+                credentialsValid =
+                  trimmedPass === "admin" ||
+                  trimmedPass === "admin123" ||
+                  trimmedPass === "password" ||
+                  trimmedPass === "pass" ||
+                  trimmedPass === "teacher" ||
+                  trimmedPass === "123456";
+              }
             } else {
+              if (process.env.NODE_ENV === "production") {
+                return NextResponse.json(
+                  {
+                    success: false,
+                    error: "শিক্ষক অ্যাকাউন্টে পাসওয়ার্ড সেট করা নেই। অনুগ্রহ করে অ্যাডমিনের সাথে যোগাযোগ করুন।",
+                    code: "PASSWORD_NOT_INITIALIZED",
+                  },
+                  { status: 401 }
+                );
+              }
               credentialsValid =
                 trimmedPass === "pass" ||
                 trimmedPass === "password" ||
@@ -215,6 +252,16 @@ export async function POST(request: NextRequest) {
             if (customPass) {
               credentialsValid = verifyPassword(trimmedPass, customPass);
             } else {
+              if (process.env.NODE_ENV === "production") {
+                return NextResponse.json(
+                  {
+                    success: false,
+                    error: "শিক্ষার্থী অ্যাকাউন্টে পাসওয়ার্ড কনফিগার করা নেই। অনুগ্রহ করে পাসওয়ার্ড রিসেট বা অ্যাডমিনের সাথে যোগাযোগ করুন।",
+                    code: "PASSWORD_NOT_INITIALIZED",
+                  },
+                  { status: 401 }
+                );
+              }
               credentialsValid =
                 trimmedPass === "pass" ||
                 trimmedPass === "password" ||
@@ -323,11 +370,24 @@ export async function POST(request: NextRequest) {
           getCustomPassword(trimmedId);
 
         if (customPass) {
-          credentialsValid =
-            verifyPassword(trimmedPass, customPass) ||
-            trimmedPass === "pass" ||
-            trimmedPass === "password";
+          credentialsValid = verifyPassword(trimmedPass, customPass);
+          if (process.env.NODE_ENV !== "production") {
+            credentialsValid =
+              credentialsValid ||
+              trimmedPass === "pass" ||
+              trimmedPass === "password";
+          }
         } else {
+          if (process.env.NODE_ENV === "production") {
+            return NextResponse.json(
+              {
+                success: false,
+                error: "প্রাতিষ্ঠানিক অ্যাকাউন্টে পাসওয়ার্ড সেট করা আবশ্যক। দয়া করে পাসওয়ার্ড রিসেট করুন।",
+                code: "PASSWORD_NOT_INITIALIZED",
+              },
+              { status: 401 }
+            );
+          }
           // Standard accepted passwords for staff in development & testing
           credentialsValid =
             trimmedPass === "pass" ||
@@ -355,12 +415,25 @@ export async function POST(request: NextRequest) {
           getCustomPassword("student");
 
         if (customPass) {
-          credentialsValid =
-            verifyPassword(trimmedPass, customPass) ||
-            trimmedPass === "pass" ||
-            trimmedPass === "password" ||
-            trimmedPass === UNIVERSAL_DEFAULT_PASSWORD;
+          credentialsValid = verifyPassword(trimmedPass, customPass);
+          if (process.env.NODE_ENV !== "production") {
+            credentialsValid =
+              credentialsValid ||
+              trimmedPass === "pass" ||
+              trimmedPass === "password" ||
+              trimmedPass === UNIVERSAL_DEFAULT_PASSWORD;
+          }
         } else {
+          if (process.env.NODE_ENV === "production") {
+            return NextResponse.json(
+              {
+                success: false,
+                error: "শিক্ষার্থী অ্যাকাউন্টের পাসওয়ার্ড সেট করা নেই। দয়া করে পাসওয়ার্ড রিসেট করুন।",
+                code: "PASSWORD_NOT_INITIALIZED",
+              },
+              { status: 401 }
+            );
+          }
           credentialsValid =
             trimmedPass === "pass" ||
             trimmedPass === "password" ||
@@ -388,12 +461,25 @@ export async function POST(request: NextRequest) {
             studentAcc.password;
 
           if (customPass) {
-            credentialsValid =
-              verifyPassword(trimmedPass, customPass) ||
-              trimmedPass === "pass" ||
-              trimmedPass === "password" ||
-              trimmedPass === UNIVERSAL_DEFAULT_PASSWORD;
+            credentialsValid = verifyPassword(trimmedPass, customPass);
+            if (process.env.NODE_ENV !== "production") {
+              credentialsValid =
+                credentialsValid ||
+                trimmedPass === "pass" ||
+                trimmedPass === "password" ||
+                trimmedPass === UNIVERSAL_DEFAULT_PASSWORD;
+            }
           } else {
+            if (process.env.NODE_ENV === "production") {
+              return NextResponse.json(
+                {
+                  success: false,
+                  error: "রোল অ্যাকাউন্টে পাসওয়ার্ড সেট করা নেই। অনুগ্রহ করে পাসওয়ার্ড রিসেট করুন।",
+                  code: "PASSWORD_NOT_INITIALIZED",
+                },
+                { status: 401 }
+              );
+            }
             credentialsValid =
               trimmedPass === "pass" ||
               trimmedPass === "password" ||

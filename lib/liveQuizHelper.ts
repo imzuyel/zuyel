@@ -315,27 +315,42 @@ export function getSessionQuestions(quizId: string): LiveQuestionSnapshot[] {
       let correctAnswer: any = null;
 
       if (type === "mcq_single" || type === "mcq_multiple" || type === "image_choice" || type === "poll") {
-        options = snap.options || [];
-        correctAnswer = snap.correctIndex !== undefined ? snap.correctIndex : snap.correctAnswers;
-      } else if (type === "true_false") {
+        options = snap.options || snap.questionData?.options || [];
+        correctAnswer = snap.correctIndex !== undefined 
+          ? snap.correctIndex 
+          : snap.questionData?.correctIndex !== undefined 
+          ? snap.questionData.correctIndex 
+          : (snap.correctAnswers ?? snap.questionData?.correctAnswers ?? snap.correctAnswer ?? snap.questionData?.correctAnswer);
+      } else if (type === "true_false" || type.includes("true") || type.includes("tf")) {
         options = ["সত্য (True)", "মিথ্যা (False)"];
-        correctAnswer = snap.correctAnswer;
-      } else if (type === "matching") {
-        options = snap.pairs?.map((p: any) => `${p.left} ➔ ${p.right}`) || [];
-        correctAnswer = snap.pairs;
-      } else if (type === "ordering") {
-        options = snap.items || [];
-        correctAnswer = snap.correctOrder || snap.items;
+        correctAnswer = snap.correctAnswer !== undefined ? snap.correctAnswer : snap.questionData?.correctAnswer;
+      } else if (type === "matching" || type.includes("match")) {
+        const pairs = snap.pairs || snap.matchingPairs || snap.questionData?.pairs || snap.questionData?.matchingPairs || [];
+        options = pairs.map((p: any) => `${p.left} ➔ ${p.right}`);
+        correctAnswer = pairs;
+      } else if (type === "ordering" || type === "reorder" || type.includes("order")) {
+        const items = snap.items || snap.options || snap.questionData?.items || snap.questionData?.options || [];
+        options = items;
+        correctAnswer = snap.correctOrder || snap.items || snap.options;
+      } else if (type === "fill_blank" || type === "fill_blanks" || type.includes("blank")) {
+        options = snap.acceptedAnswers || snap.options || snap.questionData?.acceptedAnswers || [];
+        correctAnswer = snap.correctAnswer || (options && options[0]) || "";
       } else {
-        options = [];
+        options = snap.options || [];
         correctAnswer = snap.correctAnswer || snap.answer;
       }
+
+      const pairs = snap.pairs || snap.matchingPairs || snap.questionData?.pairs || snap.questionData?.matchingPairs;
+      const orderList = snap.correctOrder || snap.items || snap.questionData?.items || snap.questionData?.correctOrder;
 
       return {
         id: String(qq.id),
         questionText: snap.questionText || (qq as any).questionText || "টেকনিক্যাল কুইজ প্রশ্ন",
         type,
+        questionType: type,
         options: options.length > 0 ? options : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+        matchingPairs: pairs,
+        correctOrder: orderList,
         questionData: snap,
         timeLimit: qq.timeLimit || 30,
         correctAnswer: correctAnswer ?? 0
@@ -349,8 +364,11 @@ export function getSessionQuestions(quizId: string): LiveQuestionSnapshot[] {
     return (dbQuiz as any).questions.map((q: any, idx: number) => ({
       id: String(q.id || `q-${idx}`),
       questionText: q.question || q.questionText || "টেকনিক্যাল প্রশ্ন",
-      type: q.type || "mcq_single",
+      type: q.type || q.questionType || "mcq_single",
+      questionType: q.type || q.questionType || "mcq_single",
       options: q.options && q.options.length > 0 ? q.options : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+      matchingPairs: q.matchingPairs || q.pairs || q.questionData?.pairs,
+      correctOrder: q.correctOrder || q.items || q.questionData?.items,
       questionData: q,
       timeLimit: q.timeLimit || 30,
       correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0
@@ -362,11 +380,15 @@ export function getSessionQuestions(quizId: string): LiveQuestionSnapshot[] {
     const fallbackQuestions = institutionalDb.quizQuestions.slice(0, 10);
     return fallbackQuestions.map((qq) => {
       const snap = qq.questionSnapshot || {};
+      const fType = qq.questionType || "mcq_single";
       return {
         id: String(qq.id),
         questionText: snap.questionText || "টেকনিক্যাল প্রশ্ন",
-        type: qq.questionType || "mcq_single",
+        type: fType,
+        questionType: fType,
         options: snap.options || ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+        matchingPairs: snap.pairs || snap.matchingPairs,
+        correctOrder: snap.correctOrder || snap.items,
         questionData: snap,
         timeLimit: qq.timeLimit || 30,
         correctAnswer: snap.correctIndex ?? 0

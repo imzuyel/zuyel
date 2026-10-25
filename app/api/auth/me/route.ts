@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PRESET_USERS } from "@/lib/presetUsers";
-import { normalizeRole } from "@/lib/rbac";
+import { extractRequestIdentity } from "@/lib/serverAuthGuard";
 
 export async function GET(request: NextRequest) {
-  const headerRole = request.headers.get("x-user-role");
-  const cookieRole = request.cookies.get("pgtsc_user_role")?.value;
-  const cookieId = request.cookies.get("pgtsc_user_id")?.value;
+  const identity = extractRequestIdentity(request);
 
-  const rawRole = (headerRole || cookieRole || "student").toLowerCase().trim();
-  const normalizedRole = normalizeRole(rawRole);
+  if (!identity.isAuthenticated || !identity.isTokenVerified) {
+    return NextResponse.json({
+      authenticated: false,
+      role: "student",
+      userId: null,
+      user: null,
+    });
+  }
 
-  const user = PRESET_USERS[normalizedRole] || PRESET_USERS.student;
+  const user = PRESET_USERS[identity.userRole] || {
+    id: identity.userId,
+    role: identity.userRole,
+    fullName: identity.userName,
+    email: identity.userEmail || "",
+  };
 
   return NextResponse.json({
-    authenticated: normalizedRole !== "student",
-    role: normalizedRole,
-    userId: cookieId || user.id,
+    authenticated: true,
+    role: identity.userRole,
+    userId: identity.userId,
     user,
   });
 }

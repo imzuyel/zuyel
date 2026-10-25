@@ -265,8 +265,14 @@ export function InternationalStoryLessonRenderer({
       )}
 
       {/* 2. MAIN STORY PARSED CONTENT (International EdTech Layout) */}
-      <div className="space-y-4">
-        {blocks.map((block, idx) => {
+      {/<\/?[a-z][\s\S]*>/i.test(markdown) ? (
+        <div
+          className="prose dark:prose-invert max-w-none prose-headings:font-black prose-headings:tracking-tight prose-h1:text-xl sm:prose-h1:2xl prose-h2:text-lg sm:prose-h2:xl prose-p:text-slate-700 dark:prose-p:text-slate-300 prose-p:leading-relaxed prose-li:text-slate-700 dark:prose-li:text-slate-300 prose-mark:bg-amber-300/80 dark:prose-mark:bg-amber-400/30 dark:prose-mark:text-amber-100 prose-mark:px-1.5 prose-mark:py-0.5 prose-mark:rounded-md text-sm sm:text-base leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: markdown }}
+        />
+      ) : (
+        <div className="space-y-4">
+          {blocks.map((block, idx) => {
           // Heading 1
           if (block.type === "h1") {
             return (
@@ -465,6 +471,7 @@ export function InternationalStoryLessonRenderer({
           );
         })}
       </div>
+      )}
 
       {/* 3. KEY TAKEAWAYS (🎯 মূল শিখনফল Checklist Box) */}
       {keyTakeaways && keyTakeaways.length > 0 && (

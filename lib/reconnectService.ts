@@ -1,4 +1,4 @@
-import { institutionalDb, LiveParticipant, LiveSession, LiveQuizAuditLog } from "./database";
+import { institutionalDb, LiveQuizAuditLog } from "./database";
 import { getSessionQuestions, computeQuizSequenceState } from "./liveQuizHelper";
 import { TeamService } from "./teamService";
 
@@ -11,6 +11,12 @@ export const RECONNECT_SETTINGS = {
 
 // In-memory sliding window rate limiter
 const requestLogs = new Map<string, number[]>();
+
+// A presence sweep walks every participant and session. Heartbeat, realtime
+// and presence polling can all trigger it, so enforce a single global cadence
+// instead of one full sweep per request.
+const PRESENCE_SWEEP_INTERVAL_MS = 2000;
+let lastPresenceSweepAt = 0;
 
 export const SecurityService = {
   logAudit(
@@ -38,6 +44,18 @@ export const SecurityService = {
 
   isRateLimited(key: string, limit = 60, windowMs = 60000): boolean {
     const now = Date.now();
+
+    // Bound memory: prune keys that have been quiet for longer than the
+    // window before the map can grow with every player that ever connected.
+    if (requestLogs.size > 10000) {
+      for (const [logKey, logTimestamps] of requestLogs) {
+        const last = logTimestamps[logTimestamps.length - 1] || 0;
+        if (now - last >= windowMs) {
+          requestLogs.delete(logKey);
+        }
+      }
+    }
+
     const timestamps = requestLogs.get(key) || [];
     const validTimestamps = timestamps.filter(t => now - t < windowMs);
     validTimestamps.push(now);
@@ -84,9 +102,17 @@ export const PresenceService = {
     return false;
   },
 
-  processPresenceTimeouts() {
+  processPresenceTimeouts(force = false) {
     const now = Date.now();
-    
+
+    // Timeout resolution only needs second-level accuracy (the reconnect
+    // grace period is 25s). Skipping redundant sweeps avoids O(n) work per
+    // polling request at classroom scale.
+    if (!force && now - lastPresenceSweepAt < PRESENCE_SWEEP_INTERVAL_MS) {
+      return;
+    }
+    lastPresenceSweepAt = now;
+
     // Process participants
     for (const p of institutionalDb.liveParticipants) {
       if (p.status !== "JOINED") continue;

@@ -7,3 +7,4 @@ export * from "./Badge";
 export * from "./DataTable";
 export * from "./Toast";
 export * from "./SkeletonScreens";
+export * from "./DeleteConfirmationModal";

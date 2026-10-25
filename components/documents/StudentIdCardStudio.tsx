@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import {
   CreditCard,
   Palette,
@@ -218,11 +219,17 @@ export default function StudentIdCardStudio() {
                           : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 dark:hover:bg-slate-800/50"
                       }`}
                     >
-                      <img
-                        src={s.photoUrl}
-                        alt={s.name}
-                        className="w-8 h-8 rounded-full object-cover border"
-                      />
+                      <div className="relative w-8 h-8 rounded-full overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0">
+                        <Image
+                          src={s.photoUrl || "/placeholder-avatar.png"}
+                          alt={s.name}
+                          width={32}
+                          height={32}
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                          unoptimized={Boolean(s.photoUrl?.startsWith("data:") || s.photoUrl?.startsWith("blob:"))}
+                        />
+                      </div>
                       <div className="pr-1">
                         <span className="font-bold text-xs text-slate-900 dark:text-white block truncate max-w-[120px]">
                           {s.nameBangla || s.name}

@@ -24,6 +24,14 @@ export interface QuizAttemptRecord {
   isGuest?: boolean;
 }
 
+export interface StudentDoubtReply {
+  id: string;
+  sender: "student" | "teacher";
+  senderName: string;
+  text: string;
+  timestamp: string;
+}
+
 export interface StudentDoubtItem {
   id: string;
   lessonId: string;
@@ -37,6 +45,10 @@ export interface StudentDoubtItem {
   answeredBy?: string;
   answeredAt?: string;
   createdAt: string;
+  contextType?: "lesson" | "chapter" | "quiz_question";
+  contextTitle?: string;
+  questionNumber?: number | string;
+  replies?: StudentDoubtReply[];
 }
 
 export interface WeakTopicItem {
@@ -488,11 +500,11 @@ export function loginStudentAccount(
     return matchStudentClass(s.classLevel, targetNormClass);
   });
 
-  // If student record not found in either institutional DB or registered list:
-  if (!dbStudent && !regFound && !/^\d+$/.test(cleanRoll)) {
+  // Strict Student Login: Ensure login is strictly restricted to valid students existing in the database
+  if (!dbStudent && !regFound) {
     return {
       success: false,
-      message: "শিক্ষার্থীর রেকর্ড পাওয়া যায়নি। রোল নম্বর ও শ্রেণি সঠিকভাবে যাচাই করুন।",
+      message: "শিক্ষার্থীর রেকর্ড পাওয়া যায়নি। প্রতিষ্ঠান ডাটাবেসে আপনার রোল ও শ্রেণি সঠিকভাবে নথিভুক্ত রয়েছে কি না যাচাই করুন।",
     };
   }
 
@@ -892,17 +904,57 @@ export function saveStudentDoubt(doubt: Omit<StudentDoubtItem, "id" | "status" |
 
 export function answerStudentDoubt(id: string, answerText: string, teacherName: string): StudentDoubtItem[] {
   const doubts = getStudentDoubts();
-  const updated = doubts.map((d) =>
-    d.id === id
-      ? {
-          ...d,
-          status: "answered" as const,
-          answer: answerText,
-          answeredBy: teacherName || "PTSC বিষয়ভিত্তিক শিক্ষক",
-          answeredAt: new Date().toISOString().split("T")[0],
-        }
-      : d
-  );
+  const updated = doubts.map((d) => {
+    if (d.id === id) {
+      const existingReplies = d.replies || [];
+      const teacherReply: StudentDoubtReply = {
+        id: `reply-${Date.now()}`,
+        sender: "teacher",
+        senderName: teacherName || "PTSC বিষয়ভিত্তিক শিক্ষক",
+        text: answerText,
+        timestamp: new Date().toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" }),
+      };
+      return {
+        ...d,
+        status: "answered" as const,
+        answer: answerText,
+        answeredBy: teacherName || "PTSC বিষয়ভিত্তিক শিক্ষক",
+        answeredAt: new Date().toISOString().split("T")[0],
+        replies: [...existingReplies, teacherReply],
+      };
+    }
+    return d;
+  });
+  if (typeof window !== "undefined") {
+    localStorage.setItem("ptsc_student_doubts", JSON.stringify(updated));
+  }
+  return updated;
+}
+
+export function addDoubtReply(
+  id: string,
+  reply: { sender: "student" | "teacher"; senderName: string; text: string }
+): StudentDoubtItem[] {
+  const doubts = getStudentDoubts();
+  const updated = doubts.map((d) => {
+    if (d.id === id) {
+      const existingReplies = d.replies || [];
+      const newReply: StudentDoubtReply = {
+        id: `reply-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ...reply,
+        timestamp: new Date().toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" }),
+      };
+      return {
+        ...d,
+        status: reply.sender === "teacher" ? ("answered" as const) : d.status,
+        answer: reply.sender === "teacher" ? reply.text : d.answer,
+        answeredBy: reply.sender === "teacher" ? reply.senderName : d.answeredBy,
+        answeredAt: reply.sender === "teacher" ? new Date().toISOString().split("T")[0] : d.answeredAt,
+        replies: [...existingReplies, newReply],
+      };
+    }
+    return d;
+  });
   if (typeof window !== "undefined") {
     localStorage.setItem("ptsc_student_doubts", JSON.stringify(updated));
   }
@@ -1995,7 +2047,7 @@ export function syncGuestProgressToStudent(roll: string): { mergedCount: number;
 /**
  * Saves a completed item ID for a student to ensure permanent unlock across sessions & page navigations
  */
-export function saveStudentCompletedItemId(roll: string | undefined, itemId: number): void {
+export function saveStudentCompletedItemId(roll: string | undefined, itemId: number, stars?: number): void {
   const activeStudent = getActiveStudentAccount();
   const cleanRoll = (roll || activeStudent?.rollNumber || "").trim();
   if (typeof window === "undefined" || !cleanRoll || !itemId) return;
@@ -2006,8 +2058,45 @@ export function saveStudentCompletedItemId(roll: string | undefined, itemId: num
       prevCompleted.push(itemId);
       localStorage.setItem(studentCompletedKey, JSON.stringify(prevCompleted));
     }
+
+    if (stars && stars > 0) {
+      saveStudentItemStars(cleanRoll, itemId, stars);
+    }
   } catch (e) {
     console.error("Failed to save student completed item ID:", e);
+  }
+}
+
+/**
+ * Saves earned 1-5 stars for a specific learning item
+ */
+export function saveStudentItemStars(roll: string | undefined, itemId: number, stars: number): void {
+  const activeStudent = getActiveStudentAccount();
+  const cleanRoll = (roll || activeStudent?.rollNumber || "").trim();
+  if (typeof window === "undefined" || !cleanRoll || !itemId) return;
+  try {
+    const key = `ptsc_student_item_stars_${cleanRoll}`;
+    const currentStarsMap: Record<number, number> = JSON.parse(localStorage.getItem(key) || "{}");
+    currentStarsMap[itemId] = Math.max(currentStarsMap[itemId] || 0, Math.min(5, Math.max(1, stars)));
+    localStorage.setItem(key, JSON.stringify(currentStarsMap));
+  } catch (e) {
+    console.error("Failed to save student item stars:", e);
+  }
+}
+
+/**
+ * Retrieves map of itemId -> stars for a student
+ */
+export function getStudentItemStars(roll?: string): Record<number, number> {
+  const activeStudent = getActiveStudentAccount();
+  const cleanRoll = (roll || activeStudent?.rollNumber || "").trim();
+  if (typeof window === "undefined" || !cleanRoll) return {};
+  try {
+    const key = `ptsc_student_item_stars_${cleanRoll}`;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
   }
 }
 
@@ -2026,3 +2115,4 @@ export function getStudentCompletedItemIds(roll?: string): number[] {
     return [];
   }
 }
+

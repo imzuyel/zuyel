@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, Quiz, QuizQuestion } from "@/lib/database";
 import { validateSubjectEligibility, getTeacherSubjectAssignments } from "@/lib/subjectEngine";
 import { v4 as uuidv4 } from "uuid";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { extractRequestIdentity, verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { isAuthorizedStaff } from "@/lib/rbac";
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,7 +16,17 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status");
     const creatorId = searchParams.get("creatorId");
 
+    const identity = extractRequestIdentity(req);
+    const isStaff = identity.isAuthenticated && isAuthorizedStaff(identity.userRole);
+
     let filteredQuizzes = [...institutionalDb.quizzes];
+
+    // Non-staff callers can ONLY see published quizzes
+    if (!isStaff) {
+      filteredQuizzes = filteredQuizzes.filter(q => q.status === "published");
+    } else if (status) {
+      filteredQuizzes = filteredQuizzes.filter(q => q.status === status);
+    }
 
     if (academicYearId) {
       filteredQuizzes = filteredQuizzes.filter(q => q.academicYearId === Number(academicYearId));
@@ -82,7 +93,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const effectiveCreatorId = Number(creatorId) || 1;
+    const effectiveCreatorId = Number(auth.identity.userId) || 1;
 
     // Server-side context validation for Academic quizzes
     if (mode === "academic") {

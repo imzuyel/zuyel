@@ -382,8 +382,10 @@ export default function LiveQuizPage() {
             <div className="grid grid-cols-1 gap-3">
               <AnimatePresence mode="popLayout">
                 {currentQuestion.options?.map((option: string, idx: number) => {
-                  const isSelected = localSelected === idx || selectedOption === idx;
-                  const isConfirmed = playerAnswered && (selectedOption === idx || selectedOption === option);
+                  const isSelected = (localSelected !== null && String(localSelected) === String(idx)) || 
+                    (selectedOption !== "" && selectedOption !== null && selectedOption !== undefined && String(selectedOption) === String(idx));
+                  const isConfirmed = playerAnswered && 
+                    (String(selectedOption) === String(idx) || String(selectedOption).trim().toLowerCase() === String(option).trim().toLowerCase());
                   
                   return (
                     <motion.button

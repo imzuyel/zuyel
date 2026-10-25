@@ -3,6 +3,36 @@ import { institutionalDb, LiveAnswer, LiveParticipant } from "@/lib/database";
 import { QuizSecurityEngine } from "@/lib/quizSecurityEngine";
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
 
+// ==========================================
+// RATE LIMITING & SUBMISSION THROTTLING
+// ==========================================
+interface RateLimitEntry {
+  lastSubmittedAt: number;
+  countInWindow: number;
+  windowStart: number;
+}
+
+const submissionRateLimits = new Map<string, RateLimitEntry>();
+const MIN_SUBMISSION_INTERVAL_MS = 1000; // Minimum 1 second between consecutive submissions per player
+const RATE_LIMIT_WINDOW_MS = 5000; // 5-second window
+const MAX_SUBMISSIONS_PER_WINDOW = 4; // Max 4 submissions within 5 seconds
+
+// Periodic cleanup to avoid memory leakage in long-running Node processes
+let lastCleanupTime = Date.now();
+const CLEANUP_INTERVAL_MS = 3 * 60 * 1000; // Every 3 minutes
+
+function cleanupStaleLimits() {
+  const now = Date.now();
+  if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
+    lastCleanupTime = now;
+    for (const [key, entry] of submissionRateLimits.entries()) {
+      if (now - entry.lastSubmittedAt > 60 * 1000) {
+        submissionRateLimits.delete(key);
+      }
+    }
+  }
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -34,12 +64,126 @@ export async function POST(
       );
     }
 
-    // 1. ENSURE COLLECTIONS EXIST IN INSTITUTIONAL DB
+    // -------------------------------------------------------------
+    // RATE LIMITING & ANTI-SPAM PROTECTION
+    // -------------------------------------------------------------
+    cleanupStaleLimits();
+    const now = Date.now();
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+    const rateLimitKey = `${sessionId}:${playerId}:${clientIp}`;
+
+    const limitData = submissionRateLimits.get(rateLimitKey);
+
+    if (limitData) {
+      // 1. Minimum interval throttle check (reject rapid-fire script hammering)
+      const elapsedSinceLast = now - limitData.lastSubmittedAt;
+      if (elapsedSinceLast < MIN_SUBMISSION_INTERVAL_MS) {
+        const retryAfter = Math.ceil((MIN_SUBMISSION_INTERVAL_MS - elapsedSinceLast) / 1000);
+        return NextResponse.json(
+          {
+            success: false,
+            error: "খুব দ্রুত উত্তর জমা দেওয়া হচ্ছে। অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করুন। (Too many rapid submissions)",
+            retryAfterMs: MIN_SUBMISSION_INTERVAL_MS - elapsedSinceLast,
+          },
+          {
+            status: 429,
+            headers: { "Retry-After": String(retryAfter || 1) },
+          }
+        );
+      }
+
+      // 2. Sliding window burst limit check
+      if (now - limitData.windowStart < RATE_LIMIT_WINDOW_MS) {
+        if (limitData.countInWindow >= MAX_SUBMISSIONS_PER_WINDOW) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "জমা দেওয়ার সর্বোচ্চ সীমা অতিক্রম করেছে। অনুগ্রহ করে কয়েক সেকেন্ড অপেক্ষা করুন। (Rate limit exceeded)",
+              retryAfterMs: RATE_LIMIT_WINDOW_MS - (now - limitData.windowStart),
+            },
+            {
+              status: 429,
+              headers: { "Retry-After": "2" },
+            }
+          );
+        }
+        limitData.countInWindow += 1;
+      } else {
+        limitData.windowStart = now;
+        limitData.countInWindow = 1;
+      }
+      limitData.lastSubmittedAt = now;
+    } else {
+      submissionRateLimits.set(rateLimitKey, {
+        lastSubmittedAt: now,
+        countInWindow: 1,
+        windowStart: now,
+      });
+    }
+
+    // 3. Database-level timestamp check via Prisma (if connected)
+    if (isPrismaAvailable() && prisma) {
+      try {
+        const numericSessionId = parseInt(sessionId, 10);
+        if (!isNaN(numericSessionId)) {
+          const lastDbSubmission = await prisma.liveAnswer.findFirst({
+            where: {
+              sessionId: numericSessionId,
+              participantId: String(playerId),
+            },
+            orderBy: { createdAt: "desc" },
+            select: { createdAt: true },
+          });
+
+          if (lastDbSubmission) {
+            const timeDiff = now - new Date(lastDbSubmission.createdAt).getTime();
+            if (timeDiff < MIN_SUBMISSION_INTERVAL_MS) {
+              return NextResponse.json(
+                {
+                  success: false,
+                  error: "পূর্ববর্তী উত্তর প্রক্রিয়াধীন রয়েছে। অনুগ্রহ করে ১ সেকেন্ড অপেক্ষা করুন।",
+                  retryAfterMs: MIN_SUBMISSION_INTERVAL_MS - timeDiff,
+                },
+                {
+                  status: 429,
+                  headers: { "Retry-After": "1" },
+                }
+              );
+            }
+          }
+        }
+      } catch (dbErr) {
+        // Non-blocking fallback to in-memory enforcement
+      }
+    }
+
+    // 4. Duplicate Question Submission Prevention
     institutionalDb.liveParticipants = institutionalDb.liveParticipants || [];
     institutionalDb.liveAnswers = institutionalDb.liveAnswers || [];
     institutionalDb.liveSessions = institutionalDb.liveSessions || [];
 
-    // 2. FIND OR CREATE PARTICIPANT (AI Studio Preview Safe)
+    const existingAnswer = institutionalDb.liveAnswers.find(
+      (a) => a.sessionId === sessionId && a.playerId === playerId && a.questionId === questionId
+    );
+    if (existingAnswer) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "আপনি ইতিমধ্যে এই প্রশ্নের উত্তর জমা দিয়েছেন। (Answer already submitted for this question)",
+          isDuplicate: true,
+          previousPoints: existingAnswer.totalPoints,
+        },
+        { status: 409 }
+      );
+    }
+
+    // -------------------------------------------------------------
+    // PARTICIPANT & ANSWER EVALUATION
+    // -------------------------------------------------------------
+    // Find or create participant
     let participant = institutionalDb.liveParticipants.find(
       (p) => p.sessionId === sessionId && p.id === playerId
     );
@@ -66,26 +210,31 @@ export async function POST(
       institutionalDb.liveParticipants.push(participant);
     }
 
-    // 3. DETERMINE THE CORRECT ANSWER
+    // Determine the correct answer
+    // Determine the correct answer, question type, and snapshot
     let correctAnswer: any = body.correctAnswer;
+    let questionType: string | undefined = body.questionType;
+    let questionSnapshot: any = undefined;
 
-    if (correctAnswer === undefined) {
-      // Find question from active session or question bank
-      const session = institutionalDb.liveSessions.find((s) => s.id === sessionId);
-      const questionItem = session?.questions?.find((q: any) => q.id === questionId);
+    const session = institutionalDb.liveSessions.find((s) => s.id === sessionId);
+    const questionItem = session?.questions?.find((q: any) => q.id === questionId);
 
-      if (questionItem) {
+    if (questionItem) {
+      if (correctAnswer === undefined) {
         correctAnswer = questionItem.correctAnswer ?? questionItem.correctOptionIndex ?? 0;
-      } else {
-        // Fallback default for preview simulation
-        correctAnswer = body.answerPayload !== undefined ? body.answerPayload : 0;
       }
+      questionType = questionType || questionItem.questionType || (questionItem as any).type;
+      questionSnapshot = questionItem;
+    } else if (correctAnswer === undefined) {
+      correctAnswer = body.answerPayload !== undefined ? body.answerPayload : 0;
     }
 
-    // 4. RUN SERVER-AUTHORITATIVE ANTI-CHEAT & EVALUATION ENGINE
+    // Run Server-Authoritative Anti-Cheat & Evaluation Engine
     const evaluation = QuizSecurityEngine.evaluateAnswer({
       playerId,
       questionId,
+      questionType,
+      questionSnapshot,
       answerPayload,
       correctAnswer,
       responseTimeMs: Number(responseTimeMs) || 1000,
@@ -94,7 +243,7 @@ export async function POST(
       tabSwitchCount: Number(tabSwitchCount) || 0,
     });
 
-    // 5. UPDATE IN-MEMORY PARTICIPANT STATS
+    // Update in-memory participant stats
     const currentScore = participant.totalScore || 0;
     participant.totalScore = currentScore + evaluation.totalPoints;
     participant.currentStreak = evaluation.newStreak;
@@ -109,7 +258,7 @@ export async function POST(
     }
     participant.lastSeenAt = new Date().toISOString();
 
-    // 6. RECORD LIVE ANSWER
+    // Record Live Answer
     const newAnswerRecord: LiveAnswer = {
       id: `ans_${sessionId}_${playerId}_${questionId}_${Date.now()}`,
       sessionId,
@@ -141,7 +290,7 @@ export async function POST(
       p.rank = idx + 1;
     });
 
-    // 7. MYSQL PERSISTENCE VIA PRISMA (If operational)
+    // MySQL Persistence via Prisma (If operational)
     if (isPrismaAvailable() && prisma) {
       try {
         await prisma.liveAnswer.create({

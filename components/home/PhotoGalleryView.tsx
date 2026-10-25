@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import { useLanguage } from "@/context/LanguageContext";
 import {
   Image as ImageIcon,
@@ -130,19 +131,23 @@ export default function PhotoGalleryView() {
               onClick={() => openLightbox(idx)}
               className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-xs border border-slate-200/80 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-cyan-500/50 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
             >
-              <div className="relative overflow-hidden aspect-video bg-slate-800">
-                <img
+              <div className="relative overflow-hidden aspect-video bg-slate-800 rounded-t-3xl">
+                <Image
                   src={item.imageUrl}
-                  alt={item.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  alt={item.titleBangla || item.title || "ক্যাম্পাস ফটো"}
+                  fill
+                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                  loading="lazy"
+                  className="object-cover group-hover:scale-105 transition-transform duration-500"
+                  unoptimized={Boolean(item.imageUrl?.startsWith("data:") || item.imageUrl?.startsWith("blob:"))}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4 z-10">
                   <span className="text-white text-xs font-bold flex items-center gap-1.5">
                     <ZoomIn className="w-4 h-4 text-cyan-300" />
                     <span>বড় করে দেখুন</span>
                   </span>
                 </div>
-                <span className="absolute top-3 left-3 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-black/60 text-white backdrop-blur-md border border-white/20">
+                <span className="absolute top-3 left-3 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-black/60 text-white backdrop-blur-md border border-white/20 z-10">
                   {item.categoryBangla}
                 </span>
               </div>
@@ -192,11 +197,17 @@ export default function PhotoGalleryView() {
           </button>
 
           <div className="max-w-4xl w-full text-center space-y-4">
-            <img
-              src={filtered[lightboxIndex].imageUrl}
-              alt={filtered[lightboxIndex].title}
-              className="max-h-[75vh] mx-auto rounded-2xl shadow-2xl object-contain border border-white/15"
-            />
+            <div className="relative w-full max-h-[75vh] h-[65vh] flex items-center justify-center">
+              <Image
+                src={filtered[lightboxIndex].imageUrl}
+                alt={filtered[lightboxIndex].titleBangla || filtered[lightboxIndex].title || "গ্যালারি ছবি"}
+                fill
+                sizes="(max-width: 1200px) 90vw, 1200px"
+                priority
+                className="rounded-2xl shadow-2xl object-contain border border-white/15"
+                unoptimized={Boolean(filtered[lightboxIndex].imageUrl?.startsWith("data:") || filtered[lightboxIndex].imageUrl?.startsWith("blob:"))}
+              />
+            </div>
             <div className="text-white space-y-1">
               <h3 className="text-base sm:text-lg font-bold">
                 {filtered[lightboxIndex].titleBangla || filtered[lightboxIndex].title}

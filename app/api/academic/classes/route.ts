@@ -25,6 +25,16 @@ export async function GET(req: NextRequest) {
     if (isPrismaAvailable()) {
       try {
         const dbClasses = await prisma.academicClass.findMany({
+          select: {
+            id: true,
+            name: true,
+            nameBangla: true,
+            numericValue: true,
+            level: true,
+            hasTrade: true,
+            sections: true,
+            shifts: true,
+          },
           orderBy: { numericValue: "asc" },
         });
 
@@ -41,9 +51,22 @@ export async function GET(req: NextRequest) {
     }
 
     const snapshot = await getMasterDataSnapshot();
+    const safeClasses = (snapshot.classes || []).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      nameBangla: c.nameBangla,
+      numericValue: c.numericValue,
+      level: c.level || (c.numericValue >= 9 ? "technical" : "general"),
+      hasTrade: Boolean(c.hasTrade),
+      sections: Array.isArray(c.defaultSections) ? c.defaultSections.join(",") : c.sections || "A,B",
+      shifts: Array.isArray(c.defaultShifts) ? c.defaultShifts.join(",") : c.shifts || "FIRST_SHIFT",
+      totalSeats: c.totalSeats || 80,
+      status: c.status || "Active",
+    }));
+
     return NextResponse.json({
       success: true,
-      classes: snapshot.classes || [],
+      classes: safeClasses,
       source: "engine_store",
     });
   } catch (error: any) {

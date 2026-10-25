@@ -45,6 +45,10 @@ import {
   QuizTemplateTheme,
   QuizLayoutDirectionId,
 } from "@/lib/quizEngineTypes";
+import UniversalQuestionRenderer from "@/components/quiz/shared/UniversalQuestionRenderer";
+import UniversalQuizShowcaseEngine from "@/components/quiz/engine/UniversalQuizShowcaseEngine";
+import QuizTimer from "@/components/quiz/engine/QuizTimer";
+import { isOptionMatch } from "@/components/quiz/engine/archetypes/shared";
 
 interface AdvancedQuizArenaProps {
   quizQuestions: QuizQuestionItem[];
@@ -78,6 +82,9 @@ export function AdvancedQuizArena({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
 
+  // Custom payload for non-MCQ questions (Matching, Fill Blanks, True/False, Reorder)
+  const [universalAnswersMap, setUniversalAnswersMap] = useState<Record<string, any>>({});
+
   // Shuffled Options per question: questionId -> ShuffledQuizOption[]
   const [shuffledOptionsMap, setShuffledOptionsMap] = useState<
     Record<string, ShuffledQuizOption[]>
@@ -88,9 +95,8 @@ export function AdvancedQuizArena({
     Record<string, QuestionAttemptResult>
   >({});
 
-  // Per-question countdown timer (in seconds)
-  const [timeLeft, setTimeLeft] = useState<number>(timeLimitPerQuestion);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Question start timestamp for zero-lag duration calculation (no 1s re-render churn)
+  const questionStartTimeRef = useRef<number>(Date.now());
 
   // Final Quiz Result from backend or calculated
   const [finalResult, setFinalResult] = useState<any | null>(null);
@@ -118,8 +124,9 @@ export function AdvancedQuizArena({
       setTemplateOffset(newOffset);
       setShuffledOptionsMap(newShuffledMap);
       setQuestionResults({});
+      setUniversalAnswersMap({});
       setCurrentQuestionIndex(0);
-      setTimeLeft(timeLimitPerQuestion);
+      questionStartTimeRef.current = Date.now();
       setFinalResult(null);
       setTabSwitchedQuestionIds([]);
       setShowTabWarning(false);
@@ -190,34 +197,11 @@ export function AdvancedQuizArena({
     };
   }, [quizStarted, finalResult, currentQuestion]);
 
-  // Per-Question 30s Countdown Timer Effect
+  // Reset question start time when navigating or starting quiz
   useEffect(() => {
     if (!quizStarted || finalResult || !currentQuestion) return;
-
-    if (hasAnsweredCurrent) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      return;
-    }
-
-    setTimeLeft(timeLimitPerQuestion);
-
-    if (timerRef.current) clearInterval(timerRef.current);
-
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          handleQuestionTimeout(currentQuestion);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [quizStarted, finalResult, currentQuestionIndex, hasAnsweredCurrent, currentQuestion, timeLimitPerQuestion]);
+    questionStartTimeRef.current = Date.now();
+  }, [quizStarted, finalResult, currentQuestionIndex, currentQuestion]);
 
   // Triggered when 30s per-question timer runs out
   const handleQuestionTimeout = (q: QuizQuestionItem) => {
@@ -231,7 +215,7 @@ export function AdvancedQuizArena({
           selectedOptionId: null,
           selectedOriginalIndex: null,
           correctOptionId: correctOptId,
-          correctOriginalIndex: q.correctOptionIndex,
+          correctOriginalIndex: q.correctOptionIndex ?? 0,
           isCorrect: false,
           isTimeout: true,
           timeSpentSeconds: timeLimitPerQuestion,
@@ -245,18 +229,151 @@ export function AdvancedQuizArena({
   const handleSelectOption = (chosenOption: ShuffledQuizOption) => {
     if (!currentQuestion || hasAnsweredCurrent || isSubmitting) return;
 
-    if (timerRef.current) clearInterval(timerRef.current);
-
-    const timeSpent = Math.max(1, timeLimitPerQuestion - timeLeft);
+    const timeSpent = Math.max(
+      1,
+      Math.min(timeLimitPerQuestion, Math.round((Date.now() - questionStartTimeRef.current) / 1000))
+    );
     const correctOptId = `opt_${currentQuestion.correctOptionIndex}`;
-    const isCorrect = chosenOption.id === correctOptId;
+    const isCorrect =
+      isOptionMatch(
+        chosenOption.text,
+        chosenOption.originalIndex,
+        currentQuestion.correctAnswer ?? currentQuestion.correctOptionIndex
+      ) ||
+      chosenOption.id === correctOptId ||
+      chosenOption.originalIndex === currentQuestion.correctOptionIndex;
 
     const result: QuestionAttemptResult = {
       questionId: currentQuestion.id,
       selectedOptionId: chosenOption.id,
       selectedOriginalIndex: chosenOption.originalIndex,
       correctOptionId: correctOptId,
-      correctOriginalIndex: currentQuestion.correctOptionIndex,
+      correctOriginalIndex: currentQuestion.correctOptionIndex ?? 0,
+      isCorrect,
+      isTimeout: false,
+      timeSpentSeconds: timeSpent,
+      answeredAt: new Date().toISOString(),
+    };
+
+    setQuestionResults((prev) => ({
+      ...prev,
+      [currentQuestion.id]: result,
+    }));
+  };
+
+  // Handle Universal Answer for non-MCQ questions (Draft answer updater: TASK 1 Defer Evaluation)
+  const handleUniversalAnswer = (ans: any) => {
+    if (!currentQuestion || hasAnsweredCurrent || isSubmitting) return;
+
+    setUniversalAnswersMap((prev) => ({
+      ...prev,
+      [currentQuestion.id]: ans,
+    }));
+  };
+
+  // Explicit Confirmation & Evaluation Handler (TASK 1: Defer Evaluation)
+  const handleConfirmUniversalAnswer = (forcedAns?: any) => {
+    if (!currentQuestion || hasAnsweredCurrent || isSubmitting) return;
+
+    const ans = forcedAns !== undefined ? forcedAns : universalAnswersMap[currentQuestion.id];
+    if (ans === undefined || ans === null) return;
+
+    const timeSpent = Math.max(
+      1,
+      Math.min(timeLimitPerQuestion, Math.round((Date.now() - questionStartTimeRef.current) / 1000))
+    );
+    const qType = String(currentQuestion.questionType || (currentQuestion as any).type || "MCQ").toUpperCase();
+    let isCorrect = false;
+
+    if (qType === "TRUE_FALSE") {
+      const studentBool =
+        typeof ans === "boolean"
+          ? ans
+          : ans === 0 ||
+            String(ans).toLowerCase() === "true" ||
+            String(ans) === "সত্য" ||
+            String(ans).toLowerCase() === "t";
+      const exp =
+        currentQuestion.correctBoolean !== undefined
+          ? currentQuestion.correctBoolean
+          : typeof currentQuestion.correctAnswer === "boolean"
+          ? currentQuestion.correctAnswer
+          : String(currentQuestion.correctAnswer).toLowerCase() === "true" ||
+            String(currentQuestion.correctAnswer) === "সত্য" ||
+            currentQuestion.correctOptionIndex === 0;
+      isCorrect = studentBool === exp;
+    } else if (qType === "FILL_BLANKS") {
+      const bracketMatches = Array.from(
+        currentQuestion.questionText.matchAll(/\[(.*?)\]/g)
+      ).map((m) => m[1].trim());
+      const targetBlanks =
+        bracketMatches.length > 0
+          ? bracketMatches
+          : currentQuestion.acceptedAnswers && currentQuestion.acceptedAnswers.length > 0
+          ? currentQuestion.acceptedAnswers
+          : currentQuestion.correctAnswer
+          ? [currentQuestion.correctAnswer]
+          : currentQuestion.options || [];
+
+      if (typeof ans === "string") {
+        isCorrect = targetBlanks.some(
+          (t: string) => t.trim().toLowerCase() === ans.trim().toLowerCase()
+        );
+      } else if (typeof ans === "object" && ans !== null) {
+        isCorrect = targetBlanks.every((target: string, bIdx: number) => {
+          const val =
+            (ans as any)[bIdx] ??
+            (ans as any)[String(bIdx)] ??
+            (ans as any)[`blank_${bIdx}`] ??
+            (ans as any)[target];
+          return (
+            typeof val === "string" && val.trim().toLowerCase() === target.trim().toLowerCase()
+          );
+        });
+      }
+    } else if (qType === "MATCHING") {
+      const pairs = currentQuestion.matchingPairs || (currentQuestion as any).pairs || [];
+      if (pairs.length > 0 && ans) {
+        if (typeof ans === "object") {
+          const mapping = ans.mapping || ans.pairs || ans;
+          isCorrect = pairs.every((p: any, idx: number) => {
+            const textMatch = mapping[p.left] ?? mapping[p.left.trim()];
+            if (
+              typeof textMatch === "string" &&
+              textMatch.trim().toLowerCase() === p.right.trim().toLowerCase()
+            ) {
+              return true;
+            }
+            const indexChoice = mapping[idx] ?? mapping[String(idx)];
+            if (
+              typeof indexChoice === "string" &&
+              indexChoice.trim().toLowerCase() === p.right.trim().toLowerCase()
+            ) {
+              return true;
+            }
+            if (indexChoice !== undefined && Number(indexChoice) === idx) {
+              return true;
+            }
+            return false;
+          });
+        }
+      }
+    } else if (qType === "REORDER") {
+      const expOrder = currentQuestion.correctOrder || currentQuestion.options || [];
+      if (Array.isArray(ans) && ans.length === expOrder.length) {
+        isCorrect = ans.every(
+          (val, idx) =>
+            String(val).trim().toLowerCase() === String(expOrder[idx]).trim().toLowerCase()
+        );
+      }
+    }
+
+    const result: QuestionAttemptResult = {
+      questionId: currentQuestion.id,
+      selectedOptionId: typeof ans === "string" || typeof ans === "number" ? String(ans) : "custom_payload",
+      selectedOriginalIndex: null,
+      correctOptionId: `type_${qType}`,
+      correctOriginalIndex: currentQuestion.correctOptionIndex ?? 0,
       isCorrect,
       isTimeout: false,
       timeSpentSeconds: timeSpent,
@@ -273,7 +390,7 @@ export function AdvancedQuizArena({
   const handleProceedNext = () => {
     if (currentQuestionIndex < quizQuestions.length - 1) {
       setCurrentQuestionIndex((prev) => prev + 1);
-      setTimeLeft(timeLimitPerQuestion);
+      questionStartTimeRef.current = Date.now();
     } else {
       handleFinalSubmission();
     }
@@ -297,13 +414,18 @@ export function AdvancedQuizArena({
     try {
       setIsSubmitting(true);
 
-      const answersMap: Record<string, number> = {};
+      const answersMap: Record<string, any> = {};
       let correctCount = 0;
       let totalTimeSpent = 0;
 
       quizQuestions.forEach((q) => {
         const res = questionResults[q.id];
-        if (res && res.selectedOriginalIndex !== null && !res.isTimeout) {
+        const universalAns = universalAnswersMap[q.id];
+        if (universalAns !== undefined) {
+          answersMap[q.id] = universalAns;
+          if (res?.isCorrect) correctCount++;
+          totalTimeSpent += res?.timeSpentSeconds || timeLimitPerQuestion;
+        } else if (res && res.selectedOriginalIndex !== null && !res.isTimeout) {
           answersMap[q.id] = res.selectedOriginalIndex;
           if (res.isCorrect) correctCount++;
           totalTimeSpent += res.timeSpentSeconds;
@@ -403,139 +525,25 @@ export function AdvancedQuizArena({
     startNewAttempt(nextAttempt, nextOffset);
   };
 
-  // Reusable 30-Second Timer Renderer
+  // Reusable Isolated Quiz Timer (Prevents parent re-renders)
   const renderTimerBadge = (overrideStyle?: string) => {
-    const pct = Math.max(0, Math.min(100, (timeLeft / timeLimitPerQuestion) * 100));
-    const isUrgent = timeLeft <= 7;
-    const timerType = overrideStyle || currentTemplate.timerStyle;
+    if (!currentQuestion) return null;
+    const qType = String(currentQuestion.questionType || (currentQuestion as any).type || "MCQ").toUpperCase();
+    const effectiveLimit =
+      qType === "MATCHING" || qType === "REORDER"
+        ? Math.max(120, ((currentQuestion.matchingPairs || (currentQuestion as any).pairs || []).length || 3) * 30)
+        : timeLimitPerQuestion;
 
-    switch (timerType) {
-      case "circular": {
-        const radius = 15;
-        const circumference = 2 * Math.PI * radius;
-        const strokeDashoffset = circumference - (pct / 100) * circumference;
-        return (
-          <div className="flex items-center gap-2">
-            <div className="relative w-9 h-9 flex items-center justify-center">
-              <svg className="w-9 h-9 -rotate-90">
-                <circle
-                  cx="18"
-                  cy="18"
-                  r={radius}
-                  className="stroke-slate-200 dark:stroke-slate-800"
-                  strokeWidth="3"
-                  fill="transparent"
-                />
-                <circle
-                  cx="18"
-                  cy="18"
-                  r={radius}
-                  className={`${isUrgent ? "stroke-rose-500 animate-pulse" : currentTemplate.timerColor} transition-all duration-300`}
-                  strokeWidth="3"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={strokeDashoffset}
-                  strokeLinecap="round"
-                  fill="transparent"
-                />
-              </svg>
-              <span
-                className={`absolute text-xs font-black font-mono ${
-                  isUrgent ? "text-rose-500 animate-pulse" : "text-slate-800 dark:text-slate-200"
-                }`}
-              >
-                {timeLeft}
-              </span>
-            </div>
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hidden sm:inline">
-              সেকেন্ড
-            </span>
-          </div>
-        );
-      }
-
-      case "terminal": {
-        return (
-          <div className="px-3 py-1.5 rounded-lg bg-black/90 border border-emerald-500/50 font-mono text-xs flex items-center gap-2 shadow-inner">
-            <span className="text-emerald-400 font-bold animate-pulse">●</span>
-            <span className="text-emerald-300">
-              SYS_TIME:[<strong className={isUrgent ? "text-rose-400" : "text-emerald-400"}>{String(timeLeft).padStart(2, "0")}s</strong>]
-            </span>
-          </div>
-        );
-      }
-
-      case "marquee": {
-        return (
-          <div className="px-2.5 py-1 rounded bg-yellow-400 text-slate-950 font-mono font-bold text-xs border border-black flex items-center gap-1.5">
-            <span>⏱ সময়</span>
-            <span className="px-1.5 py-0.5 bg-black text-yellow-400 rounded">
-              {String(timeLeft).padStart(2, "0")}s
-            </span>
-          </div>
-        );
-      }
-
-      case "pill": {
-        return (
-          <div
-            className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 border shadow-xs transition-colors ${
-              isUrgent
-                ? "bg-rose-50 dark:bg-rose-950/80 border-rose-300 text-rose-600 animate-pulse"
-                : "bg-slate-100 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span className="font-mono">{timeLeft}s বাকি</span>
-          </div>
-        );
-      }
-
-      case "minimal": {
-        return (
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-400 font-mono">সময়:</span>
-            <span
-              className={`font-mono text-sm font-bold ${
-                isUrgent ? "text-rose-500 font-black animate-pulse" : "text-slate-700 dark:text-slate-200"
-              }`}
-            >
-              {timeLeft}s
-            </span>
-          </div>
-        );
-      }
-
-      case "stadium": {
-        return (
-          <div className="px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-700 dark:text-amber-400 font-bold text-xs flex items-center gap-1.5">
-            <Flame className="w-3.5 h-3.5 fill-current" />
-            <span className="font-mono">{timeLeft}s বাকি</span>
-          </div>
-        );
-      }
-
-      case "bar":
-      default: {
-        return (
-          <div className="w-24 sm:w-32 space-y-1">
-            <div className="flex items-center justify-between text-[10px] font-mono">
-              <span className="text-slate-500 dark:text-slate-400 font-bold">টাইমার</span>
-              <span className={isUrgent ? "text-rose-500 font-black" : "text-slate-700 dark:text-slate-300 font-bold"}>
-                {timeLeft}s
-              </span>
-            </div>
-            <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  isUrgent ? "bg-rose-500 animate-pulse" : currentTemplate.timerColor
-                }`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-        );
-      }
-    }
+    return (
+      <QuizTimer
+        key={`timer-${currentQuestion.id}-${attemptNumber}`}
+        initialSeconds={effectiveLimit}
+        onExpire={() => handleQuestionTimeout(currentQuestion)}
+        isPaused={hasAnsweredCurrent || !quizStarted || !!finalResult}
+        timerStyle={overrideStyle || currentTemplate.timerStyle}
+        timerColor={currentTemplate.timerColor}
+      />
+    );
   };
 
   // Reusable 2x2 Responsive Option Grid Component
@@ -545,6 +553,25 @@ export function AdvancedQuizArena({
   // Natural height, wrap-anywhere, break-words, no truncation!
   const renderOptionGrid = (optionsList: ShuffledQuizOption[], customBadgeStyle?: string) => {
     if (!currentQuestion) return null;
+
+    const qType = String(currentQuestion.questionType || (currentQuestion as any).type || "MCQ").toUpperCase();
+    if (qType !== "MCQ") {
+      return (
+        <div className="w-full pt-1">
+          <UniversalQuestionRenderer
+            question={currentQuestion}
+            questionIndex={currentQuestionIndex}
+            totalQuestions={quizQuestions.length}
+            selectedAnswer={universalAnswersMap[currentQuestion.id] ?? currentResult?.selectedOptionId}
+            onSelectAnswer={(ans) => handleUniversalAnswer(ans)}
+            onConfirmAnswer={(ans) => handleConfirmUniversalAnswer(ans)}
+            isConfirmed={hasAnsweredCurrent}
+            isCorrect={currentResult?.isCorrect}
+            disabled={hasAnsweredCurrent || isSubmitting}
+          />
+        </div>
+      );
+    }
 
     return (
       <div
@@ -688,6 +715,31 @@ export function AdvancedQuizArena({
 
   // Navigation Footer Bar (Streamlined Minimalist Action Buttons)
   const renderNavFooter = () => {
+    const qType = currentQuestion ? String(currentQuestion.questionType || (currentQuestion as any).type || "MCQ").toUpperCase() : "MCQ";
+    const isNonMCQ = qType !== "MCQ";
+    const draftAns = currentQuestion ? universalAnswersMap[currentQuestion.id] : undefined;
+
+    let isNonMCQAnswerReady = false;
+    if (isNonMCQ && currentQuestion) {
+      if (qType === "MATCHING") {
+        const pairs = currentQuestion.matchingPairs || (currentQuestion as any).pairs || [];
+        if (draftAns && typeof draftAns === "object") {
+          const matchedKeys = Object.keys(draftAns.mapping || draftAns).filter((k) => k.startsWith("drop-"));
+          isNonMCQAnswerReady = pairs.length > 0 && matchedKeys.length >= pairs.length;
+        }
+      } else if (qType === "REORDER") {
+        isNonMCQAnswerReady = Array.isArray(draftAns) && draftAns.length > 0;
+      } else if (qType === "FILL_BLANKS") {
+        if (typeof draftAns === "string") {
+          isNonMCQAnswerReady = draftAns.trim().length > 0;
+        } else if (typeof draftAns === "object" && draftAns !== null) {
+          isNonMCQAnswerReady = Object.values(draftAns).some((v) => typeof v === "string" && v.trim().length > 0);
+        }
+      } else if (qType === "TRUE_FALSE") {
+        isNonMCQAnswerReady = draftAns !== undefined && draftAns !== null;
+      }
+    }
+
     return (
       <div className="pt-4 flex items-center justify-between gap-3 border-t border-slate-200/50 dark:border-slate-800/60 mt-4">
         <button
@@ -700,7 +752,21 @@ export function AdvancedQuizArena({
           <span>পূর্ববর্তী</span>
         </button>
 
-        {currentQuestionIndex < quizQuestions.length - 1 ? (
+        {isNonMCQ && !hasAnsweredCurrent ? (
+          <button
+            type="button"
+            disabled={!isNonMCQAnswerReady || isSubmitting}
+            onClick={() => handleConfirmUniversalAnswer()}
+            className={`px-5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+              isNonMCQAnswerReady
+                ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md active:scale-98"
+                : "bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-60"
+            }`}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>উত্তর জমা দিন / যাচাই করুন</span>
+          </button>
+        ) : currentQuestionIndex < quizQuestions.length - 1 ? (
           <button
             type="button"
             onClick={handleProceedNext}
@@ -926,10 +992,10 @@ export function AdvancedQuizArena({
                 const res = questionResults[q.id];
                 const isOpen = !!reviewOpenQuestions[q.id];
                 const studentAnswerText =
-                  res?.selectedOriginalIndex !== null && res?.selectedOriginalIndex !== undefined
+                  res?.selectedOriginalIndex !== null && res?.selectedOriginalIndex !== undefined && q.options
                     ? q.options[res.selectedOriginalIndex]
                     : null;
-                const correctAnswerText = q.options[q.correctOptionIndex];
+                const correctAnswerText = (q.options && q.options[q.correctOptionIndex ?? 0]) || "N/A";
 
                 return (
                   <div
@@ -1019,7 +1085,7 @@ export function AdvancedQuizArena({
 
   const currentShuffledOptions =
     shuffledOptionsMap[currentQuestion.id] ||
-    currentQuestion.options.map((opt, i) => ({
+    (currentQuestion.options || []).map((opt, i) => ({
       id: `opt_${i}`,
       text: opt,
       originalIndex: i,
@@ -1030,10 +1096,97 @@ export function AdvancedQuizArena({
   // =========================================================================
 
   const renderActiveTemplate = () => {
+    return (
+      <div className="w-full space-y-4">
+        {/* Subtle top header bar */}
+        <div className="flex items-center justify-between px-1 text-xs">
+          <span className="font-bold text-slate-500 dark:text-slate-400">
+            প্রশ্ন {currentQuestionIndex + 1} / {quizQuestions.length}
+          </span>
+          {renderTimerBadge("circular")}
+        </div>
+
+        {/* Dynamic Universal Quiz Showcase Engine */}
+        <UniversalQuizShowcaseEngine
+          question={currentQuestion}
+          questionIndex={currentQuestionIndex}
+          totalQuestions={quizQuestions.length}
+          selectedAnswer={
+            universalAnswersMap[currentQuestion.id] ?? currentResult?.selectedOptionId
+          }
+          onSelectAnswer={(ans) => {
+            const qType = String(
+              currentQuestion.questionType || (currentQuestion as any).type || "MCQ"
+            ).toUpperCase();
+            if (qType !== "MCQ") {
+              handleUniversalAnswer(ans);
+            } else {
+              const opt =
+                typeof ans === "number"
+                  ? currentShuffledOptions.find(
+                      (o) => o.originalIndex === ans || o.id === `opt_${ans}`
+                    ) || currentShuffledOptions[ans]
+                  : currentShuffledOptions.find(
+                      (o) => o.id === ans || o.text.trim() === String(ans).trim()
+                    ) || currentShuffledOptions[0];
+              if (opt) handleSelectOption(opt);
+            }
+          }}
+          onConfirmAnswer={(ans) => handleConfirmUniversalAnswer(ans)}
+          isConfirmed={hasAnsweredCurrent}
+          isCorrect={currentResult?.isCorrect}
+          disabled={hasAnsweredCurrent || isSubmitting}
+          showProofBadge={true}
+          autoRandomize={true}
+        />
+
+        {renderFeedbackBanner()}
+        {renderNavFooter()}
+      </div>
+    );
+  };
+
+  const _legacyUnusedTemplateRenderer = () => {
     const layout = currentTemplate.layoutDirection;
 
     // 03. ASYMMETRIC SPLIT LAYOUT (True 2-column Desktop/Tablet Split Canvas)
     if (layout === "asymmetric_split") {
+      const isInteractive = currentQuestion.questionType && currentQuestion.questionType !== "MCQ";
+      if (isInteractive) {
+        return (
+          <div className={`p-5 sm:p-7 transition-all ${currentTemplate.containerCard}`}>
+            <div className="w-full max-w-5xl mx-auto flex flex-col space-y-5">
+              {/* Question Header & Prompt compactly on top */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-purple-500/10 dark:bg-purple-950/40 border border-purple-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${currentTemplate.badgeStyle}`}>
+                    প্রশ্ন {currentQuestionIndex + 1} / {quizQuestions.length}
+                  </span>
+                  {renderTimerBadge("circular")}
+                </div>
+
+                {(currentQuestion as any).conceptTopic && (
+                  <span className="text-xs font-bold text-purple-600 dark:text-purple-400 block">
+                    বিষয়: {(currentQuestion as any).conceptTopic}
+                  </span>
+                )}
+
+                <h3 className="text-base sm:text-xl font-black text-slate-900 dark:text-white leading-relaxed break-words">
+                  {currentQuestion.questionText}
+                </h3>
+              </div>
+
+              {/* 100% Full-Width Interactive Arena */}
+              <div className="w-full space-y-4">
+                {renderOptionGrid(currentShuffledOptions)}
+                {renderFeedbackBanner()}
+                {renderNavFooter()}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className={`p-5 sm:p-7 transition-all ${currentTemplate.containerCard}`}>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1057,14 +1210,18 @@ export function AdvancedQuizArena({
               </h3>
 
               <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-2 border-t border-purple-200 dark:border-purple-800">
-                ডান পাশ থেকে সঠিক বিকল্পটি নির্বাচন করুন।
+                {currentQuestion.questionType && currentQuestion.questionType !== "MCQ"
+                  ? "সঠিক সমাধান নির্ধারণ করুন।"
+                  : "সঠিক বিকল্পটি নির্বাচন করুন।"}
               </div>
             </div>
 
             {/* Right Column: Options Arena + Feedback + Navigation */}
             <div className="lg:col-span-7 space-y-4">
               <div className="text-xs font-bold text-slate-500 dark:text-slate-400 pb-1">
-                বিকল্প উত্তরসমূহ:
+                {currentQuestion.questionType && currentQuestion.questionType !== "MCQ"
+                  ? "ইন্টারেক্টিভ সমাধান নির্ধারণ:"
+                  : "উত্তর বিকল্পসমূহ:"}
               </div>
               {renderOptionGrid(currentShuffledOptions)}
               {renderFeedbackBanner()}

@@ -26,6 +26,7 @@ import {
 } from "@/lib/subjectEngine";
 import { ACADEMIC_CLASSES, ALL_TRADES, parseClassNumeric, doesClassHaveTrade } from "@/lib/academicStructure";
 import { institutionalDb } from "@/lib/database";
+import { requireTeacherOrAdmin, requireAdmin } from "@/lib/serverAuthGuard";
 
 // ==========================================
 // GET HANDLER
@@ -98,11 +99,21 @@ export async function GET(req: NextRequest) {
         subjectId,
       });
 
+      const sanitizedFaculty = (institutionalDb.faculty || []).map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        nameBangla: f.nameBangla || f.name,
+        designation: f.designation,
+        department: f.department,
+        tradeCode: f.tradeCode || null,
+        type: f.type || "faculty",
+      }));
+
       return NextResponse.json({
         success: true,
         count: assignments.length,
         assignments,
-        facultyList: institutionalDb.faculty,
+        facultyList: sanitizedFaculty,
       });
     }
 
@@ -212,9 +223,15 @@ export async function GET(req: NextRequest) {
 // POST HANDLER (Create / Save / Assign / Copy / Import)
 // ==========================================
 export async function POST(req: NextRequest) {
+  const guard = requireTeacherOrAdmin(req, "/api/academic/subjects");
+  if (!guard.authorized) {
+    return guard.errorResponse!;
+  }
+
   try {
     const body = await req.json();
-    const { action = "create_master", user = "Admin" } = body;
+    const { action = "create_master" } = body;
+    const user = guard.identity.userName || guard.identity.userEmail || "Staff";
 
     // 1. Create Subject Master
     if (action === "create_master") {
@@ -511,9 +528,15 @@ export async function POST(req: NextRequest) {
 // PUT HANDLER (Update Master / Mapping)
 // ==========================================
 export async function PUT(req: NextRequest) {
+  const guard = requireTeacherOrAdmin(req, "/api/academic/subjects");
+  if (!guard.authorized) {
+    return guard.errorResponse!;
+  }
+
   try {
     const body = await req.json();
-    const { action = "update_master", id, updates, user = "Admin" } = body;
+    const { action = "update_master", id, updates } = body;
+    const user = guard.identity.userName || guard.identity.userEmail || "Staff";
 
     if (action === "update_master") {
       if (!id) {
@@ -538,11 +561,16 @@ export async function PUT(req: NextRequest) {
 // DELETE HANDLER (Archive Master / Remove Mapping / Remove Teacher)
 // ==========================================
 export async function DELETE(req: NextRequest) {
+  const guard = requireAdmin(req, "/api/academic/subjects");
+  if (!guard.authorized) {
+    return guard.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action") || "delete_master";
     const id = searchParams.get("id");
-    const user = searchParams.get("user") || "Admin";
+    const user = guard.identity.userName || guard.identity.userEmail || "Admin";
 
     if (!id) {
       return NextResponse.json({ success: false, error: "আইডি প্যারামিটার আবশ্যক।" }, { status: 400 });

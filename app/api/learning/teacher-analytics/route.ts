@@ -1,8 +1,14 @@
 import { NextRequest } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
+  const auth = requireTeacherOrAdmin(req, "/api/learning/teacher-analytics");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const classFilter = searchParams.get("class") || "all";

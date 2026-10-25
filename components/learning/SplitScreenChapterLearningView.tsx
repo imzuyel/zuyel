@@ -26,6 +26,7 @@ import {
   Trophy,
   Flame,
   Compass,
+  UserCheck,
 } from "lucide-react";
 import PublicHeader from "@/components/layout/PublicHeader";
 import PublicFooter from "@/components/layout/PublicFooter";
@@ -34,7 +35,10 @@ import GamifiedEdTechBackground from "@/components/learning/GamifiedEdTechBackgr
 import { InternationalStoryLessonRenderer } from "@/components/learning/InternationalStoryLessonRenderer";
 import { CurvedPathwayRoadmap } from "@/components/learning/CurvedPathwayRoadmap";
 import { AdvancedQuizArena } from "@/components/learning/AdvancedQuizArena";
+import { CourseCertificateModal } from "@/components/learning/CourseCertificateModal";
 import confetti from "canvas-confetti";
+import { triggerBlockCompletionCelebration } from "@/lib/confetti";
+import { toast } from "sonner";
 import {
   getActiveStudentAccount,
   StudentAuthAccount,
@@ -135,6 +139,13 @@ export default function SplitScreenChapterLearningView({
   // Blog reading countdown & state
   const [completingBlog, setCompletingBlog] = useState(false);
   const [readingSecondsLeft, setReadingSecondsLeft] = useState<number>(0);
+  const blogReadingStartRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    if (activeItem?.id && activeItem.itemType === "BLOG_PART") {
+      blogReadingStartRef.current = Date.now();
+    }
+  }, [activeItem?.id]);
 
   // Quiz active state
   const [quizStarted, setQuizStarted] = useState(false);
@@ -164,6 +175,7 @@ export default function SplitScreenChapterLearningView({
     item: ChapterContentItemData;
     reason: string;
   } | null>(null);
+  const [certificateModalOpen, setCertificateModalOpen] = useState(false);
   const contentPaneRef = useRef<HTMLDivElement | null>(null);
 
   // Sync active student on mount
@@ -470,6 +482,61 @@ export default function SplitScreenChapterLearningView({
     }
   };
 
+  // Auto-Navigation & Certificate Triggering Logic (Task 1)
+  const handleAdvanceAfterCompletion = () => {
+    // 1. If next milestone exists in current chapter, navigate directly to it
+    if (nextItem && course && chapter) {
+      handleNavigateToItem(nextItem);
+      return;
+    }
+
+    // 2. If this was the last item of the chapter, check for the NEXT chapter in the course
+    if (!course || !chapter) return;
+    const chapters = course.chapters || [];
+    const currentChapterIdx = chapters.findIndex(
+      (ch) => ch.id === chapter.id || ch.chapterNumber === chapter.chapterNumber
+    );
+
+    if (currentChapterIdx !== -1 && currentChapterIdx < chapters.length - 1) {
+      const nextChapter = chapters[currentChapterIdx + 1];
+      toast.success(
+        `🎉 অধ্যায় "${chapter.titleBangla}" সম্পন্ন হয়েছে! পরবর্তী অধ্যায় "${nextChapter.titleBangla}"-এ নিয়ে যাওয়া হচ্ছে...`,
+        { duration: 4000 }
+      );
+      try {
+        triggerBlockCompletionCelebration();
+      } catch {}
+
+      // Automatically route to First Block of NEXT chapter
+      if (nextChapter.items && nextChapter.items.length > 0) {
+        const firstBlock = nextChapter.items[0];
+        const nextUrl = buildLessonUrl(course, nextChapter, firstBlock);
+        router.push(nextUrl);
+      } else {
+        const nextUrl = buildChapterUrl(course, nextChapter);
+        router.push(nextUrl);
+      }
+      return;
+    }
+
+    // 3. NO more chapters exist: The entire subject/course is fully completed!
+    try {
+      confetti({
+        particleCount: 120,
+        spread: 90,
+        origin: { y: 0.5 },
+      });
+      triggerBlockCompletionCelebration();
+    } catch {}
+
+    toast.success("অসাধারণ কৃতিত্ব! আপনি সম্পূর্ণ পাঠ্যক্রম সফলভাবে সমাপ্ত করেছেন! 🎓🏆", {
+      duration: 6000,
+    });
+
+    // Automatically trigger Course Completion Certificate modal
+    setCertificateModalOpen(true);
+  };
+
   // Complete Blog Part and advance
   const handleCompleteBlog = async () => {
     if (!activeItem || completingBlog) return;
@@ -477,6 +544,7 @@ export default function SplitScreenChapterLearningView({
       setCompletingBlog(true);
       const studentRoll = activeStudent?.rollNumber || getGuestSessionId();
       const studentName = activeStudent?.studentName;
+      const elapsedSeconds = Math.max(1, Math.round((Date.now() - blogReadingStartRef.current) / 1000));
 
       const res = await safeFetchJson(`/api/learning/items/${activeItem.id}/complete-blog`, {
         method: "POST",
@@ -484,11 +552,14 @@ export default function SplitScreenChapterLearningView({
         body: JSON.stringify({
           studentRoll,
           studentName,
-          timeSpentSeconds: (activeItem.readTimeMinutes || 3) * 60,
+          timeSpentSeconds: elapsedSeconds,
         }),
       });
 
       if (res.success) {
+        try {
+          triggerBlockCompletionCelebration();
+        } catch {}
         if (activeStudent && course && chapter) {
           saveStudentResumePoint(activeStudent.rollNumber, {
             courseId: course.id,
@@ -500,8 +571,10 @@ export default function SplitScreenChapterLearningView({
           });
         }
 
-        // Permanently persist completed milestone for student so it NEVER re-locks
-        saveStudentCompletedItemId(studentRoll, activeItem.id);
+        const awardedStars = res.stars || 5;
+
+        // Permanently persist completed milestone and earned stars for student so it NEVER re-locks
+        saveStudentCompletedItemId(studentRoll, activeItem.id, awardedStars);
 
         // Instant optimistic update on active item
         setActiveItem((prev) =>
@@ -511,6 +584,7 @@ export default function SplitScreenChapterLearningView({
                 progress: {
                   isPassed: true,
                   status: "COMPLETED",
+                  stars: awardedStars,
                   completedAt: new Date().toISOString(),
                 },
               }
@@ -527,6 +601,7 @@ export default function SplitScreenChapterLearningView({
                 progress: {
                   isPassed: true,
                   status: "COMPLETED",
+                  stars: awardedStars,
                   completedAt: new Date().toISOString(),
                 },
                 isLocked: false,
@@ -556,10 +631,8 @@ export default function SplitScreenChapterLearningView({
           };
         });
 
-        // Advance to next milestone if available
-        if (nextItem && course && chapter) {
-          handleNavigateToItem(nextItem);
-        }
+        // Auto-navigate to next milestone, next chapter, or show completion certificate
+        handleAdvanceAfterCompletion();
       }
     } catch (err: any) {
       console.error("Complete blog error:", err);
@@ -578,7 +651,7 @@ export default function SplitScreenChapterLearningView({
 
     const newShuffled: Record<string, { text: string; originalIndex: number }[]> = {};
     (activeItem?.quizQuestions || []).forEach((q) => {
-      const indexed = q.options.map((opt, i) => ({ text: opt, originalIndex: i }));
+      const indexed = (q.options || []).map((opt, i) => ({ text: opt, originalIndex: i }));
       for (let i = indexed.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [indexed[i], indexed[j]] = [indexed[j], indexed[i]];
@@ -622,14 +695,14 @@ export default function SplitScreenChapterLearningView({
       if (data.success) {
         setQuizResult(data);
         if (data.isPassed) {
-          confetti({
-            particleCount: 80,
-            spread: 70,
-            origin: { y: 0.6 },
-          });
+          try {
+            triggerBlockCompletionCelebration();
+          } catch {}
 
-          // Permanently persist completed quiz milestone for student so it NEVER re-locks
-          saveStudentCompletedItemId(activeStudent.rollNumber, activeItem.id);
+          const awardedStars = data.stars || 4;
+
+          // Permanently persist completed quiz milestone and earned stars for student so it NEVER re-locks
+          saveStudentCompletedItemId(activeStudent.rollNumber, activeItem.id, awardedStars);
 
           // Optimistically update active item state
           setActiveItem((prev) =>
@@ -640,6 +713,7 @@ export default function SplitScreenChapterLearningView({
                     isPassed: true,
                     status: "COMPLETED",
                     score: data.score,
+                    stars: awardedStars,
                     completedAt: new Date().toISOString(),
                   },
                 }
@@ -657,6 +731,7 @@ export default function SplitScreenChapterLearningView({
                     isPassed: true,
                     status: "COMPLETED",
                     score: data.score,
+                    stars: awardedStars,
                     completedAt: new Date().toISOString(),
                   },
                   isLocked: false,
@@ -760,8 +835,47 @@ export default function SplitScreenChapterLearningView({
           </div>
         </div>
 
-        {/* Loading / Error States */}
-        {loading ? (
+        {/* Protected Access Guard for Unauthenticated Students */}
+        {!loading && !activeStudent ? (
+          <div className="max-w-xl mx-auto my-8 sm:my-14 p-8 sm:p-10 text-center bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl rounded-3xl border border-indigo-200/80 dark:border-indigo-900/50 space-y-6 shadow-2xl relative overflow-hidden">
+            <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-cyan-500/25">
+              <Lock className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 text-xs font-black border border-indigo-200 dark:border-indigo-800">
+                সংরক্ষিত শিখন পরিবেশ
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
+                অধ্যায়টিতে প্রবেশ করতে শিক্ষার্থী লগইন আবশ্যক
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                বিষয় এবং অধ্যায়ের তালিকা উন্মুক্ত থাকলেও প্রতিটি অধ্যায়ের পাঠ পড়া, কুইজে অংশগ্রহণ এবং শিখন অগ্রগতি ট্র্যাক করার জন্য পঞ্চগড় সরকারি টিএসসি-র শিক্ষার্থী অ্যাকাউন্টে লগইন বাধ্যতামূলক।
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setLoginModalOpen(true)}
+                className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 text-white font-black text-xs hover:shadow-lg hover:shadow-cyan-500/30 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <UserCheck className="w-4 h-4" />
+                <span>শিক্ষার্থী লগইন করুন</span>
+              </button>
+
+              {course && (
+                <Link
+                  href={buildSubjectUrl(course)}
+                  className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors flex items-center justify-center gap-2"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>অধ্যায় তালিকায় ফিরুন</span>
+                </Link>
+              )}
+            </div>
+          </div>
+        ) : loading ? (
           <div className="p-12 sm:p-16 text-center bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl rounded-3xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-xl">
             <Loader2 className="w-9 h-9 border-cyan-500 animate-spin mx-auto text-cyan-500" />
             <p className="text-xs text-slate-600 dark:text-slate-300 font-bold">
@@ -865,6 +979,8 @@ export default function SplitScreenChapterLearningView({
                   progressPercentage={(chapter as any).progressPercentage || 0}
                   completedCount={(chapter as any).completedItemsCount || 0}
                   totalCount={chapter.items.length}
+                  totalEarnedStars={(chapter as any).totalEarnedStars}
+                  maxPossibleStars={(chapter as any).maxPossibleStars || (chapter.items.length * 5)}
                 />
               </aside>
 
@@ -1127,9 +1243,7 @@ export default function SplitScreenChapterLearningView({
                           }
                         }}
                         onNavigateToNextMilestone={() => {
-                          if (nextItem && course && chapter) {
-                            handleNavigateToItem(nextItem);
-                          }
+                          handleAdvanceAfterCompletion();
                         }}
                         onBackToRoadmap={() => {
                           setMobileTab("roadmap");
@@ -1212,6 +1326,22 @@ export default function SplitScreenChapterLearningView({
             setLoginModalOpen(false);
             fetchChapterAndLessonData();
           }}
+        />
+      )}
+
+      {/* Course Completion Certificate Modal (Task 1) */}
+      {course && (
+        <CourseCertificateModal
+          isOpen={certificateModalOpen}
+          onClose={() => setCertificateModalOpen(false)}
+          studentName={activeStudent?.studentName || "শিক্ষার্থী"}
+          studentRoll={activeStudent?.rollNumber || "2026-ROLL"}
+          courseTitle={course.title || course.titleBangla}
+          courseTitleBangla={course.titleBangla}
+          className={course.className || "কারিগরি শাখা"}
+          tradeName={course.tradeName || "জেনারেল ভোকেশনাল"}
+          earnedXp={course.totalXp || 350}
+          totalStars={5}
         />
       )}
     </div>

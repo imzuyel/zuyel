@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import SouthAsianStudentAvatar from "@/components/common/SouthAsianStudentAvatar";
 import confetti from "canvas-confetti";
+import UniversalQuestionRenderer from "@/components/quiz/shared/UniversalQuestionRenderer";
+import UniversalQuizShowcaseEngine from "@/components/quiz/engine/UniversalQuizShowcaseEngine";
 
 interface SavedPlayerSession {
   sessionId: string;
@@ -644,72 +646,20 @@ export function StudentJoinContentComponent() {
                     )}
                   </div>
 
-                  {/* OPTIONS RENDERING BASED ON TYPE */}
+                  {/* OPTIONS RENDERING WITH UNIVERSAL QUIZ SHOWCASE ENGINE */}
                   <div className="space-y-3 pt-2">
-                    {(currentQuestion.type === "mcq" || currentQuestion.type === "image_choice" || currentQuestion.type === "poll" || !currentQuestion.type) && (
-                      <div className="grid grid-cols-1 gap-2.5">
-                        {currentQuestion.options && currentQuestion.options.map((option: string, idx: number) => {
-                          const isSelected = selectedOption === idx || selectedOption === option;
-                          return (
-                            <button
-                              key={idx}
-                              disabled={playerAnswered || isSubmitting}
-                              onClick={() => setSelectedOption(idx)}
-                              className={`w-full min-h-[52px] p-3.5 rounded-2xl text-left font-bold text-xs sm:text-sm transition-all flex items-center justify-between border cursor-pointer select-none active:scale-[0.98] ${
-                                isSelected
-                                  ? "bg-cyan-500/25 border-cyan-400 text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] ring-2 ring-cyan-400/50"
-                                  : "bg-slate-950/80 border-slate-800 text-slate-200 hover:bg-slate-900 hover:border-slate-700"
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-mono font-black shrink-0 ${
-                                  isSelected ? "bg-cyan-400 text-slate-950 shadow-md" : "bg-slate-800 text-slate-300 border border-white/5"
-                                }`}>
-                                  {["A", "B", "C", "D"][idx] || idx + 1}
-                                </span>
-                                <span className="leading-snug">{option}</span>
-                              </div>
-                              {isSelected && <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {currentQuestion.type === "true_false" && (
-                      <div className="grid grid-cols-2 gap-3">
-                        {["true", "false"].map((val) => {
-                          const isSelected = selectedOption === val;
-                          return (
-                            <button
-                              key={val}
-                              disabled={playerAnswered || isSubmitting}
-                              onClick={() => setSelectedOption(val)}
-                              className={`min-h-[56px] p-4 rounded-2xl font-black text-sm uppercase tracking-wider text-center border transition-all cursor-pointer select-none active:scale-[0.98] ${
-                                isSelected
-                                  ? "bg-cyan-500/25 border-cyan-400 text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] ring-2 ring-cyan-400/50"
-                                  : "bg-slate-950/80 border-slate-800 text-slate-200 hover:bg-slate-900 hover:border-slate-700"
-                              }`}
-                            >
-                              {val === "true" ? "সত্য (True)" : "মিথ্যা (False)"}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {(currentQuestion.type === "fill_in_blank" || currentQuestion.type === "short_answer") && (
-                      <div className="space-y-2">
-                        <input
-                          type="text"
-                          disabled={playerAnswered || isSubmitting}
-                          value={selectedOption}
-                          onChange={(e) => setSelectedOption(e.target.value)}
-                          placeholder="আপনার উত্তর এখানে লিখুন..."
-                          className="w-full h-13 bg-slate-950 border border-slate-800 rounded-xl px-4 text-sm text-white placeholder:text-slate-600 dark:text-slate-400 focus:outline-none focus:border-cyan-500 font-bold"
-                        />
-                      </div>
-                    )}
+                    <UniversalQuizShowcaseEngine
+                      question={currentQuestion}
+                      questionIndex={currentQuestionIdx}
+                      totalQuestions={totalQuestions}
+                      selectedAnswer={selectedOption}
+                      onSelectAnswer={(ans) => setSelectedOption(ans)}
+                      isConfirmed={playerAnswered}
+                      isCorrect={playerEvaluation ? playerEvaluation.isCorrect : undefined}
+                      disabled={playerAnswered || isSubmitting}
+                      showProofBadge={true}
+                      autoRandomize={true}
+                    />
                   </div>
 
                   {/* SUBMIT BUTTON */}

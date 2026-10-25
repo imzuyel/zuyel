@@ -43,6 +43,8 @@ import {
   ChevronRight,
   AlertTriangle,
   Zap,
+  GripVertical,
+  XCircle,
 } from "lucide-react";
 import { institutionalDb, Quiz, QuestionBankQuestion, QuizQuestion } from "@/lib/database";
 import {
@@ -54,6 +56,10 @@ import {
 } from "@/lib/academicStructure";
 import ManualQuestionCreatorModal from "./ManualQuestionCreatorModal";
 import MentimeterInteractiveAiQuizStudio from "./MentimeterInteractiveAiQuizStudio";
+import QuizTemplateManager from "./QuizTemplateManager";
+import MatchingQuestionPlayer from "./MatchingQuestionPlayer";
+import UniversalTemplateWrapper from "./shared/UniversalTemplateWrapper";
+import UniversalQuizShowcaseEngine from "./engine/UniversalQuizShowcaseEngine";
 import {
   GlowCard,
   AnimatedCounter,
@@ -173,6 +179,8 @@ export default function LiveQuizArena({
   const [autosaveStatus, setAutosaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
   const [previewCurrentQIndex, setPreviewCurrentQIndex] = useState(0);
+  const [previewSelectedAnswer, setPreviewSelectedAnswer] = useState<any>(null);
+  const [previewTemplateId, setPreviewTemplateId] = useState<number | undefined>(undefined);
   const [builderViewMode, setBuilderViewMode] = useState<"mentimeter_studio" | "column">("mentimeter_studio");
 
   // Quiz Creation Modes: Unified AI Studio (Recommended) vs Manual Entry vs CopyPaste
@@ -2064,7 +2072,7 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                                       <input
                                         type="radio"
                                         name={`correct-${q.id}`}
-                                        checked={q.questionData.correctIndex === oIdx}
+                                        checked={String(q.questionData.correctIndex ?? "") === String(oIdx)}
                                         onChange={() => {
                                           const updated = [...parsedQuestions];
                                           updated[idx].questionData.correctIndex = oIdx;
@@ -2121,7 +2129,7 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                                   <div className="grid grid-cols-2 gap-1.5 mt-2 pl-3">
                                     {q.questionData.options.map((opt: string, oIdx: number) => (
                                       <div key={oIdx} className={`p-1.5 px-2 rounded-lg text-[10px] font-bold ${
-                                        q.questionData.correctIndex === oIdx
+                                        String(q.questionData.correctIndex ?? "") === String(oIdx)
                                           ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-black"
                                           : "bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                                       }`}>
@@ -2438,7 +2446,7 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                           ]
                         ).map((opt: string, optIdx: number) => {
                           const isCorrect =
-                            activeQuizQuestions[selectedQuestionIndex].questionSnapshot?.questionData?.correctIndex === optIdx;
+                            String(activeQuizQuestions[selectedQuestionIndex].questionSnapshot?.questionData?.correctIndex ?? "") === String(optIdx);
                           return (
                             <div key={optIdx} className="flex items-center gap-2">
                               <button
@@ -2481,15 +2489,15 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                             "Option D",
                           ]
                         ).map((opt: string, optIdx: number) => {
-                          const curIndices: number[] =
+                          const curIndices: any[] =
                             activeQuizQuestions[selectedQuestionIndex].questionSnapshot?.questionData?.correctIndices || [0];
-                          const isCorrect = curIndices.includes(optIdx);
+                          const isCorrect = curIndices.map(String).includes(String(optIdx));
                           return (
                             <div key={optIdx} className="flex items-center gap-2">
                               <button
                                 onClick={() => {
                                   const next = isCorrect
-                                    ? curIndices.filter((i) => i !== optIdx)
+                                    ? curIndices.filter((i) => String(i) !== String(optIdx))
                                     : [...curIndices, optIdx];
                                   handleUpdateActiveQuestion("data.correctIndices", next.length > 0 ? next : [optIdx]);
                                 }}
@@ -2546,22 +2554,25 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                     )}
 
                     {/* 4. Matching Pairs (ডান পাশ - বাম পাশ) */}
-                    {activeQuizQuestions[selectedQuestionIndex].questionType === "matching" && (
+                    {(activeQuizQuestions[selectedQuestionIndex].questionType === "matching" ||
+                      (activeQuizQuestions[selectedQuestionIndex] as any).type === "matching") && (
                       <div className="space-y-3 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-amber-200 dark:border-amber-900/40">
                         <div className="flex items-center justify-between text-xs font-bold">
-                          <span className="text-amber-700 dark:text-amber-300">🔗 বাম পাশ ↔ ডান পাশ মিলকরণ জোড়াসমূহ:</span>
+                          <span className="text-amber-700 dark:text-amber-300">🔗 বাম পাশ ↔ ডান পাশ মিলকরণ জোড়াসমূহ (Matching Pairs):</span>
                           <button
                             type="button"
                             onClick={() => {
                               const curPairs = [
                                 ...(activeQuizQuestions[selectedQuestionIndex].questionSnapshot?.questionData?.pairs || []),
                               ];
-                              if (curPairs.length < 6) {
+                              if (curPairs.length < 10) {
                                 curPairs.push({
+                                  id: curPairs.length + 1,
                                   left: `বাম পাশ ${curPairs.length + 1}`,
                                   right: `ডান পাশ ${curPairs.length + 1}`,
                                 });
                                 handleUpdateActiveQuestion("data.pairs", curPairs);
+                                handleUpdateActiveQuestion("data.correctAnswer", JSON.stringify(curPairs));
                               }
                             }}
                             className="text-amber-600 dark:text-amber-400 font-bold hover:underline"
@@ -2805,6 +2816,29 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                 )}
 
                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                  {/* Question Stepper Navigation */}
+                  <div className="flex items-center justify-between gap-2 pb-1">
+                    <button
+                      type="button"
+                      disabled={selectedQuestionIndex <= 0}
+                      onClick={() => setSelectedQuestionIndex((prev) => Math.max(0, prev - 1))}
+                      className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl disabled:opacity-40 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-center"
+                    >
+                      ← Previous Question
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedQuestionIndex >= activeQuizQuestions.length - 1}
+                      onClick={() => setSelectedQuestionIndex((prev) => {
+                        const next = prev + 1;
+                        return next < activeQuizQuestions.length ? next : prev;
+                      })}
+                      className="flex-1 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl disabled:opacity-40 cursor-pointer hover:bg-indigo-700 transition-all text-center"
+                    >
+                      Next Question →
+                    </button>
+                  </div>
+
                   <button
                     onClick={() => handlePublishQuiz(activeQuiz.id)}
                     className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 shadow-md"
@@ -3083,11 +3117,12 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                       {q.questionText}
                     </p>
 
-                    {/* Options / Answers Preview */}
-                    {qData.options && Array.isArray(qData.options) && (
+                    {/* Options / Answers Preview - Strictly Conditional based on Question Type */}
+                    {((q.type as string) === "mcq_single" || (q.type as string) === "mcq_multiple" || (q.type as string) === "MCQ" || (!q.type && !qData.pairs && !qData.acceptedAnswers)) && qData.options && Array.isArray(qData.options) && (
                       <div className="grid grid-cols-2 gap-1.5 pt-1">
                         {qData.options.map((opt: string, optIdx: number) => {
-                          const isCorrect = qData.correctIndex === optIdx || (Array.isArray(qData.correctIndices) && qData.correctIndices.includes(optIdx));
+                          const isCorrect = String(qData.correctIndex ?? "") === String(optIdx) || 
+                            (Array.isArray(qData.correctIndices) && qData.correctIndices.map(String).includes(String(optIdx)));
                           return (
                             <div
                               key={optIdx}
@@ -3102,6 +3137,56 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+
+                    {/* MATCHING PAIRS PREVIEW */}
+                    {((q.type as string) === "matching" || (q.type as string) === "MATCHING" || (qData.pairs && qData.pairs.length > 0)) && (
+                      <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800/60 space-y-1.5">
+                        <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 block uppercase tracking-wider">
+                          🔗 বাম ↔ ডান মিলকরণ জোড়াসমূহ (Matching Pairs):
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {((qData.pairs || (q as any).matchingPairs || [])).map((p: any, pIdx: number) => (
+                            <div key={pIdx} className="p-1.5 px-2.5 bg-white dark:bg-slate-900 rounded-lg border border-amber-200 dark:border-amber-800 text-xs flex items-center justify-between">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{p.left}</span>
+                              <span className="text-amber-500 font-bold mx-1">↔</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">{p.right}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* FILL IN THE BLANKS PREVIEW */}
+                    {((q.type as string) === "fill_blank" || (q.type as string) === "FILL_BLANKS" || (q.type as string) === "fill_in_blank") && (
+                      <div className="p-3 bg-cyan-50/70 dark:bg-cyan-950/40 rounded-xl border border-cyan-200 dark:border-cyan-800/60 space-y-1.5">
+                        <span className="text-[10px] font-bold text-cyan-700 dark:text-cyan-300 block uppercase tracking-wider">
+                          📝 শূন্যস্থান পূরণের গ্রহণযোগ্য উত্তরসমূহ (Accepted Answers):
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {((qData.acceptedAnswers || (q as any).acceptedAnswers || ["সঠিক উত্তর"])).map((ans: string, aIdx: number) => (
+                            <span key={aIdx} className="px-2.5 py-0.5 bg-white dark:bg-slate-900 border border-cyan-300 dark:border-cyan-700 text-cyan-800 dark:text-cyan-200 rounded-md text-xs font-bold font-mono">
+                              {ans}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ORDERING PREVIEW */}
+                    {((q.type as string) === "ordering" || (q.type as string) === "REORDER") && (
+                      <div className="p-3 bg-teal-50/70 dark:bg-teal-950/40 rounded-xl border border-teal-200 dark:border-teal-800/60 space-y-1.5">
+                        <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300 block uppercase tracking-wider">
+                          ⬇ সঠিক ক্রম ধাপসমূহ (Sequence Steps):
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {((qData.items || (q as any).correctOrder || [])).map((item: string, iIdx: number) => (
+                            <span key={iIdx} className="px-2.5 py-0.5 bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 rounded-md text-xs font-bold">
+                              {iIdx + 1}. {item}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -3206,54 +3291,36 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
           </div>
 
           <div
-            className={`mx-auto transition-all ${
+            className={`mx-auto transition-all duration-300 ${
               previewDevice === "mobile"
-                ? "max-w-sm border-[10px] border-slate-900 rounded-[40px] shadow-2xl overflow-hidden p-6 bg-slate-900 text-white"
-                : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-xl"
+                ? "max-w-md border-[10px] border-slate-900 rounded-[40px] shadow-2xl overflow-hidden p-2 bg-slate-950 text-white"
+                : "w-full max-w-5xl"
             }`}
           >
             {activeQuizQuestions[previewCurrentQIndex] ? (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between text-xs font-bold border-b pb-3">
-                  <span>
-                    Question {previewCurrentQIndex + 1} of {activeQuizQuestions.length}
-                  </span>
-                  <span className="px-2.5 py-1 bg-amber-500 text-white rounded-full text-[10px]">
-                    ⏱️ {activeQuizQuestions[previewCurrentQIndex].timeLimit || 60}s
-                  </span>
-                </div>
+              <div className="space-y-4">
+                <UniversalQuizShowcaseEngine
+                  question={activeQuizQuestions[previewCurrentQIndex]}
+                  questionIndex={previewCurrentQIndex}
+                  totalQuestions={activeQuizQuestions.length}
+                  templateId={previewTemplateId}
+                  selectedAnswer={previewSelectedAnswer}
+                  onSelectAnswer={(ans) => setPreviewSelectedAnswer(ans)}
+                  onTemplateChange={(newId) => setPreviewTemplateId(newId)}
+                  showProofBadge={true}
+                  autoRandomize={true}
+                />
 
-                <h2 className="text-base sm:text-lg font-black leading-snug">
-                  {activeQuizQuestions[previewCurrentQIndex].questionSnapshot?.questionText ||
-                    (activeQuizQuestions[previewCurrentQIndex] as any).questionText ||
-                    activeQuizQuestions[previewCurrentQIndex].questionType ||
-                    "Question"}
-                </h2>
-
-                <div className="space-y-2">
-                  {(
-                    activeQuizQuestions[previewCurrentQIndex].questionSnapshot?.options ||
-                    activeQuizQuestions[previewCurrentQIndex].questionSnapshot?.questionData?.options ||
-                    (activeQuizQuestions[previewCurrentQIndex] as any).options ||
-                    []
-                  ).map((opt: string, i: number) => (
-                    <div
-                      key={i}
-                      className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer transition-all border border-transparent hover:border-indigo-400"
-                    >
-                      <span className="font-bold mr-2 text-indigo-500">{String.fromCharCode(65 + i)}.</span>
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t gap-2 flex-wrap">
+                <div className="flex items-center justify-between pt-2 px-2 gap-2 flex-wrap">
                   <button
-                    disabled={previewCurrentQIndex === 0}
-                    onClick={() => setPreviewCurrentQIndex((p) => p - 1)}
-                    className="px-4 py-2 bg-slate-200 dark:bg-slate-800 text-xs font-bold rounded-xl disabled:opacity-50 cursor-pointer"
+                    disabled={previewCurrentQIndex <= 0}
+                    onClick={() => {
+                      setPreviewSelectedAnswer(null);
+                      setPreviewCurrentQIndex((p) => Math.max(0, p - 1));
+                    }}
+                    className="px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl disabled:opacity-40 cursor-pointer hover:bg-slate-300 dark:hover:bg-slate-700 transition-all"
                   >
-                    Previous
+                    ← পূর্ববর্তী প্রশ্ন (Previous)
                   </button>
 
                   <button
@@ -3264,20 +3331,26 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                   </button>
 
                   <button
-                    disabled={previewCurrentQIndex === activeQuizQuestions.length - 1}
-                    onClick={() => setPreviewCurrentQIndex((p) => p + 1)}
-                    className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl disabled:opacity-50 cursor-pointer"
+                    disabled={previewCurrentQIndex >= activeQuizQuestions.length - 1}
+                    onClick={() => {
+                      setPreviewSelectedAnswer(null);
+                      setPreviewCurrentQIndex((prev) => {
+                        const nextIdx = prev + 1;
+                        return nextIdx < activeQuizQuestions.length ? nextIdx : prev;
+                      });
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl disabled:opacity-40 cursor-pointer shadow-md shadow-indigo-600/20 transition-all"
                   >
-                    Next Question
+                    পরবর্তী প্রশ্ন (Next Question) →
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-8 space-y-4">
+              <div className="text-center py-8 space-y-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-sm">
                 <p className="text-xs text-slate-400">প্রিভিউ করার মতো কোনো প্রশ্ন নেই।</p>
                 <button
                   onClick={() => onLaunchLiveArena && onLaunchLiveArena(activeQuiz.id)}
-                  className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 shadow-md shadow-indigo-600/20 cursor-pointer"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" /> লাইভ মোডে চালু করুন
                 </button>

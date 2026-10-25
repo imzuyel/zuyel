@@ -29,14 +29,35 @@ const FORBIDDEN_STUDENT_MUTATION_FIELDS = new Set([
   "isAdmitted",
 ]);
 
-function getAuthenticatedStudentRoll(req: NextRequest, identityUserId: string | number): string {
-  const cookieRoll = req.cookies.get("ptsc_student_roll")?.value;
-  const headerRoll = req.headers.get("x-student-roll");
+function getAuthenticatedStudentRoll(
+  req: NextRequest,
+  identityUserId: string | number,
+  identityEmail?: string
+): string {
   const rawId = String(identityUserId || "").trim();
-  if (cookieRoll && cookieRoll.trim()) return cookieRoll.trim();
-  if (headerRoll && headerRoll.trim()) return headerRoll.trim();
-  if (rawId && rawId !== "4" && rawId !== "student") return rawId;
-  return "101"; // Fallback to demo student roll 101
+
+  // 1. Authoritative check: verified identity from cryptographically validated token
+  if (rawId && rawId !== "4" && rawId !== "student" && rawId !== "anonymous") {
+    return rawId;
+  }
+
+  // 2. Check verified email pattern (e.g., student.102@pgtsc.gov.bd)
+  if (identityEmail) {
+    const emailMatch = identityEmail.match(/student\.(\d+)@/i);
+    if (emailMatch && emailMatch[1]) {
+      return emailMatch[1];
+    }
+  }
+
+  // 3. For development demo student profile switching only (strictly non-production)
+  if (process.env.NODE_ENV !== "production") {
+    const cookieRoll = req.cookies.get("ptsc_student_roll")?.value?.trim();
+    if (cookieRoll && /^\d+$/.test(cookieRoll)) {
+      return cookieRoll;
+    }
+  }
+
+  return "101"; // Fallback to default demo student roll 101
 }
 
 export async function GET(request: NextRequest) {
@@ -47,7 +68,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const studentRoll = getAuthenticatedStudentRoll(request, guard.identity.userId);
+    const studentRoll = getAuthenticatedStudentRoll(
+      request,
+      guard.identity.userId,
+      guard.identity.userEmail
+    );
 
     // 2. Query Prisma or institutionalDb fallback
     let dbRecord = await safePrismaQuery(async (p) => {
@@ -163,7 +188,11 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const studentRoll = getAuthenticatedStudentRoll(request, guard.identity.userId);
+    const studentRoll = getAuthenticatedStudentRoll(
+      request,
+      guard.identity.userId,
+      guard.identity.userEmail
+    );
 
     // 3. Extract and sanitize allowed fields
     const updates: Partial<Student> = {};

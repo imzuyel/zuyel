@@ -77,70 +77,181 @@ export class AnswerEvaluator {
     }
 
     // 4. MCQ Single / Image Choice
-    if (qType === "mcq_single" || qType === "image_choice") {
-      const subIndex = parseInt(submitted, 10);
-      const corrIndex = parseInt(correctAnswer, 10);
+    // 4. MCQ Single / Image Choice
+    if (qType === "mcq_single" || qType === "mcq" || qType === "image_choice") {
+      const resolvedCorrect = (correctAnswer !== undefined && correctAnswer !== null)
+        ? correctAnswer
+        : (questionSnapshot?.correctIndex !== undefined
+            ? questionSnapshot.correctIndex
+            : questionSnapshot?.questionData?.correctIndex !== undefined
+            ? questionSnapshot.questionData.correctIndex
+            : questionSnapshot?.correctAnswer ?? questionSnapshot?.questionData?.correctAnswer);
 
-      if (!isNaN(subIndex) && !isNaN(corrIndex)) {
-        return { isCorrect: subIndex === corrIndex, isManual: false };
+      // Explicit numeric casting comparison
+      const subNum = Number(submitted);
+      const corrNum = Number(resolvedCorrect);
+
+      if (!isNaN(subNum) && !isNaN(corrNum) && String(subNum) === String(corrNum)) {
+        return { isCorrect: true, isManual: false };
       }
 
-      // String fallback comparison
+      // Explicit string normalization & comparison
+      const subStr = this.normalizeString(submitted);
+      const corrStr = this.normalizeString(resolvedCorrect);
+
+      if (subStr !== "" && subStr === corrStr) {
+        return { isCorrect: true, isManual: false };
+      }
+
+      // Option label/index cross-matching fallback (e.g. comparing index to option text or vice-versa)
+      const options = questionSnapshot?.options || questionSnapshot?.questionData?.options;
+      if (Array.isArray(options) && options.length > 0) {
+        if (!isNaN(subNum) && options[subNum] !== undefined) {
+          if (this.normalizeString(options[subNum]) === corrStr) {
+            return { isCorrect: true, isManual: false };
+          }
+        }
+        if (!isNaN(corrNum) && options[corrNum] !== undefined) {
+          if (this.normalizeString(options[corrNum]) === subStr) {
+            return { isCorrect: true, isManual: false };
+          }
+        }
+      }
+
+      // Letter and option ID normalization fallback (e.g., "A", "B", "opt_1", "ক", "খ")
+      const letters = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      const banglaLetters = ["ক", "খ", "গ", "ঘ", "ঙ", "চ"];
+      const cleanSub = subStr.replace(/^opt_|^option_/, "");
+      const cleanCorr = corrStr.replace(/^opt_|^option_/, "");
+
+      if (cleanSub !== "" && cleanSub === cleanCorr) {
+        return { isCorrect: true, isManual: false };
+      }
+
+      const subLetterIdx =
+        letters.indexOf(cleanSub) !== -1
+          ? letters.indexOf(cleanSub)
+          : banglaLetters.indexOf(cleanSub);
+      const corrLetterIdx =
+        letters.indexOf(cleanCorr) !== -1
+          ? letters.indexOf(cleanCorr)
+          : banglaLetters.indexOf(cleanCorr);
+
+      if (subLetterIdx !== -1 && (subLetterIdx === corrNum || subLetterIdx === corrLetterIdx)) {
+        return { isCorrect: true, isManual: false };
+      }
+      if (corrLetterIdx !== -1 && (corrLetterIdx === subNum || corrLetterIdx === subLetterIdx)) {
+        return { isCorrect: true, isManual: false };
+      }
+
       return {
-        isCorrect: this.normalizeString(submitted) === this.normalizeString(correctAnswer),
-        isManual: false
+        isCorrect: false,
+        isManual: false,
       };
     }
 
     // 5. MCQ Multiple
     if (qType === "mcq_multiple") {
-      let subSet: any[] = Array.isArray(submitted) ? submitted : [submitted];
-      let corrSet: any[] = Array.isArray(correctAnswer) ? correctAnswer : [correctAnswer];
+      const resolvedCorrect = (correctAnswer !== undefined && correctAnswer !== null)
+        ? correctAnswer
+        : (questionSnapshot?.correctIndices !== undefined
+            ? questionSnapshot.correctIndices
+            : questionSnapshot?.questionData?.correctIndices !== undefined
+            ? questionSnapshot.questionData.correctIndices
+            : questionSnapshot?.correctAnswers);
 
-      // Convert elements to strings and sort them to normalize sequence
-      const normSub = subSet.map(s => this.normalizeString(s)).sort();
-      const normCorr = corrSet.map(c => this.normalizeString(c)).sort();
+      let subSet: any[] = Array.isArray(submitted) ? submitted : [submitted];
+      let corrSet: any[] = Array.isArray(resolvedCorrect) ? resolvedCorrect : [resolvedCorrect];
+
+      // Enforce explicit string casting and trim for all elements
+      const normSub = subSet.map(s => String(s !== undefined && s !== null ? s : "").trim().toLowerCase()).sort();
+      const normCorr = corrSet.map(c => String(c !== undefined && c !== null ? c : "").trim().toLowerCase()).sort();
 
       if (normSub.length !== normCorr.length) {
         return { isCorrect: false, isManual: false };
       }
 
-      const isMatch = normSub.every((val, idx) => val === normCorr[idx]);
+      const isMatch = normSub.every((val, idx) => String(val) === String(normCorr[idx]));
       return { isCorrect: isMatch, isManual: false };
     }
 
     // 6. True / False
-    if (qType === "true_false") {
+    if (qType === "true_false" || qType.includes("true") || qType.includes("tf")) {
       const subNorm = this.normalizeString(submitted);
       const corrNorm = this.normalizeString(correctAnswer);
 
-      const isSubTrue = ["true", "1", "yes", "সত্য", "সঠিক"].includes(subNorm);
-      const isCorrTrue = ["true", "1", "yes", "সত্য", "সঠিক"].includes(corrNorm);
+      const isSubTrue = submitted === true || ["true", "1", "yes", "সত্য", "সঠিক"].includes(subNorm) || (subNorm === "0" && !["false", "0", "মিথ্যা"].includes(corrNorm));
+      const isCorrTrue = correctAnswer === true || ["true", "1", "yes", "সত্য", "সঠিক"].includes(corrNorm) || (corrNorm === "0" && !["false", "0", "মিথ্যা"].includes(subNorm));
 
-      return { isCorrect: isSubTrue === isCorrTrue, isManual: false };
+      return { isCorrect: Boolean(isSubTrue) === Boolean(isCorrTrue), isManual: false };
     }
 
     // 7. Matching
-    if (qType === "matching") {
-      // Input can be an array of pair mappings or an object of { left: right }
-      // E.g., submitted: [{"left": "A", "right": "1"}, {"left": "B", "right": "2"}]
-      // or submitted: {"A": "1", "B": "2"}
-      if (Array.isArray(submitted) && Array.isArray(correctAnswer)) {
-        if (submitted.length !== correctAnswer.length) {
-          return { isCorrect: false, isManual: false };
-        }
-        const makeKey = (pair: any) => `${this.normalizeString(pair.left)}::${this.normalizeString(pair.right)}`;
-        const subKeys = submitted.map(makeKey).sort();
-        const corrKeys = correctAnswer.map(makeKey).sort();
-
-        const isMatch = subKeys.every((val, idx) => val === corrKeys[idx]);
-        return { isCorrect: isMatch, isManual: false };
+    if (qType === "matching" || qType.includes("match")) {
+      // Resolve canonical expected pairs from correctAnswer, snapshot pairs, or questionData
+      let resolvedExpected = correctAnswer;
+      if (typeof resolvedExpected === "string" && resolvedExpected.trim().startsWith("[")) {
+        try {
+          resolvedExpected = JSON.parse(resolvedExpected);
+        } catch {}
       }
-      
+      if (!resolvedExpected || (Array.isArray(resolvedExpected) && resolvedExpected.length === 0)) {
+        resolvedExpected =
+          questionSnapshot?.pairs ||
+          questionSnapshot?.questionData?.pairs ||
+          questionSnapshot?.matchingPairs ||
+          resolvedExpected;
+      }
+
+      // If submitted is a JSON string, parse it
+      let resolvedSubmitted = submitted;
+      if (typeof resolvedSubmitted === "string" && resolvedSubmitted.trim().startsWith("[")) {
+        try {
+          resolvedSubmitted = JSON.parse(resolvedSubmitted);
+        } catch {}
+      } else if (typeof resolvedSubmitted === "string" && resolvedSubmitted.trim().startsWith("{")) {
+        try {
+          resolvedSubmitted = JSON.parse(resolvedSubmitted);
+        } catch {}
+      }
+
+      // Comparison when expected is array of pairs: [{ left, right }]
+      if (Array.isArray(resolvedExpected) && resolvedExpected.length > 0) {
+        if (Array.isArray(resolvedSubmitted)) {
+          if (resolvedSubmitted.length !== resolvedExpected.length) {
+            return { isCorrect: false, isManual: false };
+          }
+          const makeKey = (pair: any) =>
+            `${this.normalizeString(pair?.left)}::${this.normalizeString(pair?.right)}`;
+          const subKeys = resolvedSubmitted.map(makeKey).sort();
+          const corrKeys = resolvedExpected.map(makeKey).sort();
+
+          const isMatch = subKeys.every((val, idx) => val === corrKeys[idx]);
+          return { isCorrect: isMatch, isManual: false };
+        } else if (typeof resolvedSubmitted === "object" && resolvedSubmitted !== null) {
+          const isMatch = resolvedExpected.every((pair: any, idx: number) => {
+            const userChoice =
+              resolvedSubmitted[pair.left] ??
+              resolvedSubmitted[`drop-${idx}`] ??
+              (pair.id !== undefined ? resolvedSubmitted[pair.id] : undefined) ??
+              resolvedSubmitted[idx];
+            return (
+              this.normalizeString(userChoice) === this.normalizeString(pair.right)
+            );
+          });
+          return { isCorrect: isMatch, isManual: false };
+        }
+      }
+
       // Object comparison fallback
-      if (typeof submitted === "object" && typeof correctAnswer === "object") {
-        const subKeys = Object.keys(submitted).sort();
-        const corrKeys = Object.keys(correctAnswer).sort();
+      if (
+        typeof resolvedSubmitted === "object" &&
+        resolvedSubmitted !== null &&
+        typeof resolvedExpected === "object" &&
+        resolvedExpected !== null
+      ) {
+        const subKeys = Object.keys(resolvedSubmitted).sort();
+        const corrKeys = Object.keys(resolvedExpected).sort();
 
         if (subKeys.length !== corrKeys.length) {
           return { isCorrect: false, isManual: false };
@@ -148,7 +259,10 @@ export class AnswerEvaluator {
 
         const isMatch = subKeys.every((k, idx) => {
           if (k !== corrKeys[idx]) return false;
-          return this.normalizeString(submitted[k]) === this.normalizeString(correctAnswer[k]);
+          return (
+            this.normalizeString(resolvedSubmitted[k]) ===
+            this.normalizeString(resolvedExpected[k])
+          );
         });
         return { isCorrect: isMatch, isManual: false };
       }
@@ -156,10 +270,33 @@ export class AnswerEvaluator {
       return { isCorrect: false, isManual: false };
     }
 
-    // 8. Ordering / Arrange
-    if (qType === "ordering" || qType === "arrange") {
-      const subSeq: any[] = Array.isArray(submitted) ? submitted : [submitted];
-      const corrSeq: any[] = Array.isArray(correctAnswer) ? correctAnswer : [correctAnswer];
+    // 8. Ordering / Arrange / Reorder
+    if (qType === "ordering" || qType === "arrange" || qType === "reorder" || qType.includes("order")) {
+      let resolvedCorr = correctAnswer;
+      if (typeof resolvedCorr === "string" && resolvedCorr.trim().startsWith("[")) {
+        try {
+          resolvedCorr = JSON.parse(resolvedCorr);
+        } catch {}
+      }
+      if (!resolvedCorr || (Array.isArray(resolvedCorr) && resolvedCorr.length === 0)) {
+        resolvedCorr =
+          questionSnapshot?.correctOrder ||
+          questionSnapshot?.items ||
+          questionSnapshot?.questionData?.items ||
+          questionSnapshot?.options;
+      }
+
+      let resolvedSub = submitted;
+      if (typeof resolvedSub === "string" && resolvedSub.trim().startsWith("[")) {
+        try {
+          resolvedSub = JSON.parse(resolvedSub);
+        } catch {}
+      } else if (typeof resolvedSub === "object" && resolvedSub !== null && !Array.isArray(resolvedSub)) {
+        resolvedSub = Object.values(resolvedSub);
+      }
+
+      const subSeq: any[] = Array.isArray(resolvedSub) ? resolvedSub : [resolvedSub];
+      const corrSeq: any[] = Array.isArray(resolvedCorr) ? resolvedCorr : [resolvedCorr];
 
       if (subSeq.length !== corrSeq.length) {
         return { isCorrect: false, isManual: false };
@@ -172,7 +309,15 @@ export class AnswerEvaluator {
     }
 
     // 9. Fill in the Blank
-    if (qType === "fill_blank") {
+    if (qType === "fill_blank" || qType === "fill_blanks" || qType.includes("blank")) {
+      // If submitted is multi-part object or array
+      if (typeof submitted === "object" && submitted !== null) {
+        const subVals = Array.isArray(submitted) ? submitted : Object.values(submitted);
+        const subStr = subVals.map(v => this.normalizeString(v)).join(" ");
+        const corrStr = this.normalizeString(correctAnswer);
+        if (subStr === corrStr) return { isCorrect: true, isManual: false };
+      }
+
       const submittedStr = this.normalizeString(submitted);
       const correctStr = this.normalizeString(correctAnswer);
 
@@ -184,6 +329,12 @@ export class AnswerEvaluator {
         } else if (typeof questionSnapshot.alternatives === "string") {
           alternatives.push(...questionSnapshot.alternatives.split(",").map((a: any) => this.normalizeString(a)));
         }
+      }
+      if (Array.isArray(questionSnapshot?.acceptedAnswers)) {
+        alternatives.push(...questionSnapshot.acceptedAnswers.map((a: any) => this.normalizeString(a)));
+      }
+      if (Array.isArray(questionSnapshot?.questionData?.acceptedAnswers)) {
+        alternatives.push(...questionSnapshot.questionData.acceptedAnswers.map((a: any) => this.normalizeString(a)));
       }
 
       const isMatch = submittedStr === correctStr || alternatives.includes(submittedStr);

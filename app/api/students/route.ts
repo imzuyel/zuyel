@@ -8,6 +8,26 @@ import {
   doesStudentMatchTrade,
 } from "@/lib/academicStructure";
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
+import { extractRequestIdentity, requireAdmin } from "@/lib/serverAuthGuard";
+import { isAuthorizedStaff } from "@/lib/rbac";
+
+// Redact sensitive personal identifiable information for public or unprivileged callers
+function sanitizeStudentRecord(s: Student, allowFullAccess: boolean): Student {
+  if (allowFullAccess) return s;
+  return {
+    ...s,
+    birthRegNo: "",
+    fatherName: "",
+    motherName: "",
+    guardianMobile: "",
+    studentMobile: "",
+    email: "",
+    presentAddress: "",
+    permanentAddress: "",
+    emergencyContact: "",
+    guardianName: "",
+  };
+}
 
 // Helper to format Prisma Student record to standard frontend shape
 function mapPrismaStudentToClient(s: any): Student {
@@ -79,6 +99,9 @@ export async function GET(req: Request) {
     const status = searchParams.get("status") || "Active";
     const studentIdParam = searchParams.get("studentId");
 
+    const identity = extractRequestIdentity(req);
+    const isPrivileged = identity.isAuthenticated && isAuthorizedStaff(identity.userRole);
+
     // 1. HYBRID EXECUTION: Check if Prisma / MySQL is active
     if (isPrismaAvailable() && prisma) {
       try {
@@ -97,9 +120,16 @@ export async function GET(req: Request) {
           });
 
           if (studentRecord) {
+            const clientShape = mapPrismaStudentToClient(studentRecord);
+            const isSelf =
+              identity.isAuthenticated &&
+              (String(identity.userId) === String(clientShape.id) ||
+                String(identity.userId) === String(clientShape.roll) ||
+                identity.userEmail?.toLowerCase() === clientShape.email.toLowerCase());
+
             return NextResponse.json({
               success: true,
-              student: mapPrismaStudentToClient(studentRecord),
+              student: sanitizeStudentRecord(clientShape, isPrivileged || isSelf),
               source: "mysql",
             });
           }
@@ -152,7 +182,9 @@ export async function GET(req: Request) {
           orderBy: [{ classId: "asc" }, { roll: "asc" }],
         });
 
-        const formatted = prismaStudents.map(mapPrismaStudentToClient);
+        const formatted = prismaStudents
+          .map(mapPrismaStudentToClient)
+          .map((s: Student) => sanitizeStudentRecord(s, isPrivileged));
 
         return NextResponse.json({
           success: true,
@@ -175,7 +207,17 @@ export async function GET(req: Request) {
     if (studentIdParam) {
       const found = list.find((s) => s.id === Number(studentIdParam) || s.studentId === studentIdParam);
       if (found) {
-        return NextResponse.json({ success: true, student: found, source: "in-memory" });
+        const isSelf =
+          identity.isAuthenticated &&
+          (String(identity.userId) === String(found.id) ||
+            String(identity.userId) === String(found.roll) ||
+            identity.userEmail?.toLowerCase() === found.email?.toLowerCase());
+
+        return NextResponse.json({
+          success: true,
+          student: sanitizeStudentRecord(found, isPrivileged || isSelf),
+          source: "in-memory",
+        });
       }
       return NextResponse.json({ success: false, error: "Student not found" }, { status: 404 });
     }
@@ -212,10 +254,12 @@ export async function GET(req: Request) {
       );
     }
 
+    const sanitizedList = list.map((s) => sanitizeStudentRecord(s, isPrivileged));
+
     return NextResponse.json({
       success: true,
-      students: list,
-      items: list,
+      students: sanitizedList,
+      items: sanitizedList,
       source: "in-memory",
     });
   } catch (error: any) {
@@ -224,6 +268,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = requireAdmin(req, "/api/students (POST)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const currentYear = new Date().getFullYear();
@@ -450,6 +499,11 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const auth = requireAdmin(req, "/api/students (PUT)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const idx = institutionalDb.students.findIndex((s) => s.id === Number(body.id));
@@ -553,6 +607,11 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const auth = requireAdmin(req, "/api/students (DELETE)");
+  if (!auth.authorized) {
+    return auth.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");

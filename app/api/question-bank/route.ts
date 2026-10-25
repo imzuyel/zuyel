@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, QuestionBankQuestion } from "@/lib/database";
 import { v4 as uuidv4 } from "uuid";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
+  const guard = requireTeacherOrAdmin(req, "/api/question-bank");
+  if (!guard.authorized) {
+    return guard.errorResponse!;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const subjectId = searchParams.get("subjectId");
@@ -42,12 +48,17 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = requireTeacherOrAdmin(req, "/api/question-bank");
+  if (!guard.authorized) {
+    return guard.errorResponse!;
+  }
+
   try {
     const body = await req.json();
     const { 
       type, questionText, questionData, 
       subjectId, classId, tradeId, chapterId, topicId,
-      difficulty, explanation, createdBy, marks, timeLimit
+      difficulty, explanation, marks, timeLimit
     } = body;
 
     if (!type || !questionText || !questionText.trim()) {
@@ -59,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     const effectiveSubjectId = Number(subjectId) || 1;
     const effectiveClassId = Number(classId) || 4;
-    const effectiveCreatedBy = Number(createdBy) || 1;
+    const effectiveCreatedBy = Number(guard.identity.userId) || 1;
 
     const newQuestion: QuestionBankQuestion = {
       id: uuidv4(),

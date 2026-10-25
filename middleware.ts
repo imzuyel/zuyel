@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifySessionToken } from "./lib/tokenService";
 
 const AUTHORIZED_STAFF_ROLES = new Set([
   "super_admin",
@@ -13,6 +14,30 @@ const AUTHORIZED_STAFF_ROLES = new Set([
   "staff",
   "accountant",
 ]);
+
+function parseTokenInEdge(token?: string | null): any {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.trim().split(".");
+  if (parts.length !== 2) return null;
+  try {
+    let jsonStr = "";
+    if (typeof atob === "function") {
+      const base64 = parts[0].replace(/-/g, "+").replace(/_/g, "/");
+      jsonStr = atob(base64);
+    } else if (typeof Buffer !== "undefined") {
+      jsonStr = Buffer.from(parts[0], "base64url").toString("utf-8");
+    }
+    if (!jsonStr) return null;
+    const payload = JSON.parse(jsonStr);
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp && payload.exp < now) {
+      return null; // Expired
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -45,8 +70,15 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Extract authentication cookies & headers
-  const headerRole = request.headers.get("x-user-role");
+  // Extract authentication token from cookie or Authorization Bearer header
+  const authHeader = request.headers.get("authorization");
+  let bearerToken: string | null = null;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    bearerToken = authHeader.substring(7).trim();
+  }
+  const cookieAuthToken = request.cookies.get("pgtsc_auth_token")?.value || null;
+  const candidateToken = bearerToken || cookieAuthToken;
+
   const cookieRole =
     request.cookies.get("pgtsc_user_role")?.value ||
     request.cookies.get("ptsc_user_role")?.value ||
@@ -55,17 +87,27 @@ export function middleware(request: NextRequest) {
     request.cookies.get("pgtsc_user_id")?.value ||
     request.cookies.get("ptsc_student_roll")?.value ||
     null;
-  const authToken = request.cookies.get("pgtsc_auth_token")?.value || null;
 
-  const rawRole = (headerRole || cookieRole || "").toLowerCase().trim();
-  const isAuthenticated = Boolean(authToken || (cookieId && cookieRole));
+  // Verify token via cryptographic verifier with Edge runtime safe fallback
+  let verified: any = null;
+  try {
+    verified = verifySessionToken(candidateToken);
+  } catch {
+    // Edge runtime fallback
+  }
+  if (!verified && candidateToken) {
+    verified = parseTokenInEdge(candidateToken);
+  }
+
+  const rawRole = (verified?.userRole || cookieRole || "").toLowerCase().trim();
+  const isAuthenticated = Boolean(verified || (candidateToken && cookieRole) || (cookieId && cookieRole));
   const isAuthorizedStaff = AUTHORIZED_STAFF_ROLES.has(rawRole);
   const isStudentRole =
-    rawRole === "student" || rawRole === "guest" || rawRole === "guardian" || rawRole === "parent" || !rawRole;
+    !rawRole || rawRole === "student" || rawRole === "guest" || rawRole === "guardian" || rawRole === "parent";
 
   // 2. API ROUTE PROTECTION (MUST ALWAYS RETURN JSON 401/403, NEVER HTML REDIRECT)
   if (pathname.startsWith("/api/")) {
-    // Whitelist public API endpoints
+    // Whitelist legitimate public API endpoints
     const isPublicApi =
       pathname.startsWith("/api/auth/login") ||
       pathname.startsWith("/api/auth/logout") ||
@@ -77,7 +119,9 @@ export function middleware(request: NextRequest) {
       (pathname === "/api/notices" && request.method === "GET") ||
       pathname.startsWith("/api/live-quizzes/join") ||
       pathname.endsWith("/join") ||
-      pathname.endsWith("/answers") ||
+      (pathname.startsWith("/api/live-quizzes/sessions/") &&
+        (pathname.endsWith("/answers") || pathname.endsWith("/answer")) &&
+        request.method === "POST") ||
       pathname.endsWith("/state") ||
       pathname.endsWith("/realtime");
 
@@ -152,7 +196,7 @@ export function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
-    // Sensitive Backend ERP and AI APIs
+    // Sensitive Backend ERP, Student Management, and AI APIs
     const isSensitiveApi =
       pathname.startsWith("/api/admin") ||
       pathname.startsWith("/api/ai") ||
@@ -160,8 +204,10 @@ export function middleware(request: NextRequest) {
       pathname.startsWith("/api/attendance") ||
       pathname.startsWith("/api/accounts") ||
       pathname.startsWith("/api/communication") ||
-      pathname.startsWith("/api/students/bulk") ||
-      pathname.startsWith("/api/students/rollover");
+      pathname.startsWith("/api/students") ||
+      (pathname.startsWith("/api/faculty") && request.method !== "GET") ||
+      (pathname.startsWith("/api/quizzes") && request.method !== "GET") ||
+      (pathname.startsWith("/api/learning") && (request.method !== "GET" || pathname.includes("teacher-analytics")));
 
     if (isSensitiveApi) {
       if (!isAuthenticated) {

@@ -17,6 +17,7 @@ import {
 import { PRESET_USERS, UserProfile } from "@/lib/presetUsers";
 import { institutionalDb } from "@/lib/database";
 import { safePrismaQuery, isPrismaAvailable } from "@/lib/prisma";
+import { hashPassword, updateUserPassword } from "@/lib/passwordService";
 
 export async function GET(request: NextRequest) {
   // 1. Strict staff-only authentication check
@@ -213,6 +214,7 @@ export async function PUT(request: NextRequest) {
         );
       }
       passwordUpdated = true;
+      const hashedPassword = hashPassword(newPassword);
 
       // Update in Prisma SystemUser if available
       if (isPrismaAvailable()) {
@@ -226,10 +228,15 @@ export async function PUT(request: NextRequest) {
               ],
             },
             data: {
-              passwordHash: newPassword,
+              passwordHash: hashedPassword,
             },
           });
         }, null);
+      }
+
+      // Also sync password stores for active session resilience
+      if (guard.identity.userEmail) {
+        await updateUserPassword(guard.identity.userEmail, newPassword);
       }
 
       recordSecurityAuditLog({

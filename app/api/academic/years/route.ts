@@ -26,6 +26,15 @@ export async function GET(req: NextRequest) {
     if (isPrismaAvailable()) {
       try {
         const dbYears = await prisma.academicYear.findMany({
+          select: {
+            id: true,
+            year: true,
+            name: true,
+            startDate: true,
+            endDate: true,
+            isCurrent: true,
+            status: true,
+          },
           orderBy: { id: "desc" },
         });
 
@@ -40,9 +49,19 @@ export async function GET(req: NextRequest) {
     }
 
     const snapshot = await getMasterDataSnapshot();
+    const safeYears = (snapshot.academicYears || []).map((y: any) => ({
+      id: y.id,
+      year: y.year,
+      name: y.name || `Academic Year ${y.year}`,
+      startDate: y.startDate,
+      endDate: y.endDate,
+      isCurrent: Boolean(y.isCurrent),
+      status: y.status || "Active",
+    }));
+
     return NextResponse.json({
       success: true,
-      academicYears: snapshot.academicYears || [],
+      academicYears: safeYears,
       source: "engine_store",
     });
   } catch (error: any) {

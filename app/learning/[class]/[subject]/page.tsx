@@ -19,11 +19,14 @@ import {
   FolderOpen,
   Loader2,
   Flame,
+  Clock,
 } from "lucide-react";
 import PublicHeader from "@/components/layout/PublicHeader";
 import PublicFooter from "@/components/layout/PublicFooter";
 import StudentLoginModal from "@/components/auth/StudentLoginModal";
 import GamifiedEdTechBackground from "@/components/learning/GamifiedEdTechBackground";
+import ChapterCard from "@/components/learning/ChapterCard";
+import { CourseCertificateModal } from "@/components/learning/CourseCertificateModal";
 import {
   getActiveStudentAccount,
   logoutStudentAccount,
@@ -36,6 +39,30 @@ import {
   resolveCourse,
 } from "@/lib/learningSlugService";
 
+/**
+ * Converts Western digits to Bengali numerals cleanly
+ */
+function toBanglaDigits(val: number | string): string {
+  const bn = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
+  return String(val).replace(/\d/g, (d) => bn[Number(d)] ?? d);
+}
+
+/**
+ * Calculates realistic estimated study time for a chapter in Bengali
+ */
+function calculateChapterEstimatedTime(chapter: any): string {
+  const items = chapter.items || [];
+  if (items.length === 0) return "১৫ মিনিট";
+  const blogs = items.filter((it: any) => it.itemType === "BLOG_PART").length;
+  const quizzes = items.filter((it: any) => it.itemType === "QUIZ").length;
+  const totalMinutes = Math.max(blogs * 4 + quizzes * 6, items.length * 4, 10);
+  if (totalMinutes < 60) {
+    return `${toBanglaDigits(totalMinutes)} মিনিট`;
+  }
+  const hours = (totalMinutes / 60).toFixed(1);
+  return `${toBanglaDigits(hours)} ঘণ্টা`;
+}
+
 interface SubjectPageProps {
   params: Promise<{ class: string; subject: string }>;
 }
@@ -47,9 +74,19 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
   const [course, setCourse] = useState<CourseItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(null);
+  const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(() => {
+    if (typeof window !== "undefined") {
+      return getActiveStudentAccount();
+    }
+    return null;
+  });
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<{
+    chapter: any;
+    specificItem?: any;
+  } | null>(null);
   const [navigatingChapterId, setNavigatingChapterId] = useState<number | null>(null);
+  const [certificateModalOpen, setCertificateModalOpen] = useState(false);
 
   // Sync active student
   useEffect(() => {
@@ -72,7 +109,9 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
     try {
       setLoading(true);
       setError(null);
-      const studentRoll = activeStudent?.rollNumber;
+      const studentRoll =
+        activeStudent?.rollNumber ||
+        (typeof window !== "undefined" ? getActiveStudentAccount()?.rollNumber : undefined);
 
       // 1. Fetch courses list to resolve slug accurately
       const listRes = await fetch("/api/learning/courses");
@@ -87,7 +126,7 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
         return;
       }
 
-      // 2. Fetch enriched course data by course ID
+      // 2. Fetch enriched course data by course ID with active student's roll
       const courseUrl = studentRoll
         ? `/api/learning/courses/${matchedCourse.id}?studentRoll=${encodeURIComponent(studentRoll)}`
         : `/api/learning/courses/${matchedCourse.id}`;
@@ -116,12 +155,8 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
     setActiveStudent(null);
   };
 
-  const handleNavigateToChapter = (chapter: any, specificItem?: any) => {
-    if (navigatingChapterId || !course) return;
-    if (specificItem?.isLocked && !activeStudent) {
-      setLoginModalOpen(true);
-      return;
-    }
+  const executeNavigation = (chapter: any, specificItem?: any) => {
+    if (!course) return;
     setNavigatingChapterId(chapter.id);
 
     // If a specific item was clicked, navigate directly to it
@@ -145,6 +180,19 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
       const targetUrl = buildChapterUrl(course, chapter);
       router.push(targetUrl);
     }
+  };
+
+  const handleNavigateToChapter = (chapter: any, specificItem?: any) => {
+    if (navigatingChapterId || !course) return;
+
+    // Strict Protected Access: Student MUST be logged in to enter a chapter block
+    if (!activeStudent) {
+      setPendingNavigation({ chapter, specificItem });
+      setLoginModalOpen(true);
+      return;
+    }
+
+    executeNavigation(chapter, specificItem);
   };
 
   const enrichedCourse = course as any;
@@ -253,6 +301,16 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
                             />
                           </div>
                         </div>
+                        {isCourseCompleted && (
+                          <button
+                            type="button"
+                            onClick={() => setCertificateModalOpen(true)}
+                            className="w-full mt-2 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-600 hover:from-amber-400 hover:to-emerald-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 hover:scale-[1.01] active:scale-95 transition-all cursor-pointer"
+                          >
+                            <Award className="w-4 h-4 text-amber-200" />
+                            <span>সার্টিফিকেট ডাউনলোড করুন 🎓</span>
+                          </button>
+                        )}
                         <button
                           onClick={handleLogout}
                           className="w-full mt-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950 text-rose-300 border border-rose-800/50 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
@@ -344,129 +402,17 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                  {course.chapters.map((chapter, idx) => {
-                    const blogParts = chapter.items?.filter((it) => it.itemType === "BLOG_PART") || [];
-                    const quizzes = chapter.items?.filter((it) => it.itemType === "QUIZ") || [];
-                    const totalMarks = quizzes.reduce((sum, qz) => {
-                      const marks = qz.quizQuestions?.reduce((qm, q) => qm + (q.marks || 1), 0) || (qz.quizQuestions?.length ? qz.quizQuestions.length * 1 : 5);
-                      return sum + marks;
-                    }, 0);
-                    const totalChapterXp = chapter.items?.reduce((s, it) => s + (it.xpReward || 0), 0) || 0;
-
-                    const enrichedChapter = chapter as any;
-                    const isCompleted = enrichedChapter.isCompleted ?? false;
-                    const isNavigating = navigatingChapterId === chapter.id;
-
-                    return (
-                      <div
-                        key={chapter.id}
-                        onClick={() => !navigatingChapterId && handleNavigateToChapter(chapter)}
-                        className={`rgb-neon-border-card group flex flex-col h-full cursor-pointer transition-transform hover:-translate-y-1 ${
-                          isNavigating ? "opacity-80 pointer-events-none" : ""
-                        }`}
-                      >
-                        <div className="rgb-neon-border-inner p-5 flex flex-col justify-between h-full space-y-4">
-                          <div className="space-y-3 flex-1 min-w-0">
-                            {/* Badges Row */}
-                            <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
-                              <span className="px-2.5 py-1 rounded-xl bg-indigo-100/90 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-300 text-[11px] font-black border border-indigo-300/70 dark:border-indigo-800/80 shadow-xs">
-                                অধ্যায় {chapter.chapterNumber || idx + 1}
-                              </span>
-                              {isCompleted ? (
-                                <span className="px-2.5 py-1 rounded-xl bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-400 text-[10px] font-black border border-emerald-300/70 dark:border-emerald-800/80 flex items-center gap-1 shadow-xs">
-                                  <CheckCircle2 className="w-3 h-3" />
-                                  <span>সম্পন্ন ✨</span>
-                                </span>
-                              ) : (
-                                <span className="px-2.5 py-1 rounded-xl bg-cyan-100/80 dark:bg-cyan-950/70 text-cyan-800 dark:text-cyan-300 text-[10px] font-bold border border-cyan-300/60 dark:border-cyan-800/60">
-                                  শিখন প্রস্তুত
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Chapter Title */}
-                            <h3 className="text-base font-black text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors leading-snug line-clamp-2">
-                              {chapter.titleBangla}
-                            </h3>
-
-                            {/* Chapter Description */}
-                            {chapter.description && (
-                              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-sans line-clamp-2 font-medium">
-                                {chapter.description}
-                              </p>
-                            )}
-
-                            {/* Clean Chapter Summary Metrics */}
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 pb-0.5">
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-900 dark:text-cyan-200">
-                                <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 shrink-0">
-                                  <BookOpen className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">ব্লগ পাঠ</div>
-                                  <div className="text-xs font-black truncate">{blogParts.length} টি</div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-900 dark:text-indigo-200">
-                                <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0">
-                                  <Award className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">কুইজ পরীক্ষা</div>
-                                  <div className="text-xs font-black truncate">{quizzes.length} টি</div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-900 dark:text-purple-200">
-                                <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-600 dark:text-purple-400 shrink-0">
-                                  <Zap className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">মোট নম্বর</div>
-                                  <div className="text-xs font-black truncate">{totalMarks} নম্বর</div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200">
-                                <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
-                                  <Flame className="w-3.5 h-3.5" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-none">মোট রিওয়ার্ড</div>
-                                  <div className="text-xs font-black truncate">+{totalChapterXp} XP</div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Footer Action Button */}
-                          <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs font-bold text-slate-500 dark:text-slate-400">
-                            <span className="flex items-center gap-1 text-amber-500 font-mono text-[11px]">
-                              <Flame className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                              <span>
-                                +{chapter.items?.reduce((s, it) => s + (it.xpReward || 0), 0) || 0} XP
-                              </span>
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400 font-bold group-hover:translate-x-1 transition-transform">
-                              {isNavigating ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  <span>স্প্লিট-স্ক্রিন লোড হচ্ছে...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span>শিখন শুরু করুন 🚀</span>
-                                  <ArrowRight className="w-3.5 h-3.5" />
-                                </>
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {course.chapters.map((chapter, idx) => (
+                    <ChapterCard
+                      key={chapter.id}
+                      chapter={chapter}
+                      idx={idx}
+                      activeStudent={activeStudent}
+                      onNavigate={(ch, specificItem) => !navigatingChapterId && handleNavigateToChapter(ch, specificItem)}
+                      isNavigating={navigatingChapterId === chapter.id}
+                    />
+                  ))}
                 </div>
               )}
             </div>
@@ -476,15 +422,38 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
 
       <PublicFooter />
 
-      {/* Student Login Modal */}
+      {/* Student Login Modal with pending navigation resumption */}
       {loginModalOpen && (
         <StudentLoginModal
-          onClose={() => setLoginModalOpen(false)}
+          onClose={() => {
+            setLoginModalOpen(false);
+            setPendingNavigation(null);
+          }}
           onSuccessLogin={(acc) => {
             setActiveStudent(acc);
             setLoginModalOpen(false);
             fetchSubject();
+            if (pendingNavigation) {
+              executeNavigation(pendingNavigation.chapter, pendingNavigation.specificItem);
+              setPendingNavigation(null);
+            }
           }}
+        />
+      )}
+
+      {/* Course Completion Certificate Modal */}
+      {course && (
+        <CourseCertificateModal
+          isOpen={certificateModalOpen}
+          onClose={() => setCertificateModalOpen(false)}
+          studentName={activeStudent?.studentName || "শিক্ষার্থী"}
+          studentRoll={activeStudent?.rollNumber || "2026-ROLL"}
+          courseTitle={course.title || course.titleBangla}
+          courseTitleBangla={course.titleBangla}
+          className={course.className || "কারিগরি শাখা"}
+          tradeName={course.tradeName || "জেনারেল ভোকেশনাল"}
+          earnedXp={course.totalXp || 350}
+          totalStars={5}
         />
       )}
     </div>

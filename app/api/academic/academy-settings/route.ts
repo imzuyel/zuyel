@@ -7,17 +7,52 @@ import {
 import { requireAdmin } from "@/lib/serverAuthGuard";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
 
+/**
+ * Explicit safe projection for Academy Class Trade Mappings.
+ * Prevents internal administrative configs and database flags from leaking.
+ */
+function sanitizeAcademyMapping(m: any) {
+  if (!m) return null;
+  return {
+    id: String(m.id),
+    databaseClassId: Number(m.databaseClassId) || 0,
+    numericValue: Number(m.numericValue) || 0,
+    name: String(m.name || ""),
+    nameBangla: String(m.nameBangla || ""),
+    shortBangla: String(m.shortBangla || ""),
+    tier: m.tier,
+    hasTrade: Boolean(m.hasTrade),
+    tradeRequired: Boolean(m.tradeRequired),
+    generalTradeNoticeBangla: String(m.generalTradeNoticeBangla || ""),
+    totalSeats: Number(m.totalSeats) || 0,
+    availableTrades: Array.isArray(m.availableTrades)
+      ? m.availableTrades.map((t: any) => ({
+          id: String(t.id),
+          code: String(t.code),
+          name: String(t.name),
+          nameBangla: String(t.nameBangla),
+          shortBangla: String(t.shortBangla || ""),
+          numericId: t.numericId !== undefined ? Number(t.numericId) : undefined,
+          icon: t.icon,
+          seats: Number(t.seats) || 0,
+          status: t.status === "Inactive" ? "Inactive" : "Active",
+        }))
+      : [],
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const classParam = searchParams.get("class");
 
-    const mappings = institutionalDb.getAcademyClassTradeMappings() || DEFAULT_ACADEMY_CLASS_TRADE_MAPPINGS;
+    const rawMappings = institutionalDb.getAcademyClassTradeMappings() || DEFAULT_ACADEMY_CLASS_TRADE_MAPPINGS;
+    const mappings = rawMappings.map(sanitizeAcademyMapping).filter(Boolean);
 
     if (classParam && classParam !== "all") {
       const canonical = normalizeClassId(classParam);
       const matched = mappings.find(
-        (m) =>
+        (m: any) =>
           m.id === canonical ||
           String(m.databaseClassId) === classParam ||
           String(m.numericValue) === classParam
