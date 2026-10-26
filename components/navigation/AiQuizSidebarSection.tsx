@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -19,9 +19,37 @@ export default function AiQuizSidebarSection() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(true);
 
+  useEffect(() => {
+    if (!pathname) return;
+    const timer = setTimeout(() => {
+      const activeEl = document.querySelector('[data-quiz-sidebar-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [pathname]);
+
   const isLinkActive = (href: string) => {
+    if (!pathname) return false;
     if (href === "/admin") return pathname === "/admin";
     if (href === "/learning") return pathname.startsWith("/learning");
+    if (href === "/live-quizzes") {
+      return (
+        pathname.startsWith("/live-quizzes") ||
+        pathname.startsWith("/quiz") ||
+        pathname.startsWith("/live-quiz")
+      );
+    }
+    if (href === "/ai/pdf-manager") {
+      return (
+        pathname.startsWith("/ai/pdf-manager") ||
+        pathname.startsWith("/dashboard/documents")
+      );
+    }
+    if (href === "/ai/generator") {
+      return pathname.startsWith("/ai/generator");
+    }
     return pathname === href || pathname.startsWith(href);
   };
 
@@ -75,6 +103,7 @@ export default function AiQuizSidebarSection() {
             <div className="pl-7 space-y-1.5 border-l border-slate-800 ml-4 my-1 pt-1">
               <Link
                 href="/ai/generator"
+                data-quiz-sidebar-active={isLinkActive("/ai/generator") ? "true" : "false"}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition group ${
                   isLinkActive("/ai/generator")
                     ? "bg-purple-950/50 text-purple-300 font-bold border border-purple-800/50"
@@ -87,6 +116,7 @@ export default function AiQuizSidebarSection() {
 
               <Link
                 href="/ai/pdf-manager"
+                data-quiz-sidebar-active={isLinkActive("/ai/pdf-manager") ? "true" : "false"}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition group ${
                   isLinkActive("/ai/pdf-manager")
                     ? "bg-cyan-950/50 text-cyan-300 font-bold border border-cyan-800/50"
@@ -99,6 +129,7 @@ export default function AiQuizSidebarSection() {
 
               <Link
                 href="/live-quizzes"
+                data-quiz-sidebar-active={isLinkActive("/live-quizzes") ? "true" : "false"}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition group ${
                   isLinkActive("/live-quizzes")
                     ? "bg-emerald-950/50 text-emerald-300 font-bold border border-emerald-800/50"
@@ -106,11 +137,12 @@ export default function AiQuizSidebarSection() {
                 }`}
               >
                 <Radio className="w-3.5 h-3.5 text-emerald-400 group-hover:text-emerald-300 transition" />
-                <span>Live Quiz & Pin Lobby</span>
+                <span>🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও</span>
               </Link>
 
               <Link
                 href="/learning"
+                data-quiz-sidebar-active={isLinkActive("/learning") ? "true" : "false"}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition group ${
                   isLinkActive("/learning")
                     ? "bg-cyan-950/50 text-cyan-300 font-bold border border-cyan-800/50"

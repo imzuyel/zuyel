@@ -18,6 +18,8 @@ interface AiSlideToBlogModalProps {
   onClose: () => void;
   presentationTitle: string;
   totalSlides?: number;
+  chapterId?: number;
+  onSavedToChapter?: (newItem: any) => void;
 }
 
 export default function AiSlideToBlogModal({
@@ -25,12 +27,15 @@ export default function AiSlideToBlogModal({
   onClose,
   presentationTitle,
   totalSlides = 15,
+  chapterId,
+  onSavedToChapter,
 }: AiSlideToBlogModalProps) {
   const [startSlide, setStartSlide] = useState<number>(1);
   const [endSlide, setEndSlide] = useState<number>(Math.min(5, totalSlides));
   const [targetClass, setTargetClass] = useState<string>("class-9-voc");
   const [blogTone, setBlogTone] = useState<string>("educational");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [generatedBlog, setGeneratedBlog] = useState<string | null>(null);
   const [publishSuccess, setPublishSuccess] = useState<boolean>(false);
 
@@ -71,11 +76,42 @@ export default function AiSlideToBlogModal({
     }
   };
 
-  const handlePublishToFeed = () => {
+  const handlePublishToFeed = async () => {
+    if (chapterId && generatedBlog) {
+      try {
+        setIsPublishing(true);
+        const res = await fetch(`/api/learning/chapters/${chapterId}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            itemType: "BLOG_PART",
+            title: `${presentationTitle} (স্লাইড ${startSlide}-${endSlide})`,
+            titleBangla: `${presentationTitle} (স্লাইড ${startSlide}-${endSlide})`,
+            contentMarkdown: generatedBlog,
+            summary: `স্লাইড ${startSlide} থেকে ${endSlide} এর ভিত্তিতে AI জেনারেটেড টেকনিক্যাল লেসন ব্লগ।`,
+            readTimeMinutes: Math.max(3, Math.round((endSlide - startSlide + 1) * 1.5)),
+            isMandatory: true,
+            isPublished: true,
+            xpReward: 50,
+            unlockRule: "UNLOCKED",
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success && data.item) {
+          onSavedToChapter?.(data.item);
+        }
+      } catch (err) {
+        console.error("Failed to save to chapter:", err);
+      } finally {
+        setIsPublishing(false);
+      }
+    }
+
     setPublishSuccess(true);
     setTimeout(() => {
       onClose();
-    }, 2000);
+    }, 1800);
   };
 
   return (
@@ -207,10 +243,20 @@ export default function AiSlideToBlogModal({
                   <div className="flex justify-end gap-2 pt-2">
                     <button
                       onClick={handlePublishToFeed}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all"
+                      disabled={isPublishing}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-black text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all active:scale-95"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>ক্লাস ফিডে পাবলিশ করুন</span>
+                      {isPublishing ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>অধ্যায়ে সেভ ও পাবলিশ হচ্ছে...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{chapterId ? "অধ্যায়ে যোগ ও পাবলিশ করুন" : "ক্লাস ফিডে পাবলিশ করুন"}</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

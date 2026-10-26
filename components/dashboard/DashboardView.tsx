@@ -16,6 +16,11 @@ import {
   Sparkles,
   Activity,
   CheckCircle2,
+  Zap,
+  CalendarCheck,
+  BookOpen,
+  FileText,
+  RefreshCw,
 } from "lucide-react";
 import DynamicCounter from "../common/DynamicCounter";
 import { useLanguage } from "@/context/LanguageContext";
@@ -190,49 +195,76 @@ export default function DashboardView({ onNavigate }: DashboardViewProps) {
 
   return (
     <div className="space-y-6">
-      {/* Top Welcome Banner with Live Technical Highlight */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 p-6 sm:p-8 rounded-3xl text-white shadow-xl border border-indigo-900/50 flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative overflow-hidden">
-        {/* Animated Background Vector Lines */}
-        <div className="absolute top-0 right-0 w-80 h-full opacity-10 pointer-events-none hidden md:block">
-          <svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="200" cy="200" r="160" stroke="#38bdf8" strokeWidth="2" strokeDasharray="12 6" />
-            <circle cx="200" cy="200" r="120" stroke="#818cf8" strokeWidth="3" />
-            <circle cx="200" cy="200" r="80" stroke="#34d399" strokeWidth="2" strokeDasharray="8 4" />
-          </svg>
-        </div>
-
-        <div className="relative z-10 space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-teal-300 text-xs font-bold backdrop-blur-md border border-white/20">
-            <Sparkles className="w-3.5 h-3.5 text-teal-400" />
-            <span>স্মার্ট ক্যাম্পাস ম্যানেজমেন্ট ২০২৬</span>
+      {/* =======================================================================
+          TASK 1: ULTRA-SLEEK SINGLE-ROW EXECUTIVE COMMAND BAR
+          (Completely Replaces Old Welcome / Admin Name Hero Banner)
+          ======================================================================= */}
+      <div className="h-auto sm:h-14 px-4 sm:px-5 py-2.5 sm:py-0 rounded-2xl backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 transition-all">
+        {/* Left: Live Pulse Indicator & Active Academic Session */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500" />
+            </span>
+            <span className="text-xs font-black text-slate-800 dark:text-slate-100 tracking-tight">
+              ✨ প্রাতিষ্ঠানিক ড্যাশবোর্ড ওভারভিউ
+            </span>
           </div>
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white">
-            পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ ইআরপি
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-            পূর্ব জালাসী, তালমা নদী বাঁধ সংলগ্ন, পঞ্চগড় • কারিগরি শিক্ষা অধিদপ্তর ও কারিগরি শিক্ষা বোর্ড অনুমোদিত
-          </p>
+
+          <span className="hidden sm:inline text-slate-300 dark:text-slate-700">•</span>
+
+          <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-[11px] font-black text-indigo-700 dark:text-indigo-300">
+            শিক্ষাবর্ষ ২০২৬
+          </span>
         </div>
 
-        {/* Quick Launch Buttons */}
-        <div className="relative z-10 flex flex-wrap items-center gap-2.5">
-          <GlowButton
-            variant="amber"
-            onClick={() => onNavigate("id_cards")}
-            icon={CreditCard}
-            className="shadow-lg shadow-amber-500/20"
+        {/* Center/Right: Quick Action Colored Pills with hover lift */}
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-end">
+          <button
+            type="button"
+            onClick={() => onNavigate("quiz_admin")}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black text-xs shadow-sm hover:shadow-md hover:shadow-indigo-500/25 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer inline-flex items-center gap-1.5"
           >
-            আইডি কার্ড স্টুডিও
-          </GlowButton>
+            <Zap className="w-3.5 h-3.5" />
+            <span>⚡ লাইভ কুইজ</span>
+          </button>
 
-          <GlowButton
-            variant="secondary"
-            onClick={() => onNavigate("mysql_workbench")}
-            icon={Database}
-            className="border-white/20 bg-white/10 hover:bg-white/20 text-white backdrop-blur-md shadow-xs"
+          <button
+            type="button"
+            onClick={() => onNavigate("attendance")}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-black text-xs shadow-sm hover:shadow-md hover:shadow-emerald-500/25 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer inline-flex items-center gap-1.5"
           >
-            MySQL কনসোল
-          </GlowButton>
+            <CalendarCheck className="w-3.5 h-3.5" />
+            <span>📲 QR হাজিরা</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate("course_content_builder")}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 text-white font-black text-xs shadow-sm hover:shadow-md hover:shadow-amber-500/25 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>✍️ নতুন লার্নিং কন্টেন্ট</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate("bangla_docs")}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-black text-xs shadow-sm hover:shadow-md hover:shadow-cyan-500/25 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>📄 প্রত্যয়নপত্র</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-cyan-700 dark:text-cyan-300 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+            title="ডাটাবেস রিফ্রেশ"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 

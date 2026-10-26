@@ -113,9 +113,35 @@ export default function StudentLearningLeaderboard({
     };
   }, []);
 
-  const rawLeaderboard = useMemo(() => {
-    return getStudentLeaderboard(selectedClass, selectedTrade);
+  const [dbLeaderboard, setDbLeaderboard] = useState<StudentLeaderboardEntry[] | null>(null);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchDbLeaderboard() {
+      setIsLoadingLeaderboard(true);
+      try {
+        const res = await fetch(`/api/learning/leaderboard?class=${selectedClass}&trade=${selectedTrade}`);
+        const data = await res.json();
+        if (isMounted && data.success && Array.isArray(data.leaderboard)) {
+          setDbLeaderboard(data.leaderboard);
+        }
+      } catch (err) {
+        console.error("Failed to load real DB leaderboard:", err);
+      } finally {
+        if (isMounted) setIsLoadingLeaderboard(false);
+      }
+    }
+    fetchDbLeaderboard();
+    return () => {
+      isMounted = false;
+    };
   }, [selectedClass, selectedTrade]);
+
+  const rawLeaderboard = useMemo(() => {
+    if (dbLeaderboard !== null) return dbLeaderboard;
+    return getStudentLeaderboard(selectedClass, selectedTrade);
+  }, [dbLeaderboard, selectedClass, selectedTrade]);
 
   const leaderboard = useMemo(() => {
     if (!searchQuery.trim()) return rawLeaderboard;

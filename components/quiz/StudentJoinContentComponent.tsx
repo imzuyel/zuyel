@@ -98,6 +98,15 @@ export function StudentJoinContentComponent() {
     durationMs: number;
   } | null>(null);
 
+  // Pre-Quiz & Mentimeter Warmup States
+  const [activePreQuiz, setActivePreQuiz] = useState<any | null>(null);
+  const [isQuizModeStarted, setIsQuizModeStarted] = useState<boolean>(false);
+  const [preQuizInput, setPreQuizInput] = useState<string>("");
+  const [preQuizSelectedMood, setPreQuizSelectedMood] = useState<string>("fire");
+  const [preQuizStickyColor, setPreQuizStickyColor] = useState<string>("amber");
+  const [preQuizSubmitted, setPreQuizSubmitted] = useState<boolean>(false);
+  const [isSubmittingPreQuiz, setIsSubmittingPreQuiz] = useState<boolean>(false);
+
   // Auto-dismiss active motivation messages after their duration expires
   useEffect(() => {
     if (!activeMotivation) return;
@@ -267,6 +276,20 @@ export function StudentJoinContentComponent() {
           if (data.motivationMessage) {
             setActiveMotivation(data.motivationMessage);
           }
+
+          if (data.activePreQuizActivity !== undefined) {
+            setActivePreQuiz((prev: any) => {
+              if (data.activePreQuizActivity?.id !== prev?.id) {
+                setPreQuizSubmitted(false);
+                setPreQuizInput("");
+              }
+              return data.activePreQuizActivity;
+            });
+          }
+
+          if (data.isQuizModeStarted !== undefined) {
+            setIsQuizModeStarted(Boolean(data.isQuizModeStarted));
+          }
         }
       } catch (err) {
         setNetworkStatus("disconnected");
@@ -357,6 +380,35 @@ export function StudentJoinContentComponent() {
     } catch (err: any) {
       setLoading(false);
       setErrorMessage(err.message || "সার্ভার সংযোগে ত্রুটি ঘটেছে।");
+    }
+  };
+
+  // Submit Pre-Quiz Ungraded Warmup Response
+  const handleSubmitPreQuiz = async (overrideValue?: string) => {
+    if (!activePreQuiz || !activeSession || !participantId || isSubmittingPreQuiz) return;
+    const answerToSubmit = overrideValue !== undefined ? overrideValue : preQuizInput;
+    if (!answerToSubmit || !String(answerToSubmit).trim()) return;
+
+    setIsSubmittingPreQuiz(true);
+    try {
+      await fetch(`/api/live-quizzes/sessions/${activeSession.id}/pre-quiz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "submit_response",
+          activityId: activePreQuiz.id,
+          playerId: participantId,
+          playerName: displayName,
+          response: String(answerToSubmit).trim(),
+          mood: preQuizSelectedMood,
+          color: preQuizStickyColor,
+        }),
+      });
+      setPreQuizSubmitted(true);
+    } catch (err) {
+      console.error("Failed to submit pre-quiz response:", err);
+    } finally {
+      setIsSubmittingPreQuiz(false);
     }
   };
 
@@ -849,18 +901,188 @@ export function StudentJoinContentComponent() {
                   )}
                 </div>
 
-                {/* Waiting Message */}
-                <div className="text-center space-y-3 py-4 border-t border-b border-white/5">
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-                    <span className="text-xs font-black text-cyan-400 uppercase tracking-widest">
-                      Waiting for Host to Start
-                    </span>
+                {/* MENTIMETER WARMUP INTERACTIVE CARD (UNGRADED PHASE) */}
+                {activePreQuiz && !isQuizModeStarted ? (
+                  <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-950/90 to-purple-950/90 border-2 border-indigo-500/40 shadow-xl space-y-4 text-left">
+                    <div className="flex items-center justify-between gap-2 border-b border-indigo-500/30 pb-2">
+                      <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black text-[10px] uppercase tracking-wider flex items-center gap-1.5 border border-amber-500/30">
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                        <span>ওয়ার্মআপ অ্যাক্টিভিটি (নম্বরবিহীন)</span>
+                      </span>
+                      <span className="text-[10px] text-indigo-300 font-mono">লাইভ রেসপন্স</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <h4 className="text-sm sm:text-base font-black text-white leading-relaxed">
+                        {activePreQuiz.prompt || "আপনার মতামত জানান"}
+                      </h4>
+                    </div>
+
+                    {preQuizSubmitted ? (
+                      <div className="p-4 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-center space-y-2">
+                        <div className="inline-flex items-center gap-1.5 text-emerald-300 font-black text-xs">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>আপনার উত্তর সফলভাবে জমা হয়েছে!</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          হোস্টের স্ক্রিনে আপনার উত্তর দেখা যাচ্ছে। শিক্ষক কুইজ শুরু করা পর্যন্ত অপেক্ষা করুন।
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setPreQuizSubmitted(false)}
+                          className="text-[10px] text-cyan-400 underline font-bold"
+                        >
+                          পুনরায় মতামত দিতে চান?
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {/* Word Cloud Input */}
+                        {(activePreQuiz.type?.toUpperCase().includes("WORD_CLOUD") || activePreQuiz.type === "word_cloud") && (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={preQuizInput}
+                              onChange={(e) => setPreQuizInput(e.target.value)}
+                              placeholder="১–৩টি শব্দ লিখুন (যেমন: সততা, প্রযুক্তি)"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-indigo-500/40 text-sm text-white focus:outline-none focus:border-cyan-400 font-bold"
+                            />
+                            <button
+                              type="button"
+                              disabled={!preQuizInput.trim() || isSubmittingPreQuiz}
+                              onClick={() => handleSubmitPreQuiz()}
+                              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40"
+                            >
+                              {isSubmittingPreQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                              <span>শব্দ যুক্ত করুন</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Mood Check-In */}
+                        {(activePreQuiz.type?.toUpperCase().includes("MOOD") || activePreQuiz.type === "mood_checkin") && (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-2 gap-2">
+                              {[
+                                { id: "fire", label: "🔥 সুপার এনার্জেটিক", mood: "fire" },
+                                { id: "happy", label: "😊 বেশ ভালো", mood: "happy" },
+                                { id: "thinking", label: "🤔 একটু চিন্তিত", mood: "thinking" },
+                                { id: "tired", label: "😴 ক্লান্ত", mood: "tired" },
+                              ].map((m) => (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setPreQuizSelectedMood(m.mood);
+                                    handleSubmitPreQuiz(m.label);
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                                    preQuizSelectedMood === m.mood
+                                      ? "bg-indigo-600 text-white border-indigo-400 shadow-md"
+                                      : "bg-slate-950/80 text-slate-300 border-slate-800 hover:bg-slate-800"
+                                  }`}
+                                >
+                                  <span>{m.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sticky Wall / Open Feedback */}
+                        {(activePreQuiz.type?.toUpperCase().includes("STICKY") || activePreQuiz.type?.toUpperCase().includes("FEEDBACK") || activePreQuiz.type === "open_ended") && (
+                          <div className="space-y-2.5">
+                            <textarea
+                              rows={2}
+                              value={preQuizInput}
+                              onChange={(e) => setPreQuizInput(e.target.value)}
+                              placeholder="আপনার চিন্তা বা প্রশ্ন এখানে লিখুন..."
+                              className="w-full p-3 rounded-xl bg-slate-950 border border-indigo-500/40 text-xs sm:text-sm text-white focus:outline-none focus:border-cyan-400 font-medium"
+                            />
+                            {/* Color Selector */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-slate-400">রং:</span>
+                                {[
+                                  { id: "amber", bg: "bg-amber-300" },
+                                  { id: "rose", bg: "bg-rose-300" },
+                                  { id: "cyan", bg: "bg-cyan-300" },
+                                  { id: "emerald", bg: "bg-emerald-300" },
+                                ].map((c) => (
+                                  <button
+                                    key={c.id}
+                                    type="button"
+                                    onClick={() => setPreQuizStickyColor(c.id)}
+                                    className={`w-5 h-5 rounded-full ${c.bg} ${preQuizStickyColor === c.id ? "ring-2 ring-white scale-110" : "opacity-60"}`}
+                                  />
+                                ))}
+                              </div>
+                              <button
+                                type="button"
+                                disabled={!preQuizInput.trim() || isSubmittingPreQuiz}
+                                onClick={() => handleSubmitPreQuiz()}
+                                className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                              >
+                                {isSubmittingPreQuiz ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3 h-3" />}
+                                <span>পোস্ট করুন</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Opinion Poll */}
+                        {(activePreQuiz.type?.toUpperCase().includes("POLL") || activePreQuiz.type === "poll") && (
+                          <div className="space-y-2">
+                            {(activePreQuiz.options && activePreQuiz.options.length > 0
+                              ? activePreQuiz.options
+                              : ["হ্যাঁ, পুরোপুরি প্রস্তুত!", "মোটামুটি প্রস্তুত", "কিছুটা চিন্তিত"]
+                            ).map((opt: string, oIdx: number) => (
+                              <button
+                                key={oIdx}
+                                type="button"
+                                disabled={isSubmittingPreQuiz}
+                                onClick={() => handleSubmitPreQuiz(opt)}
+                                className="w-full p-2.5 rounded-xl bg-slate-950/80 hover:bg-indigo-600/30 border border-slate-800 hover:border-indigo-500 text-xs font-bold text-slate-200 transition text-left flex items-center justify-between cursor-pointer"
+                              >
+                                <span>{opt}</span>
+                                <span className="text-[10px] text-indigo-400 font-mono">ভোট দিন →</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Intro / Welcome Slide Reagents */}
+                        {(activePreQuiz.type?.toUpperCase().includes("INTRO") || activePreQuiz.type === "welcome_intro") && (
+                          <div className="flex items-center justify-center gap-2 pt-1">
+                            {["❤️", "🔥", "👏", "🎉", "⚡"].map((emoji, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => handleSubmitPreQuiz(emoji)}
+                                className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xl flex items-center justify-center transition transform active:scale-90"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed px-4">
-                    হোস্ট কুইজটি শুরু করার সাথে সাথেই আপনার স্ক্রিনে প্রথম প্রশ্নটি ভেসে উঠবে। চোখ রাখুন মূল স্ক্রিনের দিকে!
-                  </p>
-                </div>
+                ) : (
+                  /* Waiting for Host Message */
+                  <div className="text-center space-y-3 py-4 border-t border-b border-white/5">
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                      <span className="text-xs font-black text-cyan-400 uppercase tracking-widest">
+                        Waiting for Host to Start
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed px-4">
+                      হোস্ট কুইজটি শুরু করার সাথে সাথেই আপনার স্ক্রিনে প্রথম প্রশ্নটি ভেসে উঠবে। চোখ রাখুন মূল স্ক্রিনের দিকে!
+                    </p>
+                  </div>
+                )}
 
                 {/* Leave Button */}
                 <button

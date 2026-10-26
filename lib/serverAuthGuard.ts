@@ -475,13 +475,6 @@ export function requireAdmin(req: Request, endpointName?: string): AuthGuardResu
 }
 
 /**
- * Requires Supreme Admin (Principal / Super Admin) access strictly.
- */
-export function requireSuperAdmin(req: Request, endpointName?: string): AuthGuardResult {
-  return requireRole(req, ["super_admin", "principal"], endpointName);
-}
-
-/**
  * Requires Teacher, Instructor, or Administrative staff access.
  */
 export function requireTeacherOrAdmin(req: Request, endpointName?: string): AuthGuardResult {
@@ -535,6 +528,67 @@ export function requireStudentAuth(req: Request, endpointName?: string): AuthGua
           code: "STUDENT_ONLY_ENDPOINT",
           message:
             "এই এন্ডপয়েন্টটি শুধুমাত্র শিক্ষার্থীদের নিজস্ব প্রোফাইল সংক্রান্ত কার্যক্রমের জন্য নির্ধারিত। শিক্ষক বা প্রশাসনিক কর্মকর্তা হিসেবে ব্যাকএন্ড প্যানেল (/api/auth/profile) ব্যবহার করুন।",
+          endpoint: routePath,
+          timestamp: new Date().toISOString(),
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { authorized: true, identity };
+}
+
+/**
+ * Requires caller to be SUPER_ADMIN (or supreme admin).
+ * Returns AuthGuardResult with 401 Unauthorized or 403 Forbidden if not satisfied.
+ */
+export function requireSuperAdmin(req: Request, endpointName?: string): AuthGuardResult {
+  const identity = extractRequestIdentity(req);
+  const routePath = endpointName || new URL(req.url).pathname;
+
+  if (!identity.isAuthenticated) {
+    return {
+      authorized: false,
+      identity,
+      errorResponse: NextResponse.json(
+        {
+          success: false,
+          status: 401,
+          error: "Unauthorized",
+          code: "AUTH_REQUIRED",
+          message: "এই সংবেদনশীল এন্ডপয়েন্টে প্রবেশের জন্য প্রাতিষ্ঠানিক লগইন করা আবশ্যক।",
+          endpoint: routePath,
+          timestamp: new Date().toISOString(),
+        },
+        { status: 401 }
+      ),
+    };
+  }
+
+  if (!isSupremeAdmin(identity.userRole)) {
+    recordSecurityAuditLog({
+      actionType: "SUPER_ADMIN_REQUIRED_BLOCKED",
+      actorRole: identity.userRole,
+      actorName: identity.userName,
+      actorEmail: identity.userEmail,
+      routePath,
+      ipAddress: identity.ipAddress,
+      status: "BLOCKED",
+      details: `User '${identity.userName}' (${identity.userRole}) attempted to access super-admin-only endpoint ${routePath}.`,
+      detailsBangla: `ব্যবহারকারী '${identity.userName}' (${identity.userRole}) প্রধান প্রশাসক সংরক্ষিত এন্ডপয়েন্টে (${routePath}) প্রবেশের চেষ্টায় প্রত্যাখ্যাত।`,
+    });
+
+    return {
+      authorized: false,
+      identity,
+      errorResponse: NextResponse.json(
+        {
+          success: false,
+          status: 403,
+          error: "Forbidden",
+          code: "SUPER_ADMIN_REQUIRED",
+          message: "কেবলমাত্র প্রধান প্রশাসক (Super Admin) এই সংবেদনশীল কার্যক্রমে প্রবেশের অনুমতিপ্রাপ্ত।",
           endpoint: routePath,
           timestamp: new Date().toISOString(),
         },

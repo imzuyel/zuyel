@@ -182,6 +182,10 @@ const LiveQuizPortal = dynamic(() => import("@/components/quiz/LiveQuizPortal"),
   loading: () => <ViewLoader title="লাইভ কুইজ পোর্টাল" />,
   ssr: false,
 });
+const UnifiedQuizMentimeterWorkspace = dynamic(() => import("@/components/quiz/UnifiedQuizMentimeterWorkspace"), {
+  loading: () => <ViewLoader title="🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও" />,
+  ssr: false,
+});
 const PtscMasterRoutineStudio = dynamic(() => import("@/components/routine/PtscMasterRoutineStudio"), {
   loading: () => <ViewLoader title="মাষ্টার রুটিন স্টুডিও" />,
   ssr: false,
@@ -431,8 +435,8 @@ export default function AdminPage() {
           />
         )}
 
-        <main className={`flex-1 min-h-0 min-w-0 ${isQuizLive ? "p-0 overflow-y-auto overflow-x-hidden bg-slate-950 w-full min-h-screen" : "overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-slate-950"}`}>
-          <div className={isQuizLive ? "w-full min-h-screen flex flex-col" : "max-w-7xl mx-auto space-y-6 w-full min-w-0"}>
+        <main className={`flex-1 min-h-0 min-w-0 ${isQuizLive ? "p-0 overflow-y-auto overflow-x-hidden bg-slate-950 w-full min-h-screen" : "overflow-y-auto overflow-x-hidden overscroll-contain p-3 sm:p-5 lg:p-6 bg-slate-50 dark:bg-slate-950"}`}>
+          <div className={isQuizLive ? "w-full min-h-screen flex flex-col" : "w-full max-w-[1600px] mx-auto space-y-6 min-w-0"}>
             <AdminViewErrorBoundary title="অ্যাডমিন মডিউল">
               {activeTab === "dashboard" && (
                 <CleanDashboardView onNavigate={(tab: string) => handleTabChange(tab as AdminTab)} />
@@ -476,17 +480,16 @@ export default function AdminPage() {
                 />
               )}
               {activeTab === "student_doubts" && <TeacherDoubtReviewView />}
-              {activeTab === "weak_topic_analytics" && <ClassWeakTopicAnalytics />}
-              {(activeTab === "quiz_studio" || activeTab === "ai_quiz_import") && <AllInOneQuizStudio />}
-              {activeTab === "presentations" && <PresentationViewer />}
-              {activeTab === "security_governance" && <SecurityGovernanceHub />}
-              {activeTab === "profile" && <AdminStaffProfileView />}
-              {activeTab === "quiz_admin" && (
-                <LiveQuizPortal
+              {(activeTab === "quiz_admin" || activeTab === "quiz_studio" || activeTab === "ai_quiz_import") && (
+                <UnifiedQuizMentimeterWorkspace
+                  initialTab={activeTab === "quiz_studio" ? "builder" : "host"}
                   onLiveStateChange={(live) => setIsQuizLive(live)}
                   onExitLive={() => setIsQuizLive(false)}
                 />
               )}
+              {activeTab === "presentations" && <PresentationViewer />}
+              {activeTab === "security_governance" && <SecurityGovernanceHub />}
+              {activeTab === "profile" && <AdminStaffProfileView />}
             </AdminViewErrorBoundary>
           </div>
         </main>

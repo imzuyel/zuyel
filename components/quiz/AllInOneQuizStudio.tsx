@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Sparkles,
   ClipboardPaste,
@@ -36,6 +36,7 @@ import {
 import { useQuizStudio, QuizStudioProvider, StudioQuestionItem } from "@/components/quiz/QuizStudioContext";
 import AcademyClassTradeSelector from "@/components/common/AcademyClassTradeSelector";
 import { saveCustomLessonQuiz, StudentQuizQuestion } from "@/lib/studentIntelligenceStore";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
 
 // Demo text sets for instant 1-click test fill
 const SAMPLE_DEMOS = [
@@ -138,6 +139,8 @@ function AllInOneQuizStudioInner({
   // "manual" = (গ) ✍️ ম্যানুয়ালি যোগ
   const [activeTab, setActiveTab] = useState<"prompt" | "paste_import" | "manual">("paste_import");
 
+  const { selectedClass: globalClass, selectedTrade: globalTrade } = useGlobalAcademic();
+
   // Global Quiz Metadata
   const [quizTitle, setQuizTitle] = useState("কারিগরি ও একাডেমিক মূল্যায়ন কুইজ");
   const [selectedClass, setSelectedClass] = useState(defaultClassId);
@@ -145,6 +148,19 @@ function AllInOneQuizStudioInner({
   const [quizCategory, setQuizCategory] = useState("Practice");
   const [defaultMarks, setDefaultMarks] = useState<number>(2);
   const [defaultTime, setDefaultTime] = useState<number>(30);
+
+  // Sync with global academic filter
+  useEffect(() => {
+    if (globalClass) {
+      setSelectedClass(globalClass);
+    }
+  }, [globalClass]);
+
+  useEffect(() => {
+    if (globalTrade && globalTrade !== "all") {
+      setSelectedTrade(globalTrade);
+    }
+  }, [globalTrade]);
 
   // Tab (ক) AI Prompt Generator State
   const [promptTopic, setPromptTopic] = useState("");

@@ -475,11 +475,10 @@ function loadStudentRecordsFromExcelOrStaging(): NormalizedStudent[] {
     return students;
   }
 
-  // Fallback: Read from students-staging.json
+  // Fallback: Read from canonical prisma/students-staging.json
   const stagingPaths = [
-    path.join(__dirname, "students-staging.json"),
-    path.join(process.cwd(), "students-staging.json"),
     path.join(process.cwd(), "prisma", "students-staging.json"),
+    path.join(__dirname, "students-staging.json"),
   ];
 
   let stagingFilePath: string | null = null;
@@ -547,9 +546,22 @@ function loadStudentRecordsFromExcelOrStaging(): NormalizedStudent[] {
 // Main Execution Function
 // ============================================================================
 async function main() {
+  const seedMode = (process.env.SEED_MODE || "essential").toLowerCase().trim();
+  const seedStudentsExplicit = process.env.SEED_STUDENTS === "true";
+  const isFullMode = seedMode === "full";
+  const shouldSeedStudents = isFullMode || seedStudentsExplicit;
+
   console.log("============================================================================");
-  console.log("🌱 PTSC ERP — COMPREHENSIVE MASTER DATA & BULK STUDENT SEEDER");
+  console.log(`🌱 PTSC ERP — MASTER DATA SEEDER [SEED_MODE: ${seedMode.toUpperCase()}]`);
   console.log("============================================================================");
+  if (!shouldSeedStudents) {
+    console.log("ℹ️ Mode Policy: 'essential' mode active (default for production).");
+    console.log("   - Seeds: Master Academic Years, Classes, Trades, Sections, Subjects, Roles, Admin & Faculty accounts.");
+    console.log("   - Preserves: Existing live students, attendance records, exam marks, and quiz progress.");
+    console.log("   - To seed staged students without deleting live data: SEED_STUDENTS=true npx prisma db seed\n");
+  } else {
+    console.log("ℹ️ Mode Policy: 'full' development mode active. Ingesting full staged students dataset via non-destructive upsert.\n");
+  }
 
   // 1. Password Hashing with Bcrypt
   const defaultPassword = "password";
@@ -558,6 +570,7 @@ async function main() {
 
   // 2. Master Data: Academic Year 2026
   console.log("\n📦 [1/5] Upserting Academic Year 2026...");
+
   const academicYear = await prisma.academicYear.upsert({
     where: { name: "2026" },
     update: { status: "Active", isCurrent: true },
@@ -703,8 +716,63 @@ async function main() {
     console.log(`   ✓ Trade [${t.code}]: ${t.name} (DB ID: ${tradeRecord.id})`);
   }
 
+  // 5.1 Master Data: Core BTEB & National Curriculum Subjects
+  console.log("\n📚 Upserting Official Core Subjects into SubjectMaster...");
+  const coreSubjects = [
+    { code: "061", name: "Bangla", nameBangla: "বাংলা", nameEnglish: "Bangla", shortName: "BAN", subjectType: "Theory", fullMarks: 100, passMarks: 33 },
+    { code: "062", name: "English", nameBangla: "ইংরেজি", nameEnglish: "English", shortName: "ENG", subjectType: "Theory", fullMarks: 100, passMarks: 33 },
+    { code: "063", name: "Mathematics", nameBangla: "গণিত", nameEnglish: "Mathematics", shortName: "MATH", subjectType: "Theory", fullMarks: 100, passMarks: 33 },
+    { code: "064", name: "Science", nameBangla: "বিজ্ঞান", nameEnglish: "Science", shortName: "SCI", subjectType: "Theory", fullMarks: 100, passMarks: 33 },
+    { code: "065", name: "Digital Technology", nameBangla: "ডিজিটাল প্রযুক্তি", nameEnglish: "Digital Technology", shortName: "TECH", subjectType: "Practical", fullMarks: 100, passMarks: 33 },
+    { code: "191", name: "Trade 1: General Electronics", nameBangla: "ট্রেড ১: জেনারেল ইলেকট্রনিক্স", nameEnglish: "General Electronics", shortName: "GE-1", subjectType: "Technical", fullMarks: 100, passMarks: 33 },
+    { code: "192", name: "Trade 2: IT Support & IoT", nameBangla: "ট্রেড ২: আইটি সাপোর্ট অ্যান্ড আইওটি", nameEnglish: "IT Support and IoT Basics", shortName: "IT-1", subjectType: "Technical", fullMarks: 100, passMarks: 33 },
+    { code: "193", name: "Trade 3: Electrical Workshop", nameBangla: "ট্রেড ৩: জেনারেল ইলেকট্রিক্যাল", nameEnglish: "General Electrical Workshop", shortName: "EE-1", subjectType: "Technical", fullMarks: 100, passMarks: 33 },
+    { code: "194", name: "Trade 4: Apparel Manufacturing", nameBangla: "ট্রেড ৪: অ্যাপারেল ম্যানুফ্যাকচারিং", nameEnglish: "Apparel Manufacturing Basics", shortName: "AMB-1", subjectType: "Technical", fullMarks: 100, passMarks: 33 },
+  ];
+
+  try {
+    for (const sub of coreSubjects) {
+      await prisma.subjectMaster.upsert({
+        where: { code: sub.code },
+        update: {
+          name: sub.name,
+          nameBangla: sub.nameBangla,
+          nameEnglish: sub.nameEnglish,
+          shortName: sub.shortName,
+          subjectType: sub.subjectType,
+          fullMarks: sub.fullMarks,
+          passMarks: sub.passMarks,
+        },
+        create: {
+          code: sub.code,
+          name: sub.name,
+          nameBangla: sub.nameBangla,
+          nameEnglish: sub.nameEnglish,
+          shortName: sub.shortName,
+          subjectType: sub.subjectType,
+          creditHours: 3.0,
+          fullMarks: sub.fullMarks,
+          passMarks: sub.passMarks,
+          theoryMarks: 100,
+          practicalMarks: 0,
+          vivaMarks: 0,
+          continuousMarks: 40,
+          status: "Active",
+          displayOrder: 1,
+          description: "Authoritative BTEB / National Curriculum Subject",
+          createdBy: "System Seed",
+          updatedBy: "System Seed",
+        },
+      });
+    }
+    console.log(`   ✓ Seeded ${coreSubjects.length} core institutional subjects.`);
+  } catch (err: any) {
+    console.warn("   ⚠️ Note: subjectMaster table not ready or skipped:", err?.message || String(err));
+  }
+
   // 6. Master Data: Core System Roles & Test Users
   console.log("\n🛡️ Upserting Core RBAC Roles & System Credentials...");
+
   const roles = [
     { name: "super_admin", displayName: "Super Administrator", displayNameBangla: "সুপার অ্যাডমিনিস্ট্রেটর", level: 100, isSystemRole: true },
     { name: "admin", displayName: "System Administrator", displayNameBangla: "সিস্টেম অ্যাডমিনিস্ট্রেটর", level: 80, isSystemRole: true },
@@ -838,162 +906,166 @@ async function main() {
   }
   console.log(`   ✓ Seeded ${officialFaculty.length + 1} faculty members into DB.`);
 
-  // 7. Load Student Records
-  console.log("\n📊 [5/5] Ingesting Student Records across All Classes...");
-  const studentRecords = loadStudentRecordsFromExcelOrStaging();
-  console.log(`   ✓ Found ${studentRecords.length} validated student records to ingest.`);
+  // 7. Load Student Records (Controlled via SEED_MODE)
+  if (shouldSeedStudents) {
+    console.log("\n📊 [5/5] Ingesting Staged Student Records (Non-destructive Idempotent Upsert)...");
+    const studentRecords = loadStudentRecordsFromExcelOrStaging();
+    console.log(`   ✓ Found ${studentRecords.length} validated student records to ingest.`);
+    console.log(`   🛡️ Idempotent Mode: Using non-destructive upsert. Existing marks & attendance are preserved.`);
 
-  // Clean existing student records for pristine idempotency
-  console.log(`   🧹 Clearing existing student table for pristine idempotent seed...`);
-  await prisma.student.deleteMany();
+    // Ingest in isolated transactional chunks of 100
+    const batchSize = 100;
+    let successCount = 0;
+    const startTime = Date.now();
 
-  // Ingest in isolated transactional chunks of 100
-  const batchSize = 100;
-  let successCount = 0;
-  const startTime = Date.now();
+    for (let i = 0; i < studentRecords.length; i += batchSize) {
+      const batch = studentRecords.slice(i, i + batchSize);
 
-  for (let i = 0; i < studentRecords.length; i += batchSize) {
-    const batch = studentRecords.slice(i, i + batchSize);
+      await prisma.$transaction(
+        async (tx) => {
+          for (const s of batch) {
+            const classId = classMap[s.classNumeric];
+            if (!classId) {
+              throw new Error(`Invalid class numeric ${s.classNumeric} for student ${s.studentId}`);
+            }
 
-    await prisma.$transaction(
-      async (tx) => {
-        for (const s of batch) {
-          const classId = classMap[s.classNumeric];
-          if (!classId) {
-            throw new Error(`Invalid class numeric ${s.classNumeric} for student ${s.studentId}`);
+            const tradeId = s.tradeCode ? tradeMap[s.tradeCode] || null : null;
+            const photoUrl = "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=250&auto=format&fit=crop&q=80";
+
+            await tx.student.upsert({
+              where: { studentId: s.studentId },
+              update: {
+                roll: s.roll,
+                admissionNo: s.admissionNo,
+                name: s.name,
+                nameBangla: s.nameBangla,
+                gender: s.gender,
+                dob: s.dob,
+                bloodGroup: "B+",
+                birthRegNo: s.brn,
+                fatherName: s.fatherName,
+                motherName: s.motherName,
+                guardianMobile: s.mobile,
+                studentMobile: s.mobile === "01700-000000" ? null : s.mobile,
+                email: `student.${s.roll}.${s.classNumeric}@pgtsc.gov.bd`,
+                presentAddress: s.presentAddress,
+                permanentAddress: s.permanentAddress,
+                classId,
+                tradeId,
+                section: s.section,
+                session: "2026",
+                status: s.status,
+                shift: Shift.FIRST_SHIFT,
+                shiftBangla: "১ম শিফট",
+              },
+              create: {
+                studentId: s.studentId,
+                admissionNo: s.admissionNo,
+                roll: s.roll,
+                name: s.name,
+                nameBangla: s.nameBangla,
+                gender: s.gender,
+                dob: s.dob,
+                bloodGroup: "B+",
+                birthRegNo: s.brn,
+                fatherName: s.fatherName,
+                motherName: s.motherName,
+                guardianMobile: s.mobile,
+                studentMobile: s.mobile === "01700-000000" ? null : s.mobile,
+                email: `student.${s.roll}.${s.classNumeric}@pgtsc.gov.bd`,
+                presentAddress: s.presentAddress,
+                permanentAddress: s.permanentAddress,
+                photoUrl,
+                classId,
+                tradeId,
+                shift: Shift.FIRST_SHIFT,
+                shiftBangla: "১ম শিফট",
+                section: s.section,
+                session: "2026",
+                status: s.status,
+              },
+            });
+
+            successCount++;
           }
-
-          const tradeId = s.tradeCode ? tradeMap[s.tradeCode] || null : null;
-          const photoUrl = "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=250&auto=format&fit=crop&q=80";
-
-          await tx.student.upsert({
-            where: { studentId: s.studentId },
-            update: {
-              roll: s.roll,
-              admissionNo: s.admissionNo,
-              name: s.name,
-              nameBangla: s.nameBangla,
-              gender: s.gender,
-              dob: s.dob,
-              bloodGroup: "B+",
-              birthRegNo: s.brn,
-              fatherName: s.fatherName,
-              motherName: s.motherName,
-              guardianMobile: s.mobile,
-              studentMobile: s.mobile === "01700-000000" ? null : s.mobile,
-              email: `student.${s.roll}.${s.classNumeric}@pgtsc.gov.bd`,
-              presentAddress: s.presentAddress,
-              permanentAddress: s.permanentAddress,
-              classId,
-              tradeId,
-              section: s.section,
-              session: "2026",
-              status: s.status,
-              shift: Shift.FIRST_SHIFT,
-              shiftBangla: "১ম শিফট",
-            },
-            create: {
-              studentId: s.studentId,
-              admissionNo: s.admissionNo,
-              roll: s.roll,
-              name: s.name,
-              nameBangla: s.nameBangla,
-              gender: s.gender,
-              dob: s.dob,
-              bloodGroup: "B+",
-              birthRegNo: s.brn,
-              fatherName: s.fatherName,
-              motherName: s.motherName,
-              guardianMobile: s.mobile,
-              studentMobile: s.mobile === "01700-000000" ? null : s.mobile,
-              email: `student.${s.roll}.${s.classNumeric}@pgtsc.gov.bd`,
-              presentAddress: s.presentAddress,
-              permanentAddress: s.permanentAddress,
-              photoUrl,
-              classId,
-              tradeId,
-              shift: Shift.FIRST_SHIFT,
-              shiftBangla: "১ম শিফট",
-              section: s.section,
-              session: "2026",
-              status: s.status,
-            },
-          });
-
-          successCount++;
+        },
+        {
+          maxWait: 15000,
+          timeout: 60000,
         }
-      },
-      {
-        maxWait: 15000,
-        timeout: 60000,
+      );
+
+      const progress = Math.min(i + batchSize, studentRecords.length);
+      const percent = ((progress / studentRecords.length) * 100).toFixed(1);
+      console.log(`   ⏳ Ingestion progress: ${progress}/${studentRecords.length} records (${percent}%)`);
+    }
+
+    const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`\n✅ Ingested ${successCount} student records across classes 6, 7, 8, 9, 10, 11 in ${durationSec}s.`);
+
+    // Dev Demo Student Account (Roll 101, Class 9) - only in full mode
+    if (isFullMode) {
+      const class9Id = classMap[9];
+      if (class9Id) {
+        await prisma.student.upsert({
+          where: { studentId: "PTSC-2026-9-101" },
+          update: {
+            admissionNo: "ADM-TEST-0101",
+            roll: 101,
+            name: "Tanvir Ahmed",
+            nameBangla: "তানভীর আহমেদ",
+            gender: "Male",
+            dob: "2010-05-15",
+            bloodGroup: "A+",
+            fatherName: "Abdur Rashid",
+            motherName: "Tahmina Begum",
+            guardianMobile: "01711-101101",
+            studentMobile: "01811-101101",
+            email: "student.101@pgtsc.gov.bd",
+            presentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
+            permanentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
+            photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=250&auto=format&fit=crop&q=80",
+            classId: class9Id,
+            tradeId: tradeMap["IT-IoT"],
+            section: "A",
+            session: "2026",
+            shift: Shift.FIRST_SHIFT,
+            shiftBangla: "১ম শিফট",
+            status: StudentStatus.ACTIVE,
+          },
+          create: {
+            studentId: "PTSC-2026-9-101",
+            admissionNo: "ADM-TEST-0101",
+            roll: 101,
+            name: "Tanvir Ahmed",
+            nameBangla: "তানভীর আহমেদ",
+            gender: "Male",
+            dob: "2010-05-15",
+            bloodGroup: "A+",
+            fatherName: "Abdur Rashid",
+            motherName: "Tahmina Begum",
+            guardianMobile: "01711-101101",
+            studentMobile: "01811-101101",
+            email: "student.101@pgtsc.gov.bd",
+            presentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
+            permanentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
+            photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=250&auto=format&fit=crop&q=80",
+            classId: class9Id,
+            tradeId: tradeMap["IT-IoT"],
+            section: "A",
+            session: "2026",
+            shift: Shift.FIRST_SHIFT,
+            shiftBangla: "১ম শিফট",
+            status: StudentStatus.ACTIVE,
+          },
+        });
+        console.log(`   ✓ Dev Test Student ready: Roll 101 (Class 9) for portal testing.`);
       }
-    );
-
-    const progress = Math.min(i + batchSize, studentRecords.length);
-    const percent = ((progress / studentRecords.length) * 100).toFixed(1);
-    console.log(`   ⏳ Ingestion progress: ${progress}/${studentRecords.length} records (${percent}%)`);
+    }
+  } else {
+    console.log("\n📊 [5/5] Skipping student records ingestion (SEED_MODE=essential). All existing student records & marks preserved intact.");
   }
 
-  const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
-  console.log(`\n✅ Ingested ${successCount} student records across classes 6, 7, 8, 9, 10, 11 in ${durationSec}s.`);
-
-  // Dev Demo Student Account (Roll 101, Class 9)
-  const class9Id = classMap[9];
-  if (class9Id) {
-    await prisma.student.upsert({
-      where: { studentId: "PTSC-2026-9-101" },
-      update: {
-        admissionNo: "ADM-TEST-0101",
-        roll: 101,
-        name: "Tanvir Ahmed",
-        nameBangla: "তানভীর আহমেদ",
-        gender: "Male",
-        dob: "2010-05-15",
-        bloodGroup: "A+",
-        fatherName: "Abdur Rashid",
-        motherName: "Tahmina Begum",
-        guardianMobile: "01711-101101",
-        studentMobile: "01811-101101",
-        email: "student.101@pgtsc.gov.bd",
-        presentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
-        permanentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
-        photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=250&auto=format&fit=crop&q=80",
-        classId: class9Id,
-        tradeId: tradeMap["IT-IoT"],
-        section: "A",
-        session: "2026",
-        shift: Shift.FIRST_SHIFT,
-        shiftBangla: "১ম শিফট",
-        status: StudentStatus.ACTIVE,
-      },
-      create: {
-        studentId: "PTSC-2026-9-101",
-        admissionNo: "ADM-TEST-0101",
-        roll: 101,
-        name: "Tanvir Ahmed",
-        nameBangla: "তানভীর আহমেদ",
-        gender: "Male",
-        dob: "2010-05-15",
-        bloodGroup: "A+",
-        fatherName: "Abdur Rashid",
-        motherName: "Tahmina Begum",
-        guardianMobile: "01711-101101",
-        studentMobile: "01811-101101",
-        email: "student.101@pgtsc.gov.bd",
-        presentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
-        permanentAddress: "পঞ্চগড় সদর, পঞ্চগড়",
-        photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=250&auto=format&fit=crop&q=80",
-        classId: class9Id,
-        tradeId: tradeMap["IT-IoT"],
-        section: "A",
-        session: "2026",
-        shift: Shift.FIRST_SHIFT,
-        shiftBangla: "১ম শিফট",
-        status: StudentStatus.ACTIVE,
-      },
-    });
-    console.log(`   ✓ Dev Test Student ready: Roll 101 (Class 9) for portal testing.`);
-  }
 
   // 8. Verification & Summary Report
   const totalStudentsInDb = await prisma.student.count();

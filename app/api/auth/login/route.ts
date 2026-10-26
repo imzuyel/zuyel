@@ -300,9 +300,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // B. Fallback to PRESET_USERS & Student Intelligence Store
+    // B. Fallback to PRESET_USERS & Student Intelligence Store (Development / Fallback only)
     if (!user) {
+      // In production with an active database, hardcoded demo accounts cannot bypass real DB auth
+      if (process.env.NODE_ENV === "production" && isPrismaAvailable()) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "ইউজারনেম বা প্রাতিষ্ঠানিক পাসওয়ার্ড সঠিক নয়।",
+            code: "PRODUCTION_DB_AUTH_FAILED",
+          },
+          { status: 401 }
+        );
+      }
+
       // B1. Match against preset staff keys or emails
+
       for (const key of Object.keys(PRESET_USERS)) {
         const u = PRESET_USERS[key];
         const isKeyMatch = key.toLowerCase() === trimmedId;

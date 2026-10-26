@@ -218,6 +218,8 @@ export default function CourseContentBuilderAdmin({
     itemName: "",
   });
   const [isDeletingEntity, setIsDeletingEntity] = useState(false);
+  const [isCreatingCourse, setIsCreatingCourse] = useState(false);
+  const [isSavingChapter, setIsSavingChapter] = useState(false);
 
   // New Course Form State
   const [newCourseForm, setNewCourseForm] = useState({
@@ -709,6 +711,7 @@ export default function CourseContentBuilderAdmin({
   // Create Course
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsCreatingCourse(true);
     try {
       const res = await fetch("/api/learning/courses", {
         method: "POST",
@@ -726,6 +729,8 @@ export default function CourseContentBuilderAdmin({
       }
     } catch {
       toast.error("নেটওয়ার্ক ত্রুটি");
+    } finally {
+      setIsCreatingCourse(false);
     }
   };
 
@@ -758,6 +763,7 @@ export default function CourseContentBuilderAdmin({
     e.preventDefault();
     if (!selectedCourseId) return;
 
+    setIsSavingChapter(true);
     try {
       const url = editingChapter
         ? `/api/learning/chapters/${editingChapter.id}`
@@ -793,6 +799,8 @@ export default function CourseContentBuilderAdmin({
       }
     } catch {
       toast.error("নেটওয়ার্ক ত্রুটি");
+    } finally {
+      setIsSavingChapter(false);
     }
   };
 
@@ -2947,9 +2955,17 @@ export default function CourseContentBuilderAdmin({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs"
+                  disabled={isCreatingCourse}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
                 >
-                  তৈরি করুন
+                  {isCreatingCourse ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                      <span>তৈরি হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <span>তৈরি করুন</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -3021,10 +3037,20 @@ export default function CourseContentBuilderAdmin({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+                  disabled={isSavingChapter}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl font-bold shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
                 >
-                  <Save className="w-4 h-4" />
-                  <span>{editingChapter ? "অধ্যায় আপডেট করুন ✏️" : "অধ্যায় যোগ করুন"}</span>
+                  {isSavingChapter ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>{editingChapter ? "আপডেট হচ্ছে..." : "যুক্ত হচ্ছে..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>{editingChapter ? "অধ্যায় আপডেট করুন ✏️" : "অধ্যায় যোগ করুন"}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

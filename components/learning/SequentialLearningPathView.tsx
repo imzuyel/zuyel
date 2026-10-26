@@ -68,6 +68,7 @@ import {
   getActiveStudentAccount,
   StudentAuthAccount,
 } from "@/lib/studentIntelligenceStore";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
 
 // Helper for dynamic subject icons based on BTEB 4 trades & curriculum
 export const getSubjectIcon = (tradeCode?: string | null, code?: string | null) => {
@@ -162,12 +163,38 @@ export default function SequentialLearningPathView() {
   };
 
 
+  const {
+    activeClass,
+    activeTrade,
+    availableClasses,
+    availableTrades: globalTrades,
+    setSelectedClassId,
+    setSelectedTradeId,
+  } = useGlobalAcademic();
+
   // PTSC Academic Hierarchy Filter States: Class, Trade (৬-৮ ট্রেড নাই, ৯-১২ ট্রেড আছে), Category, Search
-  const [selectedClass, setSelectedClass] = useState<number | "all">("all");
-  const [selectedTrade, setSelectedTrade] = useState<string>("all");
+  const [selectedClass, setSelectedClass] = useState<number | "all">(() => {
+    return activeClass?.numericValue ? activeClass.numericValue : "all";
+  });
+  const [selectedTrade, setSelectedTrade] = useState<string>(() => {
+    return activeTrade?.code || "all";
+  });
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(null);
+
+  // Sync with GlobalAcademicContext when changed from global bar
+  useEffect(() => {
+    if (activeClass?.numericValue) {
+      setSelectedClass(activeClass.numericValue);
+    }
+  }, [activeClass?.numericValue]);
+
+  useEffect(() => {
+    if (activeTrade?.code) {
+      setSelectedTrade(activeTrade.code);
+    }
+  }, [activeTrade?.code]);
 
   // Trade applicability check: 6-8 NO trade, 9-12 has trade!
   const isTradeApplicable = useMemo(() => {
@@ -184,6 +211,24 @@ export default function SequentialLearningPathView() {
     setSelectedClass(newClass);
     // Rule: Class 6, 7, 8 do NOT have trades! Reset trade selection to "all"
     setSelectedTrade("all");
+    if (newClass !== "all") {
+      const match = availableClasses.find((c) => c.numericValue === newClass);
+      if (match) {
+        setSelectedClassId(match.id);
+      }
+    }
+  };
+
+  const handleTradeChange = (newTrade: string) => {
+    setSelectedTrade(newTrade);
+    if (newTrade !== "all") {
+      const match = globalTrades.find((t) => t.code === newTrade);
+      if (match) {
+        setSelectedTradeId(match.id);
+      }
+    } else {
+      setSelectedTradeId("all");
+    }
   };
 
   const handleResetFilters = () => {
@@ -1003,7 +1048,7 @@ export default function SequentialLearningPathView() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedTrade("all")}
+                    onClick={() => handleTradeChange("all")}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
                       selectedTrade === "all"
                         ? "bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-md shadow-cyan-500/25 scale-102"
@@ -1021,7 +1066,7 @@ export default function SequentialLearningPathView() {
                       <button
                         key={t.id}
                         type="button"
-                        onClick={() => setSelectedTrade(t.code)}
+                        onClick={() => handleTradeChange(t.code)}
                         className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
                           isSelected
                             ? "bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-md shadow-indigo-600/30 scale-102"

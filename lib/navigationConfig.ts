@@ -133,6 +133,17 @@ export function isRouteActive(pathname: string | null | undefined, href: string)
     return nextChar === "" || nextChar === "/";
   }
 
+  // Special alias handling for Quiz Ecosystem and Hub routes
+  if (
+    (cleanHref === "/live-quizzes" || cleanHref === "/quiz") &&
+    (pathname.startsWith("/quiz") || pathname.startsWith("/live-quiz") || pathname.startsWith("/live-quizzes"))
+  ) {
+    return true;
+  }
+  if (cleanHref === "/dashboard/documents" && pathname.startsWith("/ai/pdf-manager")) {
+    return true;
+  }
+
   return false;
 }
 
@@ -267,12 +278,12 @@ export const PRIMARY_NAVIGATION_GROUPS: NavGroupConfig[] = [
       },
       {
         href: "/live-quizzes",
-        label: "লাইভ কুইজ এরিনা ও লবি",
+        label: "🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও",
         icon: Radio,
-        badge: "Live Arena",
+        badge: "Unified Hub",
         badgeColor: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
         roles: ["all"],
-        keywords: ["quiz", "live", "arena", "কুইজ"],
+        keywords: ["quiz", "live", "arena", "mentimeter", "kahoot", "studio", "কুইজ", "মেন্টিমিটার"],
         theme: {
           iconText: "text-emerald-400",
           iconBg: "bg-emerald-500/15 border-emerald-500/30",

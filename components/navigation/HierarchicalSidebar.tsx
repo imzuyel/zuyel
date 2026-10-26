@@ -82,6 +82,18 @@ export default function HierarchicalSidebar({
     }
   };
 
+  // Smooth scroll active navigation item into view
+  useEffect(() => {
+    if (!pathname) return;
+    const timer = setTimeout(() => {
+      const activeEl = document.querySelector('[data-hierarchical-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [pathname]);
+
   // State for collapsible navigation groups
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     academic_core: true,
@@ -133,6 +145,14 @@ export default function HierarchicalSidebar({
         setOpenGroups((prev) => ({ ...prev, [group.id]: true }));
       }
     });
+
+    const timer = setTimeout(() => {
+      const activeEl = document.querySelector('[data-hierarchical-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
   }, [pathname, rbacFilteredGroups]);
 
   // Search filter applied on top of RBAC-filtered items
@@ -307,6 +327,7 @@ export default function HierarchicalSidebar({
                           <Link
                             href={item.href}
                             onClick={onNavClick}
+                            data-hierarchical-active={active ? "true" : "false"}
                             className={`group relative flex items-center rounded-xl transition-all duration-200 overflow-hidden ${
                               !isExpanded ? "justify-center p-2.5" : "gap-2.5 px-3 py-2"
                             } ${

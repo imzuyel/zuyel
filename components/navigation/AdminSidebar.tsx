@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -289,38 +289,20 @@ export default function AdminSidebar({
         items: [
           {
             id: "quiz_admin",
-            label: "লাইভ কুইজ পোর্টাল",
+            label: "🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও",
             icon: Flame,
-            badge: "হট",
-            badgeColor: "bg-red-500 text-white font-black shadow-[0_0_8px_rgba(239,68,68,0.5)] animate-pulse",
+            badge: "Unified Hub",
+            badgeColor: "bg-gradient-to-r from-red-500 to-amber-500 text-white font-black shadow-[0_0_8px_rgba(239,68,68,0.5)] animate-pulse",
             highlight: true,
-            keywords: ["quiz", "live", "অনলাইন কুইজ"],
+            keywords: ["quiz", "live", "mentimeter", "kahoot", "studio", "অনলাইন কুইজ", "মেন্টিমিটার"],
             colorTheme: {
-              iconText: "text-amber-600 dark:text-amber-400",
+              iconText: "text-amber-500 dark:text-amber-400",
               iconBg: "bg-amber-500/10 border-amber-500/20 dark:bg-amber-500/15 dark:border-amber-500/30",
-              activeBg: "bg-amber-600 text-white shadow-amber-600/30",
+              activeBg: "bg-gradient-to-r from-amber-600 to-rose-600 text-white shadow-amber-600/30",
               activeBorder: "border-amber-400/40",
               activeText: "text-white",
               indicatorColor: "bg-amber-400 shadow-[0_0_8px_#f59e0b]",
               glowShadow: "group-hover:shadow-[0_0_15px_rgba(245,158,11,0.4)]",
-            },
-          },
-          {
-            id: "quiz_studio",
-            label: "কুইজ স্টুডিও",
-            icon: Flame,
-            badge: "NEW",
-            badgeColor: "bg-green-500 text-white font-black shadow-[0_0_8px_rgba(34,197,94,0.5)]",
-            highlight: true,
-            keywords: ["quiz", "studio", "ai"],
-            colorTheme: {
-              iconText: "text-emerald-600 dark:text-emerald-400",
-              iconBg: "bg-emerald-500/10 border-emerald-500/20 dark:bg-emerald-500/15 dark:border-emerald-500/30",
-              activeBg: "bg-emerald-600 text-white shadow-emerald-600/30",
-              activeBorder: "border-emerald-400/40",
-              activeText: "text-white",
-              indicatorColor: "bg-emerald-400 shadow-[0_0_8px_#10b981]",
-              glowShadow: "group-hover:shadow-[0_0_15px_rgba(16,185,129,0.4)]",
             },
           },
           {
@@ -893,6 +875,25 @@ export default function AdminSidebar({
     }));
   };
 
+  // TASK 1: Auto-expand parent category and smooth-scroll active menu item into view
+  useEffect(() => {
+    if (!activeTab) return;
+    const parentCat = categories.find((cat) => cat.items.some((item) => item.id === activeTab));
+    if (parentCat) {
+      setExpandedCategories((prev) => ({
+        ...prev,
+        [parentCat.id]: true,
+      }));
+    }
+    const timer = setTimeout(() => {
+      const activeEl = document.querySelector(`[data-sidebar-tab="${activeTab}"]`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [activeTab, categories]);
+
   const filteredCategories = useMemo(() => {
     if (!searchQuery.trim()) return categories;
 
@@ -1076,6 +1077,7 @@ export default function AdminSidebar({
                               onSelectTab(item.id);
                               onCloseMobile();
                             }}
+                            data-sidebar-tab={item.id}
                             type="button"
                             className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-bold transition-all duration-300 text-left relative overflow-hidden cursor-pointer ${isActive
                                 ? `${themedFallback.activeBg} text-white shadow-[0_0_22px_rgba(99,102,241,0.35)] border border-white/30 font-black`

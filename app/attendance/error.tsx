@@ -48,15 +48,12 @@ export default function AttendanceErrorBoundary({
             >
               পুনরায় চেষ্টা করুন (Try Again)
             </Button>
-
-            <Link href="/dashboard" passHref legacyBehavior>
-              <Button
-                variant="outline"
-                size="sm"
-                leftIcon={<ArrowLeft className="w-3.5 h-3.5" />}
-              >
-                ড্যাশবোর্ডে ফিরুন
-              </Button>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center justify-center gap-1.5 h-8 px-3 text-xs sm:text-sm font-medium rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>ড্যাশবোর্ডে ফিরুন</span>
             </Link>
           </div>
         </CardContent>

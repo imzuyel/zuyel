@@ -787,3 +787,140 @@ export function calculateAbsenceAnalytics(thresholdPct: number = 75) {
     consecutiveAlerts,
   };
 }
+
+export interface DeduplicatedAttendanceSummary {
+  total: number;
+  present: number;
+  absent: number;
+  late: number;
+  percentage: number;
+  hasRecordedToday: boolean;
+  uniqueClassesCount: number;
+  deduplicationMethod: "unique_student_ids" | "representative_period";
+}
+
+/**
+ * Deduplicated Attendance Calculation (Period-Aware)
+ * Rule: If attendance is taken in Period 1, Period 2, etc.,
+ * the same class is counted only ONCE for the day.
+ * 
+ * If detailed student entries exist:
+ *   - A student is present today if marked present (or late) in at least one period.
+ *   - Deduplicated by unique student ID / studentCode / roll.
+ * If only record-level counts exist:
+ *   - Group records by unique class cohort key: `${classId}_${section}_${tradeId || 0}`
+ *   - For each class cohort, select the representative record (Period 1 if available, 
+ *     or earliest period, or latest finalized record) so that each class contributes
+ *     its student headcount exactly ONCE!
+ */
+export function calculateDeduplicatedAttendanceSummary(
+  records: any[],
+  totalStudentsFallback: number = 720
+): DeduplicatedAttendanceSummary {
+  if (!records || records.length === 0) {
+    return {
+      total: totalStudentsFallback,
+      present: 0,
+      absent: totalStudentsFallback,
+      late: 0,
+      percentage: 0,
+      hasRecordedToday: false,
+      uniqueClassesCount: 0,
+      deduplicationMethod: "representative_period",
+    };
+  }
+
+  // Group records by unique class cohort: classId + section + tradeId
+  const classCohorts = new Map<string, any[]>();
+  for (const r of records) {
+    const classId = r.classId || r.class?.id || (r.class?.numericValue ? r.class.numericValue - 5 : 0) || 0;
+    const section = r.section || "A";
+    const tradeId = r.tradeId || 0;
+    const key = `${classId}_${section}_${tradeId}`;
+    if (!classCohorts.has(key)) {
+      classCohorts.set(key, []);
+    }
+    classCohorts.get(key)!.push(r);
+  }
+
+  let totalDeduplicatedPresent = 0;
+  let totalDeduplicatedAbsent = 0;
+  let totalDeduplicatedLate = 0;
+  let totalDeduplicatedEnrolled = 0;
+  let usedUniqueStudents = false;
+
+  // Process each class cohort independently (ensures each class is counted ONCE)
+  classCohorts.forEach((cohortRecords) => {
+    // Check if detailed student entries exist across these periods
+    const allCohortEntries: any[] = [];
+    cohortRecords.forEach((rec) => {
+      if (Array.isArray(rec.entries) && rec.entries.length > 0) {
+        allCohortEntries.push(...rec.entries);
+      }
+    });
+
+    if (allCohortEntries.length > 0) {
+      usedUniqueStudents = true;
+      // Deduplicate by unique student ID / studentCode / roll
+      const presentStudentKeys = new Set<string>();
+      const lateStudentKeys = new Set<string>();
+      const allStudentKeys = new Set<string>();
+
+      allCohortEntries.forEach((entry) => {
+        const studentKey = String(entry.studentId || entry.studentCode || entry.roll || "");
+        if (!studentKey) return;
+        allStudentKeys.add(studentKey);
+        const status = String(entry.status || "").toUpperCase();
+        if (status === "P" || status === "PRESENT") {
+          presentStudentKeys.add(studentKey);
+        } else if (status === "L" || status === "LATE") {
+          presentStudentKeys.add(studentKey);
+          lateStudentKeys.add(studentKey);
+        }
+      });
+
+      const enrolledCount = allStudentKeys.size;
+      const presentCount = presentStudentKeys.size;
+      const lateCount = lateStudentKeys.size;
+      const absentCount = Math.max(0, enrolledCount - presentCount);
+
+      totalDeduplicatedEnrolled += enrolledCount;
+      totalDeduplicatedPresent += presentCount;
+      totalDeduplicatedAbsent += absentCount;
+      totalDeduplicatedLate += lateCount;
+    } else {
+      // No student-level entries: pick the representative period for this class
+      // Institutional rule: 1st period (periodNo: 1) is standard daily headcount.
+      // If 1st period not taken, pick the earliest recorded period of the day.
+      cohortRecords.sort((a, b) => (Number(a.periodNo) || 1) - (Number(b.periodNo) || 1));
+      const representativeRecord = cohortRecords[0];
+
+      const present = Number(representativeRecord.presentCount) || 0;
+      const late = Number(representativeRecord.lateCount) || 0;
+      const enrolled = Number(representativeRecord.totalCount) || Math.max(present, 50);
+      const absent = Number(representativeRecord.absentCount) || Math.max(0, enrolled - present);
+
+      totalDeduplicatedEnrolled += enrolled;
+      totalDeduplicatedPresent += present;
+      totalDeduplicatedAbsent += absent;
+      totalDeduplicatedLate += late;
+    }
+  });
+
+  const finalTotal = totalDeduplicatedEnrolled > 0 ? totalDeduplicatedEnrolled : totalStudentsFallback;
+  const finalPresent = totalDeduplicatedPresent;
+  const finalAbsent = totalDeduplicatedEnrolled > 0 ? totalDeduplicatedAbsent : Math.max(0, finalTotal - finalPresent);
+  const finalPercentage = finalTotal > 0 ? Number(((finalPresent / finalTotal) * 100).toFixed(1)) : 0;
+
+  return {
+    total: finalTotal,
+    present: finalPresent,
+    absent: finalAbsent,
+    late: totalDeduplicatedLate,
+    percentage: finalPercentage,
+    hasRecordedToday: true,
+    uniqueClassesCount: classCohorts.size,
+    deduplicationMethod: usedUniqueStudents ? "unique_student_ids" : "representative_period",
+  };
+}
+

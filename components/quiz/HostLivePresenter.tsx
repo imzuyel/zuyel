@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Volume2,
   VolumeX,
@@ -24,7 +24,12 @@ import {
   Trophy,
   MessageSquare,
   Layers,
-  Sparkles
+  Sparkles,
+  Loader2,
+  X,
+  ZoomIn,
+  Smile,
+  Heart
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import FloatingReactionOverlay, { emitLiveReaction } from "./FloatingReactionOverlay";
@@ -45,6 +50,22 @@ export interface PresenterSlide {
   options: string[];
   explanation?: string;
   expectedAnswerKeyword?: string;
+  responses?: Array<{
+    playerId?: string;
+    playerName?: string;
+    avatar?: string;
+    response: string;
+    color?: string;
+    mood?: string;
+    submittedAt?: string;
+  }>;
+  metadata?: {
+    tradeName?: string;
+    className?: string;
+    teacherNote?: string;
+    topic?: string;
+    [key: string]: any;
+  };
 }
 
 interface HostLivePresenterProps {
@@ -174,9 +195,169 @@ export default function HostLivePresenter({
   // Highest vote count for scaling the bar chart
   const maxVotes = Math.max(...optionStats, 1);
 
+  // Fullscreen 3-2-1 Kahoot Countdown state
+  const [countdownValue, setCountdownValue] = useState<number | null>(null);
+  const [isStartingQuiz, setIsStartingQuiz] = useState<boolean>(false);
+
+  // Spotlight Zoom Modal for Whiteboard Sticky Notes
+  const [spotlightNote, setSpotlightNote] = useState<{
+    text: string;
+    playerName: string;
+    avatar: string;
+    color: string;
+  } | null>(null);
+
+  // Trigger 3-2-1 Kahoot Fullscreen Countdown
+  const handleLaunchScoredQuiz = () => {
+    setIsStartingQuiz(true);
+    setCountdownValue(3);
+    const timer = setInterval(() => {
+      setCountdownValue((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(timer);
+          setTimeout(() => {
+            setCountdownValue(null);
+            setIsStartingQuiz(false);
+            if (onStartQuiz) onStartQuiz();
+          }, 600);
+          return 0; // 🚀 কুইজ শুরু!
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Mentimeter slide type checks
+  const rawType = (slide?.type || "").toUpperCase();
+  const isWordCloud = rawType === "WORD_CLOUD" || rawType === "WORDCLOUD";
+  const isMoodCheckin = rawType === "MOOD_CHECKIN" || rawType === "MOOD";
+  const isStickyWall = rawType === "STICKY_WALL" || rawType === "OPEN_FEEDBACK" || rawType === "OPEN_ENDED";
+  const isOpinionPoll = rawType === "OPINION_POLL" || rawType === "POLL";
+  const isIntroSlide = rawType === "INTRO_SLIDE" || rawType === "WELCOME_INTRO";
+
+  // 1. Process Word Cloud Words & Dynamic Frequency
+  const wordCloudData = useMemo(() => {
+    if (!isWordCloud) return [];
+    const counts: Record<string, number> = {};
+    const fromResponses = (slide?.responses || []).flatMap((r) =>
+      String(r.response || "")
+        .split(/[,;\s]+/)
+        .map((w) => w.trim())
+        .filter(Boolean)
+    );
+    const sourceWords =
+      fromResponses.length > 0
+        ? fromResponses
+        : (slide?.options && slide.options.length > 0
+            ? slide.options
+            : ["উদ্ভাবন", "প্রযুক্তি", "ভবিষ্যৎ", "দক্ষতা", "পরিশ্রম", "আইওটি", "ইঞ্জিনিয়ারিং", "সততা"]);
+
+    sourceWords.forEach((w) => {
+      counts[w] = (counts[w] || 0) + 1;
+    });
+
+    const maxCount = Math.max(1, ...Object.values(counts));
+    return Object.entries(counts).map(([word, count]) => ({
+      word,
+      count,
+      ratio: count / maxCount,
+    }));
+  }, [slide, isWordCloud]);
+
+  // 2. Process Mood & Energy Check-In Radar
+  const moodRadarData = useMemo(() => {
+    const moods = [
+      { id: "fire", label: "সুপার এনার্জেটিক", emoji: "🔥", count: 0, gradient: "from-amber-500 to-red-600", border: "border-amber-500/60" },
+      { id: "happy", label: "বেশ ভালো", emoji: "😊", count: 0, gradient: "from-emerald-400 to-teal-500", border: "border-emerald-500/60" },
+      { id: "thinking", label: "একটু চিন্তিত", emoji: "🤔", count: 0, gradient: "from-blue-400 to-indigo-500", border: "border-blue-500/60" },
+      { id: "tired", label: "ক্লান্ত", emoji: "😴", count: 0, gradient: "from-purple-400 to-pink-500", border: "border-purple-500/60" },
+    ];
+
+    const responses = slide?.responses || [];
+    responses.forEach((r) => {
+      const resp = String(r.response || "").toLowerCase();
+      const moodVal = String(r.mood || "").toLowerCase();
+      if (resp.includes("fire") || resp.includes("এনার্জেটিক") || moodVal.includes("fire") || resp.includes("🔥")) {
+        moods[0].count += 1;
+      } else if (resp.includes("happy") || resp.includes("ভালো") || moodVal.includes("happy") || resp.includes("😊")) {
+        moods[1].count += 1;
+      } else if (resp.includes("thinking") || resp.includes("চিন্তিত") || moodVal.includes("thinking") || resp.includes("🤔")) {
+        moods[2].count += 1;
+      } else if (resp.includes("tired") || resp.includes("ক্লান্ত") || moodVal.includes("tired") || resp.includes("😴")) {
+        moods[3].count += 1;
+      } else {
+        moods[1].count += 1;
+      }
+    });
+
+    const total = Math.max(1, responses.length);
+    return moods.map((m) => ({
+      ...m,
+      percent: responses.length > 0 ? Math.round((m.count / total) * 100) : 0,
+    }));
+  }, [slide]);
+
+  // 3. Process Collaborative Sticky Notes
+  const stickyNotesData = useMemo(() => {
+    const responses = slide?.responses || [];
+    if (responses.length > 0) {
+      return responses.map((r, i) => ({
+        id: `note-${i}`,
+        text: r.response,
+        playerName: r.playerName || "শিক্ষার্থী",
+        avatar: r.avatar || ["🐧", "💻", "⚡", "🌟", "🚀"][i % 5],
+        color: r.color || ["amber", "rose", "cyan", "emerald"][i % 4],
+      }));
+    }
+    // Fallback notes if waiting for first response
+    return (slide?.options && slide.options.length > 0 ? slide.options : [
+      "আজকের প্র্যাকটিক্যাল ল্যাব সেশনটি অনেক কার্যকরী ও আকর্ষণীয়!",
+      "নেটওয়ার্কিং ও সার্কিট এনালাইসিস আরও গভীরভাবে শিখতে চাই।",
+      "ইলেকট্রনিক্স প্রজেক্টে হ্যান্ডস-অন কাজের সুযোগ পেলে দারুণ হতো।"
+    ]).map((text, i) => ({
+      id: `fallback-${i}`,
+      text,
+      playerName: `শিক্ষার্থী ${i + 1}`,
+      avatar: ["🐧", "💻", "⚡"][i % 3],
+      color: ["amber", "rose", "cyan", "emerald"][i % 4],
+    }));
+  }, [slide]);
+
+  // 4. Process Live Opinion Poll Bars
+  const opinionPollData = useMemo(() => {
+    const options = slide?.options && slide.options.length > 0 ? slide.options : ["পছন্দ ক", "পছন্দ খ", "পছন্দ গ", "পছন্দ ঘ"];
+    const counts = options.map(() => 0);
+    const responses = slide?.responses || [];
+
+    responses.forEach((r) => {
+      const idx = parseInt(r.response);
+      if (!isNaN(idx) && idx >= 0 && idx < counts.length) {
+        counts[idx] += 1;
+      } else {
+        const textIdx = options.findIndex((opt) => opt.trim() === String(r.response).trim());
+        if (textIdx >= 0) counts[textIdx] += 1;
+      }
+    });
+
+    const totalVotes = Math.max(1, responses.length);
+    const gradients = [
+      "from-cyan-500 to-blue-600",
+      "from-pink-500 to-rose-600",
+      "from-amber-500 to-orange-600",
+      "from-emerald-500 to-teal-600",
+    ];
+
+    return options.map((opt, i) => ({
+      text: opt,
+      votes: counts[i],
+      percent: responses.length > 0 ? Math.round((counts[i] / totalVotes) * 100) : 0,
+      gradient: gradients[i % gradients.length],
+    }));
+  }, [slide]);
+
   // Cloud Kinetic Typography Component
   const CloudKineticTypography = ({ text }: { text: string }) => {
-    const words = text.split(" ");
+    const words = (text || "").split(" ");
     return (
       <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 max-w-5xl mx-auto">
         {words.map((word, i) => (
@@ -349,92 +530,200 @@ export default function HostLivePresenter({
                 <CloudKineticTypography text={slide.questionText} />
               </div>
 
-              {/* MENTIMETER SPECIALIZED INTERACTIVE SLIDE TYPES */}
-              {slide.type === "word_cloud" ? (
-                <div className="flex flex-wrap items-center justify-center gap-4 max-w-4xl py-6">
-                  {(slide.options && slide.options.length > 0 ? slide.options : ["উদ্ভাবন", "প্রযুক্তি", "ভবিষ্যৎ", "দক্ষতা", "পরিশ্রম", "সততা", "আইওটি", "ইঞ্জিনিয়ারিং"]).map((word, wIdx) => {
-                    const sizes = ["text-2xl sm:text-3xl font-bold", "text-3xl sm:text-5xl font-black", "text-xl sm:text-2xl font-bold", "text-4xl sm:text-6xl font-black"];
-                    const colors = [
-                      "from-cyan-400 to-blue-500",
-                      "from-pink-400 to-rose-500",
-                      "from-emerald-400 to-teal-500",
-                      "from-amber-400 to-orange-500",
-                      "from-purple-400 to-indigo-500"
-                    ];
-                    return (
-                      <motion.span
-                        key={wIdx}
-                        initial={{ opacity: 0, scale: 0.7 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: wIdx * 0.08 }}
-                        className={`px-5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-700/60 shadow-xl bg-clip-text text-transparent bg-gradient-to-r ${colors[wIdx % colors.length]} ${sizes[wIdx % sizes.length]} drop-shadow-sm`}
-                      >
-                        {word}
-                      </motion.span>
-                    );
-                  })}
-                </div>
-              ) : slide.type === "open_ended" ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-5xl py-4">
-                  {(slide.options && slide.options.length > 0 ? slide.options : [
-                    "আজকের প্র্যাকটিক্যাল ল্যাব সেশনটি অনেক কার্যকরী ছিল!",
-                    "পরবর্তী ক্লাসে নেটওয়ার্কিং প্রটোকল নিয়ে আরও বিস্তারিত জানতে চাই।",
-                    "কনসেপ্টগুলো খুব সহজে ও আকর্ষণীয়ভাবে বুঝতে পেরেছি।"
-                  ]).map((item, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.12 }}
-                      className="p-5 rounded-2xl bg-slate-900/90 border border-indigo-500/30 text-left space-y-2 shadow-xl backdrop-blur-md"
-                    >
-                      <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>শিক্ষার্থীর অভিমত #{idx + 1}</span>
-                      </div>
-                      <p className="text-sm font-medium text-slate-100 leading-relaxed">{item}</p>
-                    </motion.div>
-                  ))}
-                </div>
-              ) : slide.type === "scales_rating" ? (
-                <div className="w-full max-w-3xl space-y-4 py-4">
-                  {(slide.options && slide.options.length > 0 ? slide.options : [
-                    "১ - একদম বুঝিনি",
-                    "২ - কিছুটা বুঝেছি",
-                    "৩ - সন্তোষজনক",
-                    "৪ - ভালো বুঝেছি",
-                    "৫ - পুরোপুরি আত্মবিশ্বাসী"
-                  ]).map((level, rIdx) => (
-                    <div key={rIdx} className="p-4 rounded-2xl bg-slate-900/80 border border-slate-700/70 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <span className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 font-black text-sm flex items-center justify-center">
-                          {rIdx + 1}★
-                        </span>
-                        <span className="text-sm sm:text-base font-bold text-white">{level}</span>
-                      </div>
-                      <div className="w-40 sm:w-64 h-3 bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full"
-                          style={{ width: `${Math.min(100, (rIdx + 1) * 20)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : slide.type === "qa_slide" ? (
-                <div className="w-full max-w-4xl p-8 rounded-3xl bg-slate-900/90 border border-indigo-500/40 shadow-2xl backdrop-blur-xl text-center space-y-4">
-                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 text-xs font-bold">
-                    <HelpCircle className="w-4 h-4" />
-                    <span>উন্মুক্ত প্রশ্নোত্তর চ্যানেল সচল</span>
+              {/* MENTIMETER SPECIALIZED INTERACTIVE WARMUP & WHITEBOARD TYPES */}
+              {isWordCloud ? (
+                /* 1. DYNAMIC WORD CLOUD WHITEBOARD (WORD_CLOUD) */
+                <div className="w-full max-w-5xl py-6 flex flex-col items-center space-y-6">
+                  <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 p-8 rounded-3xl bg-slate-900/80 border-2 border-indigo-500/30 backdrop-blur-xl shadow-2xl min-h-[320px] w-full">
+                    {wordCloudData.map((item, wIdx) => {
+                      const fontClass =
+                        item.ratio >= 0.8
+                          ? "text-4xl sm:text-6xl font-black"
+                          : item.ratio >= 0.5
+                          ? "text-2xl sm:text-4xl font-black"
+                          : item.ratio >= 0.3
+                          ? "text-xl sm:text-2xl font-bold"
+                          : "text-base sm:text-lg font-semibold";
+                      const rotateClass = ["-rotate-6", "rotate-0", "rotate-6", "rotate-0", "-rotate-3", "rotate-3"][wIdx % 6];
+                      const gradientClass = [
+                        "from-cyan-400 via-teal-300 to-blue-500",
+                        "from-pink-400 via-rose-400 to-red-500",
+                        "from-amber-400 via-yellow-300 to-orange-500",
+                        "from-emerald-400 via-green-300 to-teal-500",
+                        "from-purple-400 via-violet-300 to-indigo-500",
+                      ][wIdx % 5];
+
+                      return (
+                        <motion.div
+                          key={wIdx}
+                          initial={{ scale: 0, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ type: "spring", stiffness: 280, damping: 22, delay: wIdx * 0.05 }}
+                          className={`px-4 sm:px-6 py-2 rounded-2xl bg-slate-950/70 border border-slate-700/60 shadow-lg ${rotateClass} transition-transform hover:scale-110 hover:z-20 cursor-default flex items-center gap-2`}
+                        >
+                          <span className={`bg-clip-text text-transparent bg-gradient-to-r ${gradientClass} ${fontClass}`}>
+                            {item.word}
+                          </span>
+                          {item.count > 1 && (
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 text-xs font-black">
+                              x{item.count}
+                            </span>
+                          )}
+                        </motion.div>
+                      );
+                    })}
                   </div>
-                  <h3 className="text-2xl sm:text-3xl font-black text-white">শিক্ষার্থীরা মোবাইল থেকে তাদের প্রশ্ন পাঠাচ্ছে</h3>
-                  <p className="text-sm text-slate-400">রিয়েল-টাইমে শিক্ষার্থীদের পাঠানো প্রশ্ন এই স্ক্রিনে প্রদর্শিত হবে</p>
+                  <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>শব্দের পুনরাবৃত্তির ফ্রিকোয়েন্সি অনুযায়ী স্বয়ংক্রিয়ভাবে ফন্ট স্কেলিং হচ্ছে</span>
+                  </div>
+                </div>
+              ) : isMoodCheckin ? (
+                /* 2. MOOD & ENERGY CHECK-IN RADAR (MOOD_CHECKIN) */
+                <div className="w-full max-w-4xl py-6 space-y-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {moodRadarData.map((m, mIdx) => (
+                      <motion.div
+                        key={m.id}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: mIdx * 0.1 }}
+                        className={`p-5 rounded-3xl bg-slate-900/90 border-2 ${m.border} shadow-xl flex flex-col items-center text-center space-y-2`}
+                      >
+                        <span className="text-4xl sm:text-5xl drop-shadow-lg">{m.emoji}</span>
+                        <span className="text-xs sm:text-sm font-black text-white">{m.label}</span>
+                        <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden mt-1">
+                          <motion.div
+                            className={`h-full bg-gradient-to-r ${m.gradient}`}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${m.percent}%` }}
+                            transition={{ duration: 0.8 }}
+                          />
+                        </div>
+                        <span className="text-xs font-bold text-slate-300 font-mono">
+                          {m.count} জন ({m.percent}%)
+                        </span>
+                      </motion.div>
+                    ))}
+                  </div>
+                  {/* Floating emoji trigger buttons */}
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    {["🔥", "😊", "🤔", "😴"].map((emoji, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => emitLiveReaction(emoji)}
+                        className="px-4 py-2 rounded-2xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-lg flex items-center gap-2 transition transform active:scale-95"
+                      >
+                        <span>{emoji}</span>
+                        <span className="text-xs text-slate-400 font-bold">রিঅ্যাক্ট</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : isStickyWall ? (
+                /* 3. COLLABORATIVE WHITEBOARD STICKY NOTES (STICKY_WALL / OPEN_FEEDBACK) */
+                <div className="w-full max-w-6xl py-4 space-y-4">
+                  <div className="p-6 sm:p-8 rounded-3xl bg-slate-950/95 border-2 border-slate-800 shadow-2xl min-h-[360px] bg-[radial-gradient(#334155_1.5px,transparent_1.5px)] [background-size:24px_24px] relative">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                      {stickyNotesData.map((item, idx) => {
+                        const tilts = ["-rotate-2", "rotate-1", "-rotate-1", "rotate-2", "-rotate-3", "rotate-3"];
+                        const tilt = tilts[idx % tilts.length];
+                        const colorStyles: Record<string, string> = {
+                          amber: "bg-amber-200 text-amber-950 border-amber-300 shadow-amber-900/20",
+                          rose: "bg-rose-200 text-rose-950 border-rose-300 shadow-rose-900/20",
+                          cyan: "bg-cyan-200 text-cyan-950 border-cyan-300 shadow-cyan-900/20",
+                          emerald: "bg-emerald-200 text-emerald-950 border-emerald-300 shadow-emerald-900/20",
+                        };
+                        const style = colorStyles[item.color || "amber"] || colorStyles.amber;
+
+                        return (
+                          <motion.div
+                            key={idx}
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ delay: idx * 0.05 }}
+                            onClick={() => setSpotlightNote(item)}
+                            className={`p-4 rounded-2xl border ${style} ${tilt} shadow-lg hover:shadow-2xl hover:scale-105 hover:rotate-0 transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[140px] select-text`}
+                          >
+                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-black/10">
+                              <span className="text-lg">{item.avatar || "📌"}</span>
+                              <span className="text-[11px] font-black tracking-tight truncate">{item.playerName || "শিক্ষার্থী"}</span>
+                            </div>
+                            <p className="text-xs sm:text-sm font-semibold leading-relaxed py-2 flex-1 line-clamp-4">
+                              {item.text}
+                            </p>
+                            <div className="text-[10px] opacity-60 text-right flex items-center justify-end gap-1">
+                              <ZoomIn className="w-3 h-3" />
+                              <span>স্পটলাইট</span>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : isOpinionPoll ? (
+                /* 4. LIVE OPINION POLL BARS (OPINION_POLL) */
+                <div className="w-full max-w-4xl py-6 space-y-4">
+                  <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-4">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-bold">
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      <span>মতামত পোল • লাইভ রেজাল্ট বার (কোনো সঠিক/ভুল নেই)</span>
+                    </div>
+                    {opinionPollData.map((opt, oIdx) => (
+                      <div key={oIdx} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm font-bold text-white px-1">
+                          <span>{opt.text}</span>
+                          <span className="text-cyan-400 font-mono">{opt.votes} ভোট ({opt.percent}%)</span>
+                        </div>
+                        <div className="w-full h-8 bg-slate-800/90 rounded-2xl overflow-hidden p-1 border border-slate-700/60 relative">
+                          <motion.div
+                            className={`h-full rounded-xl bg-gradient-to-r ${opt.gradient}`}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.max(3, opt.percent)}%` }}
+                            transition={{ duration: 0.7, ease: "easeOut" }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : isIntroSlide ? (
+                /* 5. WELCOME / INTRO BANNER SLIDE (INTRO_SLIDE) */
+                <div className="w-full max-w-4xl py-8 flex flex-col items-center text-center space-y-6">
+                  <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-br from-indigo-950/80 via-slate-900/90 to-purple-950/80 border-2 border-indigo-500/40 shadow-[0_0_50px_rgba(99,102,241,0.25)] space-y-6 w-full">
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black uppercase tracking-widest">
+                      <Sparkles className="w-4 h-4 text-cyan-400" />
+                      <span>{slide.metadata?.className || "একাডেমিক সেশন ২০২৬"} • {slide.metadata?.tradeName || "PTSC ইন্টারেক্টিভ কুইজ"}</span>
+                    </div>
+                    <h1 className="text-3xl sm:text-5xl font-black text-white leading-tight">
+                      {slide.questionText || "আজকের সেশনে সবাইকে স্বাগতম!"}
+                    </h1>
+                    {slide.explanation && (
+                      <p className="text-base sm:text-xl font-medium text-indigo-200/90 max-w-2xl mx-auto leading-relaxed">
+                        {slide.explanation}
+                      </p>
+                    )}
+                    <div className="pt-4 flex items-center justify-center gap-3">
+                      {["❤️", "🔥", "👏", "🎉", "⚡"].map((emoji, eIdx) => (
+                        <button
+                          key={eIdx}
+                          type="button"
+                          onClick={() => emitLiveReaction(emoji)}
+                          className="w-12 h-12 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-2xl flex items-center justify-center transition-transform hover:scale-125 active:scale-95 cursor-pointer shadow-lg"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : slide.options && slide.options.length > 0 ? (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ delay: 1.2 }}
+                  transition={{ delay: 0.2 }}
                   className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-4xl"
                 >
                   {slide.options.map((opt, i) => (
@@ -448,12 +737,12 @@ export default function HostLivePresenter({
                 </motion.div>
               ) : null}
 
-              {slide.explanation && (
+              {slide.explanation && !isIntroSlide && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 1.5 }}
-                  className="text-2xl sm:text-3xl font-bold text-indigo-200 opacity-80"
+                  transition={{ delay: 0.3 }}
+                  className="text-xl sm:text-2xl font-bold text-indigo-200 opacity-80"
                 >
                   {slide.explanation}
                 </motion.div>
@@ -463,7 +752,7 @@ export default function HostLivePresenter({
                 <motion.div
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 1.8 }}
+                  transition={{ delay: 0.4 }}
                   className="px-6 py-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 text-xl font-black italic shadow-2xl"
                 >
                   {slide.expectedAnswerKeyword}
@@ -598,6 +887,10 @@ export default function HostLivePresenter({
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             {mode === "presentation" ? (
               <>
+                <div className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold">
+                  <span>💬 মতামত ও ওয়ার্মআপ (নম্বরবিহীন)</span>
+                </div>
+
                 <button
                   type="button"
                   onClick={onEndQuiz}
@@ -625,11 +918,16 @@ export default function HostLivePresenter({
                 </button>
                 <button
                   type="button"
-                  onClick={onStartQuiz}
-                  className="px-6 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-black shadow-lg shadow-emerald-900/40 flex items-center gap-2 transition-all transform active:scale-95 cursor-pointer"
+                  onClick={handleLaunchScoredQuiz}
+                  disabled={isStartingQuiz}
+                  className="px-6 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs sm:text-sm font-black shadow-lg shadow-emerald-900/40 flex items-center gap-2 transition-all transform active:scale-95 cursor-pointer disabled:opacity-60"
                 >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>কুইজ শুরু করুন</span>
+                  {isStartingQuiz ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                  ) : (
+                    <Play className="w-4 h-4 fill-current text-slate-950" />
+                  )}
+                  <span>🚀 মূল কুইজ প্রতিযোগিতা শুরু করুন (Launch Scored Quiz)</span>
                 </button>
               </>
             ) : (
@@ -676,6 +974,75 @@ export default function HostLivePresenter({
           </div>
         </div>
       </footer>
+
+      {/* STICKY NOTE SPOTLIGHT ZOOM MODAL */}
+      <AnimatePresence>
+        {spotlightNote && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="relative max-w-xl w-full p-8 rounded-3xl bg-amber-200 text-amber-950 border-4 border-amber-300 shadow-2xl space-y-4"
+            >
+              <button
+                type="button"
+                onClick={() => setSpotlightNote(null)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/10 hover:bg-black/20 text-amber-950 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3 pb-3 border-b border-amber-950/20">
+                <span className="text-3xl">{spotlightNote.avatar}</span>
+                <div>
+                  <h3 className="text-lg font-black">{spotlightNote.playerName}</h3>
+                  <span className="text-xs text-amber-900 font-medium">লাইভ হোয়াইটবোর্ড অভিমত</span>
+                </div>
+              </div>
+              <p className="text-xl sm:text-2xl font-bold leading-relaxed whitespace-pre-wrap py-2">
+                {spotlightNote.text}
+              </p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* FULLSCREEN 3-2-1 KAHOOT COUNTDOWN ANIMATION */}
+      <AnimatePresence>
+        {countdownValue !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-2xl"
+          >
+            <motion.div
+              key={countdownValue}
+              initial={{ scale: 0.2, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 1.8, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 320, damping: 22 }}
+              className="flex flex-col items-center justify-center text-center space-y-6"
+            >
+              <div className="w-40 h-40 sm:w-56 sm:h-56 rounded-full bg-gradient-to-tr from-amber-500 via-orange-500 to-red-600 p-2 shadow-[0_0_100px_rgba(245,158,11,0.7)] flex items-center justify-center animate-pulse">
+                <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center">
+                  <span className="font-mono text-7xl sm:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-orange-400 to-red-400 drop-shadow-2xl">
+                    {countdownValue === 0 ? "🚀" : countdownValue}
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-3xl sm:text-5xl font-black text-white tracking-wide">
+                  {countdownValue === 0 ? "মূল কুইজ প্রতিযোগিতা শুরু হচ্ছে!" : "প্রস্তুত হও..."}
+                </h2>
+                <p className="text-sm sm:text-base text-amber-300 font-bold uppercase tracking-widest">
+                  Kahoot! লাইভ স্কোরিং ও লিডারবোর্ড ফেজ
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Live Reactions Overlay */}
       <FloatingReactionOverlay />

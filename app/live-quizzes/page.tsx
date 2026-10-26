@@ -1,16 +1,29 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import Header from "@/components/layout/Header";
 import HierarchicalSidebar from "@/components/navigation/HierarchicalSidebar";
 import LiveQuizPortal from "@/components/quiz/LiveQuizPortal";
+import UnifiedQuizMentimeterWorkspace from "@/components/quiz/UnifiedQuizMentimeterWorkspace";
 import Link from "next/link";
-import { Radio, Sparkles, BookOpen, Layers, Trophy } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Radio, Sparkles, BookOpen, Layers, Trophy, Plus, Shield } from "lucide-react";
 
-export default function LiveQuizzesPage() {
+function LiveQuizzesContent() {
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams ? searchParams.get("tab") : null;
+  const initialSection = (
+    requestedTab === "question_bank" ||
+    requestedTab === "create_quiz" ||
+    requestedTab === "my_quizzes" ||
+    requestedTab === "ai_generator" ||
+    requestedTab === "tournaments"
+      ? requestedTab
+      : "dashboard"
+  ) as any;
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLiveActive, setIsLiveActive] = useState(false);
-  const [activeTab, setActiveTab] = useState<"lobby" | "question_bank" | "ai_generator">("lobby");
 
   return (
     <div className="flex h-screen max-h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
@@ -56,7 +69,55 @@ export default function LiveQuizzesPage() {
               </div>
 
               {/* Direct Quick-links to Modes */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Link
+                  href="/live-quizzes?tab=dashboard"
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm ${
+                    initialSection === "dashboard"
+                      ? "bg-indigo-600 text-white border-indigo-500"
+                      : "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300"
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>কুইজ এরিনা</span>
+                </Link>
+
+                <Link
+                  href="/live-quizzes?tab=create_quiz"
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm ${
+                    initialSection === "create_quiz"
+                      ? "bg-purple-600 text-white border-purple-500"
+                      : "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>AI স্টুডিও</span>
+                </Link>
+
+                <Link
+                  href="/live-quizzes?tab=question_bank"
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm ${
+                    initialSection === "question_bank"
+                      ? "bg-cyan-600 text-white border-cyan-500"
+                      : "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300"
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>প্রশ্ন ব্যাংক</span>
+                </Link>
+
+                <Link
+                  href="/live-quizzes?tab=tournaments"
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm ${
+                    initialSection === "tournaments"
+                      ? "bg-amber-600 text-white border-amber-500"
+                      : "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300"
+                  }`}
+                >
+                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                  <span>টুর্নামেন্ট</span>
+                </Link>
+
                 <Link
                   href="/quiz/join"
                   target="_blank"
@@ -68,10 +129,18 @@ export default function LiveQuizzesPage() {
             </div>
           )}
 
-          {/* Interactive Live Quiz Portal Engine */}
-          <div className="max-w-7xl mx-auto">
-            <LiveQuizPortal
-              initialSection="dashboard"
+          {/* Unified Quiz & Mentimeter Master Studio Engine */}
+          <div className="w-full">
+            <UnifiedQuizMentimeterWorkspace
+              initialTab={
+                requestedTab === "create_quiz" || requestedTab === "ai_generator"
+                  ? "builder"
+                  : requestedTab === "question_bank"
+                  ? "bank"
+                  : requestedTab === "tournaments"
+                  ? "tournaments"
+                  : "host"
+              }
               onLiveStateChange={(live) => setIsLiveActive(live)}
               onExitLive={() => setIsLiveActive(false)}
             />
@@ -79,5 +148,22 @@ export default function LiveQuizzesPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LiveQuizzesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-slate-950 text-white">
+          <div className="flex items-center gap-3 text-sm font-bold text-slate-400">
+            <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
+            <span>লাইভ কুইজ হাব লোড হচ্ছে...</span>
+          </div>
+        </div>
+      }
+    >
+      <LiveQuizzesContent />
+    </Suspense>
   );
 }

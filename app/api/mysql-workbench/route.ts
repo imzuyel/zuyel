@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
-import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
-import { isSupremeAdmin } from "@/lib/rbac";
+import { requireSuperAdmin } from "@/lib/serverAuthGuard";
+import { recordSecurityAuditLog } from "@/lib/rbac";
 
 export async function GET(req: Request) {
   try {
-    // Strict server-side auth guard: Only Super Admin and System Admin can inspect DB status
-    const auth = verifyBackendAuthorization(req, {
-      requiredPermission: "view_audit_logs",
-      endpointName: "/api/mysql-workbench",
-    });
-
+    // Strictly require SUPER_ADMIN authentication for database inspector
+    const auth = requireSuperAdmin(req, "/api/mysql-workbench");
     if (!auth.authorized) {
       return auth.errorResponse!;
     }
@@ -44,7 +40,7 @@ export async function GET(req: Request) {
         phpMyAdminVersion: "5.2.1",
         connectionUptime: "99.98%",
         readOnlyMode: true,
-        securityLockdown: "Arbitrary Write/Destructive SQL Execution Disabled",
+        securityLockdown: "Arbitrary Destructive SQL Blocked in Production",
       });
     }
 
@@ -112,12 +108,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    // Server-side Super Admin authentication
-    const auth = verifyBackendAuthorization(req, {
-      requiredPermission: "view_audit_logs",
-      endpointName: "/api/mysql-workbench",
-    });
-
+    // Strictly require SUPER_ADMIN authentication for executing actions
+    const auth = requireSuperAdmin(req, "/api/mysql-workbench");
     if (!auth.authorized) {
       return auth.errorResponse!;
     }
@@ -126,13 +118,6 @@ export async function POST(req: Request) {
     const { action, query, config } = body;
 
     if (action === "update_config" && config) {
-      if (!isSupremeAdmin(auth.identity.userRole)) {
-        return NextResponse.json(
-          { success: false, error: "কেবলমাত্র প্রধান প্রশাসক (Super Admin) কনফিগারেশন পরিবর্তন করতে পারেন।" },
-          { status: 403 }
-        );
-      }
-
       institutionalDb.mysqlConfig = {
         ...institutionalDb.mysqlConfig,
         ...config,
@@ -148,57 +133,64 @@ export async function POST(req: Request) {
       const trimmed = String(query).trim();
       const lower = trimmed.toLowerCase();
 
-      // STRICT SECURITY: Disallow raw destructive commands (DROP, DELETE, ALTER, TRUNCATE, INSERT, UPDATE, etc.)
-      const destructiveKeywords = [
-        "drop",
-        "delete",
-        "alter",
-        "truncate",
-        "insert",
-        "update",
-        "create",
-        "replace",
-        "grant",
-        "revoke",
-        "exec",
-        "execute",
-        "benchmark",
-        "sleep",
-      ];
-
-      const containsDestructive = destructiveKeywords.some((kw) => {
-        const regex = new RegExp(`\\b${kw}\\b`, "i");
-        return regex.test(lower);
-      });
-
-      // Also disallow statement chaining (semicolon inside query)
+      // Check for destructive commands: DROP DATABASE, TRUNCATE, DELETE without WHERE
+      const isDropDatabase = /\bdrop\s+(database|schema)\b/i.test(lower);
+      const isTruncate = /\btruncate\b/i.test(lower);
+      const isUnrestrictedDelete =
+        /\bdelete\s+from\b/i.test(lower) && !/\bwhere\b/i.test(lower);
       const hasChainedStatements = trimmed.slice(0, -1).includes(";");
 
-      if (containsDestructive || hasChainedStatements) {
+      const isDestructive = isDropDatabase || isTruncate || isUnrestrictedDelete;
+      const allowOverride = process.env.ALLOW_DESTRUCTIVE_SQL_OVERRIDE === "true";
+
+      if (hasChainedStatements) {
         return NextResponse.json(
           {
             success: false,
-            error: "নিরাপত্তা লকডাউন: ব্রাউজার থেকে কোনো প্রকার পরিবর্তনশীল বা ঝুঁকিপূর্ণ SQL কোয়েরি (DROP, DELETE, ALTER, UPDATE ইত্যাদি) চালানো স্থায়ীভাবে নিষিদ্ধ।",
-            securityAlert: "DESTRUCTIVE_SQL_BLOCKED",
+            error: "নিরাপত্তা নীতি: স্টেটমেন্ট চেইনিং (Semicolon chained queries) নিষিদ্ধ।",
+            securityAlert: "SQL_CHAINING_BLOCKED",
           },
           { status: 403 }
         );
       }
 
-      // Only allow SELECT, SHOW, DESCRIBE, EXPLAIN
+      if (isDestructive && !allowOverride) {
+        recordSecurityAuditLog({
+          actionType: "DESTRUCTIVE_SQL_BLOCKED",
+          actorRole: auth.identity.userRole,
+          actorName: auth.identity.userName,
+          actorEmail: auth.identity.userEmail,
+          routePath: "/api/mysql-workbench",
+          status: "BLOCKED",
+          details: `Destructive query blocked: ${trimmed}`,
+          detailsBangla: `বিপজ্জনক SQL কোয়েরি প্রতিহত করা হয়েছে: ${trimmed}`,
+        });
+
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "নিরাপত্তা লকডাউন: DROP DATABASE, TRUNCATE এবং WHERE বিহীন DELETE কোয়েরি স্থায়ীভাবে অবরুদ্ধ। প্রডাকশন সিস্টেমে এটি চালানোর অনুমতি নেই।",
+            securityAlert: "DESTRUCTIVE_COMMAND_BLOCKED",
+          },
+          { status: 403 }
+        );
+      }
+
+      // Read-Only Enforcement in Production unless explicit override
       const isReadOnly =
         lower.startsWith("select") ||
         lower.startsWith("show") ||
         lower.startsWith("describe") ||
         lower.startsWith("explain");
 
-      if (!isReadOnly) {
+      if (process.env.NODE_ENV === "production" && !isReadOnly && !allowOverride) {
         return NextResponse.json(
           {
             success: false,
-            error: "নিরাপত্তা নীতি: শুধুমাত্র নিরাপদ রিড-অনলি (SELECT, SHOW, DESCRIBE) কোয়েরি অনুমোদিত।",
+            error: "প্রডাকশন নিরাপত্তা নীতি: শুধুমাত্র নিরাপদ রিড-অনলি (SELECT, SHOW, DESCRIBE) কোয়েরি অনুমোদিত।",
           },
-          { status: 400 }
+          { status: 403 }
         );
       }
 
@@ -211,3 +203,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+

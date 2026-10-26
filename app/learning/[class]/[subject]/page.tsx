@@ -395,11 +395,26 @@ export default function DedicatedSubjectPage({ params }: SubjectPageProps) {
               </div>
 
               {course.chapters.length === 0 ? (
-                <div className="p-8 text-center bg-white/90 dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 shadow-sm">
-                  <BookOpen className="w-8 h-8 text-slate-400 mx-auto" />
-                  <p className="text-xs text-slate-500 dark:text-slate-400 font-bold">
-                    এই বিষয়ের অধীনে এখনো কোনো অধ্যায় যুক্ত করা হয়নি।
-                  </p>
+                <div className="p-10 text-center bg-white/90 dark:bg-slate-900/90 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700/80 space-y-4 shadow-sm">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-500 dark:text-cyan-400 flex items-center justify-center mx-auto shadow-inner border border-indigo-100 dark:border-indigo-800/40">
+                    <FolderOpen className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white">
+                      এই বিষয়ের অধীনে এখনো কোনো অধ্যায় যুক্ত করা হয়নি
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                      শিক্ষক বা অ্যাডমিন হিসেবে আপনি এখনই এই বিষয়ের জন্য নতুন অধ্যায়, ব্লগ পাঠ ও কুইজ মডিউল তৈরি করতে পারেন।
+                    </p>
+                  </div>
+                  <div className="pt-2">
+                    <Link
+                      href={`/learning/lessons?courseId=${course.id}&action=add_chapter`}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 transition-all cursor-pointer"
+                    >
+                      <span>➕ নতুন অধ্যায় তৈরি করুন</span>
+                    </Link>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">

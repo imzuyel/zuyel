@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -237,19 +237,12 @@ export default function Sidebar({
           },
           {
             id: "student_live_frontend",
-            label: "স্টুডেন্ট লাইভ কুইজ পোর্টাল (Live)",
+            label: "🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও",
             icon: Sparkles,
-            iconBg: "bg-pink-600 text-white shadow-xs",
-            badge: "লাইভ",
+            iconBg: "bg-gradient-to-r from-red-600 to-amber-600 text-white shadow-xs",
+            badge: "Unified Hub",
             badgeColor: "bg-red-500 text-white font-black shadow-xs",
             roles: ["all"],
-          },
-          {
-            id: "live_quiz_bank",
-            label: "কুইজ প্রশ্ন ব্যাংক স্টুডিও",
-            icon: BookOpen,
-            iconBg: "bg-amber-600 text-white shadow-xs",
-            roles: ["admin", "teacher"],
           },
         ],
       },
@@ -339,6 +332,24 @@ export default function Sidebar({
       .filter(Boolean) as NavSectionDef[];
   }, [allNavSections, userRole]);
 
+  // TASK 1: Auto smooth-scroll active menu item into view
+  useEffect(() => {
+    if (!activeTab) return;
+    const timer = setTimeout(() => {
+      const activeEl =
+        document.querySelector(`[data-sidebar-tab="${activeTab}"]`) ||
+        ((activeTab === "learning" || activeTab.startsWith("learning"))
+          ? document.querySelector(`[data-sidebar-tab="course_content_builder"]`)
+          : (activeTab === "live-quizzes" || activeTab === "quiz" || activeTab === "live_quizzes" || activeTab === "tournaments" || activeTab === "question_bank" || activeTab.startsWith("quiz"))
+          ? document.querySelector(`[data-sidebar-tab="quiz_studio"]`)
+          : null);
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [activeTab]);
+
   const renderContent = (isExpanded: boolean, onNavClose?: () => void) => (
     <>
       {/* Top Institutional Header */}
@@ -405,11 +416,15 @@ export default function Sidebar({
             <div className="space-y-1">
               {section.items.map((item) => {
                 const Icon = item.icon;
-                const isActive = activeTab === item.id;
+                const isActive =
+                  activeTab === item.id ||
+                  (item.id === "course_content_builder" &&
+                    (activeTab === "learning" || activeTab.startsWith("learning")));
 
                 return (
                   <button
                     key={item.id}
+                    data-sidebar-tab={item.id}
                     onClick={() => {
                       onSelectTab(item.id);
                       if (onNavClose) onNavClose();

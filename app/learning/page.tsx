@@ -43,6 +43,7 @@ import {
 import StudentLearningLeaderboard from "@/components/learning/StudentLearningLeaderboard";
 import SubjectsView from "@/components/learning/SubjectsView";
 import { buildSubjectUrl } from "@/lib/learningSlugService";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
 
 
 const ACADEMIC_CLASSES = [
@@ -58,15 +59,44 @@ const ACADEMIC_CLASSES = [
 
 export default function LearningFilterPage() {
   const router = useRouter();
+  const {
+    activeClass,
+    activeTrade,
+    isTradeApplicable,
+    availableClasses,
+    availableTrades: globalTrades,
+    setSelectedClassId,
+    setSelectedTradeId,
+  } = useGlobalAcademic();
+
   const [courses, setCourses] = useState<CourseItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedClass, setSelectedClass] = useState("all");
-  const [selectedTrade, setSelectedTrade] = useState("all");
+  const [selectedClass, setSelectedClass] = useState<string>(() => {
+    return activeClass?.numericValue ? String(activeClass.numericValue) : "all";
+  });
+  const [selectedTrade, setSelectedTrade] = useState<string>(() => {
+    return activeTrade?.code || "all";
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [navigatingCourseId, setNavigatingCourseId] = useState<number | null>(null);
   const [currentTab, setCurrentTab] = useState<"courses" | "leaderboard">("courses");
+
+  // Keep local filter synced when global academic context changes externally
+  useEffect(() => {
+    if (activeClass?.numericValue) {
+      setSelectedClass(String(activeClass.numericValue));
+    }
+  }, [activeClass?.numericValue]);
+
+  useEffect(() => {
+    if (activeTrade?.code && isTradeApplicable) {
+      setSelectedTrade(activeTrade.code);
+    } else if (!isTradeApplicable) {
+      setSelectedTrade("all");
+    }
+  }, [activeTrade?.code, isTradeApplicable]);
 
   // Current student rank and merit score info for header badge
   const studentRankInfo = useMemo(() => {
@@ -89,10 +119,28 @@ export default function LearningFilterPage() {
     return classHasTrade ? getApplicableTradesForClass(selectedClass) : [];
   }, [selectedClass, classHasTrade]);
 
-  // Handle class selection with strict trade reset
+  // Handle class selection with strict trade reset and GlobalAcademicContext sync
   const handleSelectClass = (clsId: string) => {
     setSelectedClass(clsId);
     setSelectedTrade("all");
+    if (clsId !== "all") {
+      const match = availableClasses.find((c) => String(c.numericValue) === clsId);
+      if (match) {
+        setSelectedClassId(match.id);
+      }
+    }
+  };
+
+  const handleSelectTrade = (tradeCode: string) => {
+    setSelectedTrade(tradeCode);
+    if (tradeCode !== "all") {
+      const match = globalTrades.find((t) => t.code === tradeCode);
+      if (match) {
+        setSelectedTradeId(match.id);
+      }
+    } else {
+      setSelectedTradeId("all");
+    }
   };
 
   // Check student auth on mount
@@ -373,7 +421,7 @@ export default function LearningFilterPage() {
               ) : (
                 <select
                   value={selectedTrade}
-                  onChange={(e) => setSelectedTrade(e.target.value)}
+                  onChange={(e) => handleSelectTrade(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 cursor-pointer"
                 >
                   <option value="all">

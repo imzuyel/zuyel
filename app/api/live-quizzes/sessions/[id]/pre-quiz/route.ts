@@ -49,7 +49,42 @@ export async function POST(
     const body = await req.json();
     const { action } = body;
 
-    // Action 1: Host creates a new pre-quiz activity (Message, Icebreaker, Poll, Survey)
+    // Helper to safely persist pre-quiz state to Prisma MySQL DB
+    const syncPreQuizToPrisma = async (currentSession: any) => {
+      try {
+        const { prisma } = await import("@/lib/prisma");
+        if (prisma) {
+          const pin = currentSession.sessionCode || currentSession.pin;
+          if (pin) {
+            const dbSession = await prisma.liveSession.findFirst({
+              where: { pin: String(pin) },
+            }).catch(() => null);
+
+            if (dbSession) {
+              const currentParticipantsJson = dbSession.participantsJson
+                ? JSON.parse(dbSession.participantsJson)
+                : {};
+
+              await prisma.liveSession.update({
+                where: { id: dbSession.id },
+                data: {
+                  participantsJson: JSON.stringify({
+                    ...currentParticipantsJson,
+                    activePreQuiz: currentSession.activePreQuizActivity,
+                    preQuizActivities: currentSession.preQuizActivities,
+                    lastUpdated: new Date().toISOString(),
+                  }),
+                },
+              }).catch(() => null);
+            }
+          }
+        }
+      } catch (err) {
+        // Non-blocking fallback resilience
+      }
+    };
+
+    // Action 1: Host creates a new pre-quiz activity (Word Cloud, Mood Check, Sticky Wall, Poll, Intro)
     if (action === "create_activity") {
       // Pre-quiz activities can ONLY be created when the competitive quiz has not started
       if (session.status !== "LOBBY" && session.isQuizModeStarted) {
@@ -59,7 +94,7 @@ export async function POST(
         );
       }
 
-      const { type, prompt, options } = body;
+      const { type, prompt, options, metadata } = body;
 
       if (!prompt || !prompt.trim()) {
         return NextResponse.json(
@@ -76,11 +111,12 @@ export async function POST(
       const newActivity: PreQuizActivity = {
         id: `pre-act-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
         sessionId,
-        type: type || "icebreaker", // "icebreaker" | "poll" | "survey" | "message"
+        type: type || "icebreaker", // "WORD_CLOUD" | "MOOD_CHECKIN" | "STICKY_WALL" | "OPEN_FEEDBACK" | "OPINION_POLL" | "INTRO_SLIDE" | etc.
         prompt: prompt.trim(),
-        options: Array.isArray(options) ? options.filter((o: string) => o && o.trim()) : [],
+        options: Array.isArray(options) ? options.filter((o: string) => o && String(o).trim()) : [],
         responses: [],
         isActive: true,
+        metadata: metadata || {},
         createdAt: new Date().toISOString()
       };
 
@@ -91,6 +127,9 @@ export async function POST(
       session.activePreQuizActivity = newActivity;
       session.updatedAt = new Date().toISOString();
 
+      // Persist to Prisma MySQL DB
+      await syncPreQuizToPrisma(session);
+
       return NextResponse.json({
         success: true,
         message: "প্রি-কুইজ অ্যাক্টিভিটি সফলভাবে তৈরি ও সক্রিয় হয়েছে।",
@@ -100,7 +139,7 @@ export async function POST(
 
     // Action 2: Student submits response to the active pre-quiz activity
     if (action === "submit_response") {
-      const { activityId, playerId, playerName, response } = body;
+      const { activityId, playerId, playerName, avatar, response, color, mood } = body;
 
       if (!activityId || !playerId || response === undefined || response === null) {
         return NextResponse.json(
@@ -122,7 +161,10 @@ export async function POST(
       const record = {
         playerId,
         playerName: playerName || "শিক্ষার্থী",
-        response: String(response),
+        avatar: avatar || "🐧",
+        response: String(response).trim(),
+        color: color || "amber",
+        mood: mood || "",
         submittedAt: new Date().toISOString()
       };
 
@@ -134,10 +176,14 @@ export async function POST(
 
       session.updatedAt = new Date().toISOString();
 
+      // Persist to Prisma MySQL DB
+      await syncPreQuizToPrisma(session);
+
       return NextResponse.json({
         success: true,
-        message: "উত্তর সফলভাবে গৃহীত হয়েছে। (কোনো স্কোর গণনা হবে না)",
-        responseCount: activity.responses.length
+        message: "উত্তর সফলভাবে গৃহীত হয়েছে। (নম্বরবিহীন ওয়ার্মআপ)",
+        responseCount: activity.responses.length,
+        record
       });
     }
 
@@ -148,6 +194,9 @@ export async function POST(
         session.activePreQuizActivity = null;
       }
       session.updatedAt = new Date().toISOString();
+
+      // Persist to Prisma MySQL DB
+      await syncPreQuizToPrisma(session);
 
       return NextResponse.json({
         success: true,

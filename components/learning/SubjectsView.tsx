@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import Link from "next/link";
 import { motion } from "motion/react";
 import {
   BookOpen,
@@ -271,14 +272,26 @@ export default function SubjectsView({
 
   if (courses.length === 0) {
     return (
-      <div className="p-12 text-center bg-white/80 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
-        <BookOpen className="w-10 h-10 text-slate-400 mx-auto" />
-        <h3 className="text-sm font-bold text-slate-800 dark:text-white">
-          কোনো বিষয় পাওয়া যায়নি
-        </h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-          নির্বাচিত শ্রেণি বা ট্রেডে কোনো অনুমোদিত বিষয় মেলেনি। অনুগ্রহ করে ফিল্টার অপশন পরিবর্তন করুন।
-        </p>
+      <div className="p-12 text-center bg-white/80 dark:bg-slate-900/60 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700/80 space-y-4 shadow-sm">
+        <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-500 dark:text-cyan-400 flex items-center justify-center mx-auto shadow-inner border border-indigo-100 dark:border-indigo-800/40">
+          <BookOpen className="w-8 h-8" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white">
+            কোনো বিষয় পাওয়া যায়নি
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+            নির্বাচিত শ্রেণি বা ট্রেডে কোনো অনুমোদিত বিষয় মেলেনি। আপনি ফিল্টার পরিবর্তন করতে পারেন অথবা নতুন বিষয় ও অধ্যায় তৈরি করতে পারেন।
+          </p>
+        </div>
+        <div className="pt-2 flex items-center justify-center gap-3">
+          <Link
+            href="/learning/lessons"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 hover:from-cyan-500 hover:to-indigo-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 transition-all cursor-pointer"
+          >
+            <span>➕ নতুন বিষয় বা অধ্যায় তৈরি করুন</span>
+          </Link>
+        </div>
       </div>
     );
   }

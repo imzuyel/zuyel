@@ -1020,7 +1020,156 @@
     - Active student's card is highlighted with a glowing Indigo border and `"আপনি (You)"` badge.
   - [x] Verified full responsive design and seamless light/dark mode support.
 
+## PHASE 0: SYSTEM & ARCHITECTURAL AUDIT SUMMARY (DATABASE, SEED DATA & SECURITY HARDENING)
 
+> **Status:** ✅ **COMPLETED** (Database Reliability, Production Seed Modes, RBAC Security & Route Consolidation fully hardened)
 
+### 1. Task 1: Database Connection & Prisma Reliability (`lib/prisma.ts` & `lib/database.ts`)
+- [x] **PrismaClient Singleton**: Enforced persistent caching on `globalThis` across both development (HMR survival) and production (prevents multi-chunk connection leaks).
+- [x] **Connection Pooling Thresholds**: Enforced cPanel / Node.js production-grade pooling thresholds (`connection_limit=10` default for production, `pool_timeout=20`, `connect_timeout=10`) via `withPoolParameters()`.
+- [x] **Health Check Helper**: Implemented and exported `checkDatabaseHealth(): Promise<DatabaseHealthCheckResult>` for monitoring database connectivity with `SELECT 1` ping and latency tracking.
+- [x] **Production Integrity Alerts**: Added loud console warning in `safePrismaQuery()` and health-checks in `NODE_ENV === "production"` so production never silently operates on ephemeral in-memory mock stores without alerting developers/operators.
+- [x] **In-Memory Store Singleton (`lib/database.ts`)**: Fixed conditional singleton logic so `globalForDb.pgtscDatabaseInstance = institutionalDb;` is unconditionally preserved across all environments.
 
+### 2. Task 2: Smart Seed Data Management (`prisma/seed.ts` & `scripts/seedMasterData.ts`)
+- [x] **100% Idempotent Seeding**: Completely removed dangerous `await prisma.student.deleteMany();`. All records (Years, Classes, Sections, Trades, Subjects, Roles, Users, Faculty, and Students) use transactional `upsert`. Running the seed script multiple times will NEVER wipe live marks, attendance, or student progress.
+- [x] **`SEED_MODE` Environment Variable Support**:
+  - `SEED_MODE=essential` (Default for Production): Seeds only essential institutional Master Data (Academic Year 2026, Classes 6-12, 4 BTEB Trades, Sections A/B, Official Subjects catalog into `SubjectMaster`, RBAC Roles, default Admin and Teacher credentials, and Faculty staff). Skips student bulk insertion to protect live records.
+  - `SEED_MODE=full` (Development): Ingests the complete staged students dataset across all classes via non-destructive upsert, plus dev demo test student.
+  - Explicit Student Seeding: Staged students can also be ingested in essential mode via `SEED_STUDENTS=true npx prisma db seed` without wiping existing data.
+- [x] **Canonical Staging JSON Reference**: Set `prisma/students-staging.json` as the canonical reference path and stubbed duplicate root-level `students-staging.json` with an explicit redirect pointer.
 
+### 3. Task 3: Security & RBAC Hardening (`middleware.ts`, `lib/serverAuthGuard.ts`, `app/api/mysql-workbench/route.ts`)
+- [x] **MySQL Workbench API Lockdown (`app/api/mysql-workbench/route.ts`)**:
+  - Added `requireSuperAdmin(req, "/api/mysql-workbench")` to both `GET` and `POST` handlers.
+  - Destructive SQL blocking: Permanently blocks `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE`, and unrestricted `DELETE` without `WHERE` in production unless explicit `ALLOW_DESTRUCTIVE_SQL_OVERRIDE=true` is enabled.
+  - Statement Chaining Block: Semicolon-chained commands are rejected to prevent SQL injection smuggling.
+- [x] **Preset User Production Lockdown (`app/api/auth/login/route.ts`)**:
+  - When `NODE_ENV === "production"` and Prisma is operational, hardcoded `PRESET_USERS` demo accounts cannot bypass real database authentication. Unmatched requests immediately return 401 Unauthorized.
+- [x] **Middleware Protection (`middleware.ts`)**:
+  - Added `/mysql-workbench` and `/live-quiz` to `isPrivateErpPage` and protected matcher.
+  - Added `/api/mysql-workbench` to `isSensitiveApi` and protected matcher.
+  - Whitelisted `/live-quiz/join` in public routes for smooth client redirects to `/live-quizzes/join`.
+
+### 4. Task 4: Route Deduplication & Canonical Mapping
+- [x] **AI Settings**: `/ai-settings` permanently redirects via server `redirect("/admin/ai-settings")` to canonical `/admin/ai-settings`.
+- [x] **Live Quiz Routes**:
+  - `/live-quiz` redirects to `/live-quizzes` (Teacher/Admin Hosting Dashboard).
+  - `/live-quiz/join` redirects to `/live-quizzes/join` (Student Hero Join View).
+  - `/quiz/live` handles the real-time active student exam arena with `QuizSessionContext`.
+  - All sidebar navigation items point directly to canonical routes.
+
+---
+
+## 🗺️ MODULE-BY-MODULE SIDEBAR AUDIT PROGRESS
+
+### Group 1: কোর সেটআপ ও একাডেমিক ম্যাপিং (`academic_core`)
+- [x] **Menu 1: মূল ড্যাশবোর্ড ওভারভিউ ও রিয়েল-টাইম কমান্ড সেন্টার (`/admin`, `CleanDashboardView.tsx`, `DashboardView.tsx`, `api/dashboard/summary`, `AdminSidebar.tsx`, `HierarchicalSidebar.tsx`, `Sidebar.tsx`)** ✅ **COMPLETED & OVERHAULED (DRIBBBLE-GRADE BENTO DASHBOARD, GUARANTEED VISIBLE CHARTS & FULL ADMIN LIVE CRUD)**
+  - **Margin, Padding & Executive Container Expansion**:
+    - Eliminated nested `px-4 sm:px-6 lg:px-8 py-5 sm:py-6` double padding and inner `overflow-y-auto` from `CleanDashboardView.tsx`.
+    - Expanded main admin container in `app/admin/page.tsx` from `max-w-7xl` (1280px) to `max-w-[1600px]`, giving wide desktop screens expansive, balanced breathing space and eliminating double scrollbars.
+  - **Guaranteed Visible Charts & Recharts Studio**:
+    - Fixed root cause of invisible charts: `h-68 sm:h-76` was an invalid Tailwind class causing container height to collapse to `0px`, which prevented Recharts `ResponsiveContainer` from measuring height.
+    - Set explicit responsive height `w-full h-[320px] sm:h-[360px] min-h-[300px] pt-1 relative`.
+    - Guaranteed 3-tab Recharts view:
+      1. `স্মুথ এরিয়া`: Dual-Wave Area Chart (Emerald `#10b981` Attendance % vs. Violet `#6366f1` Quiz Accuracy %) with custom glassmorphic hover tooltips.
+      2. `বার চার্ট`: Comparative dual bars with rounded corners and dark/light mode tooltips.
+      3. `হেলথ ডোনাট`: 3-segment institutional health chart with central 91% health score indicator.
+  - **Admin Live In-Place CRUD & Management Studio**:
+    - **Header Action Button**: Added `+ তৈরি ও এডিট` button on top executive bar opening the 4-tab Admin Action Studio Modal:
+      1. `🎓 শিক্ষার্থী ভর্তি ও এডিট`: Direct student registration form submitting to `/api/students` (POST) and updating live metrics.
+      2. `📢 নোটিশ প্রকাশ ও ব্রডকাস্ট`: Notice publication form submitting to `/api/notices` (POST) and updating banner + feed.
+      3. `🎯 লক্ষ্যমাত্রা ও সেটিংস`: Live target editor for Daily Attendance Target %, Monthly Fee Target (৳), Quiz Accuracy %, and Broadcast Announcement text.
+      4. `⚡ কার্যক্রম লগ`: Direct manual event logger adding live activity cards immediately to the dashboard timeline.
+    - **Inline Announcement Banner**: In-place ✏️ "এডিট" (with save & cancel) and ❌ "মুছে ফেলুন" (delete/dismiss) controls.
+    - **Hero Cards CRUD**: Direct `+` and ✏️ buttons on all 4 top cards to edit student roster or update KPI targets on click.
+    - **Leaderboard CRUD**: In-place `+⭐` bonus star & XP award button + 🗑️ "বাদ দিন" (remove) action.
+    - **Activity Feed CRUD**: In-place 🗑️ "ডিলিট" action on every log entry + `+ নতুন লগ` button in feed header + "ক্লিয়ার" action.
+  - **Sidebar Scroll & Active State Synchronization**:
+    - Added reactive `useEffect` state synchronization across `AdminSidebar.tsx`, `HierarchicalSidebar.tsx`, and `Sidebar.tsx`.
+    - Clicking any quick-action shortcut or module card on the dashboard dynamically expands the parent category in the sidebar accordion, applies active styling, and smoothly scrolls the item into view via `scrollIntoView({ behavior: 'smooth', block: 'nearest' })`.
+- [ ] **Menu 2: একাডেমিক ম্যাপিং ও মাস্টার সেটিংস (`/academic/mapping`)** 👈 **NEXT IMMEDIATE AUDIT TARGET**
+  - Session control, program-class-trade-section mappings, and BTEB curriculum compliance.
+- [ ] **Menu 3: একাডেমিক সেশন ও রুটিন মাস্টার (`/routine/master`)**
+  - Weekly master schedule, period allocations, and teacher conflict resolution.
+- [ ] **Menu 4: কারিগরি ল্যাব ও ওয়ার্কশপ (`/admin?tab=lab_inventory`)**
+  - Equipment management, maintenance logging, and intake capacity tracking.
+
+### Group 2: AI কুইজ ও কন্টেন্ট স্টুডিও (`ai_hub`) — SIDEBAR MENU 3 UPGRADE MANDATE
+- [x] **Menu 2.1: AI প্রশ্নপত্র জেনারেটর ও প্রশ্ন ব্যাংক (`/ai/generator`, `/api/ai/questions/generate`, `/api/question-bank`)** ✅ **COMPLETED**
+  - **5 Interactive Question Types**: Full support for `MCQ`, `TRUE_FALSE`, `FILL_BLANKS`, `MATCHING`, and `REORDER` in both manual and AI creator modals.
+  - **Bulletproof AI Failover Pipeline**: Integrated `lib/aiFailoverPipeline.ts` for quota and rate-limit fallbacks across Gemini, OpenRouter, Groq, and Cerebras without server crashes.
+  - **Prisma MySQL DB Persistence**: Structured persistence of `questionType`, `options` JSON, and `correctAnswer` in `/api/question-bank` and direct quiz additions with instant reactive UI refresh.
+- [x] **Menu 2.2: PDF কারিকুলাম ও প্রশ্ন রিপোজিটরি (`/dashboard/documents`, `/ai/pdf-manager`)** ✅ **COMPLETED**
+  - Canonical route alias support in `lib/navigationConfig.ts` for `/dashboard/documents` and `/ai/pdf-manager`.
+  - PDF chunk parsing and direct import into the unified Quiz Studio and Question Bank.
+- [x] **Menu 2.3: 🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও (`/live-quizzes`, `/quiz`, `/live-quiz`, `/api/live-quizzes/*`, `/api/tournaments/*`)** ✅ **COMPLETED & ARCHITECTURALLY MERGED**
+  - **TASK 1: Architectural Merge of 'লাইভ কুইজ পোর্টাল' & 'কুইজ স্টুডিও' into ONE Master Hub**:
+    - Merged duplicate sidebar links across `lib/navigationConfig.ts`, `components/navigation/AdminSidebar.tsx`, `components/navigation/HierarchicalSidebar.tsx`, `components/navigation/AiQuizSidebarSection.tsx`, and `components/layout/Sidebar.tsx` into a single master menu item: `"🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও"` (Badge: `Unified Hub`).
+    - Unified routes `/quiz`, `/live-quiz`, and `/live-quizzes` to render `components/quiz/UnifiedQuizMentimeterWorkspace.tsx` featuring 4 core studio tabs:
+      - Tab 1: **🎨 সেশন ও কুইজ বিল্ডার (Mentimeter + Kahoot Builder)** — Pre-Quiz Interactive Warmup Slides + Scored Quiz Questions (Manual + AI Topic + PDF Extractor).
+      - Tab 2: **📡 লাইভ হোস্ট ও লবি কন্ট্রোল (Live Host Center)** — Room PIN, QR Code, Lobby Players, Team Assignment, Proctoring Shield, and Live Whiteboard Presenter.
+      - Tab 3: **📚 প্রশ্ন ব্যাংক ও পিডিএফ লাইব্রেরি (Question Bank & PDF Hub)** — Full CRUD with Class/Trade filtering, search, and PDF Document Repository.
+      - Tab 4: **🏆 টুর্নামেন্ট ও পারফরম্যান্স অ্যানালিটিক্স (Tournaments & Reports)** — Brackets, Session Reports, and BTEB Eligibility Rules.
+  - **TASK 2: Mentimeter-Style Pre-Quiz Interactive Warmup & Whiteboard (Ungraded Phase - 0 Points)**:
+    - **☁️ Dynamic Word Cloud Whiteboard (`WORD_CLOUD`)**: Frequency-scaled words (`text-lg` up to `text-6xl font-black`), rotational physics (`-6deg`, `0deg`, `6deg`), dynamic gradients, and pop-in spring physics.
+    - **😊 Mood & Energy Check-In Radar (`MOOD_CHECKIN`)**: 4 mood states (`🔥`, `😊`, `🤔`, `😴`) with live percentage meters & floating reactions.
+    - **📌 Collaborative Whiteboard Sticky Notes (`STICKY_WALL` / `OPEN_FEEDBACK`)**: Digital whiteboard canvas with 3D tilted sticky cards (`amber`, `rose`, `cyan`, `emerald`), student name/avatar, and spotlight zoom modal on click.
+    - **📊 Live Opinion Poll Bars (`OPINION_POLL`)**: Animated vertical/horizontal percentage bars with real-time vote counter.
+    - **👋 Welcome / Intro Banner Slide (`INTRO_SLIDE`)**: Topic title, class/trade badge, teacher note, and live reaction emitters.
+    - **Real-Time DB Sync**: Pre-quiz activities and student submissions synchronize in real-time via Prisma MySQL in `app/api/live-quizzes/sessions/[id]/pre-quiz/route.ts` and `lib/database.ts`.
+  - **TASK 3: Seamless Transition from Mentimeter Warmup to Kahoot! Scored Quiz**:
+    - Pre-quiz slides clearly flagged with `"💬 মতামত ও ওয়ার্মআপ (নম্বরবিহীন)"` badge so students express themselves freely.
+    - Prominent Host button: `"🚀 মূল কুইজ প্রতিযোগিতা শুরু করুন (Launch Scored Quiz)"`.
+    - Exciting fullscreen **3-2-1 Kahoot-style Countdown Animation** with pulsing sound & visual effects upon entering the scored phase.
+  - **TASK 4: Scored Quiz Phase (Universal Engine + Live Podium)**:
+    - Real-time question rendering using `<UniversalQuizShowcaseEngine />` (20 rotating structural MCQ templates, Cross-Line SVG Matching, Capsule-Slot Fill-in-Blanks, Reorder Sequence, neutral True/False).
+    - Host live response counter (`"১৮ / ২৫ জন উত্তর দিয়েছে"`), countdown timer, intermediate Kahoot-style Leaderboard, and final 3D Champion Podium (`LivePodiumView.tsx`).
+  - **TASK 5: Loading Spinners & Sidebar Active Scroll**:
+    - Spinning loaders (`Loader2 className="animate-spin"`) on all interactive buttons across the unified studio.
+    - Added auto smooth-scroll on active items across `HierarchicalSidebar.tsx` and `AiQuizSidebarSection.tsx`.
+- [x] **Menu 2.4: অধ্যায়ভিত্তিক কন্টেন্ট ও ক্লাস স্টুডিও (`/learning`)** ✅ **COMPLETED & OVERHAULED (SIDEBAR MENU 2 LMS LEARNING HUB UPGRADE MANDATE)**
+  - **TASK 1: Global Class/Trade Filter Sync & Gamified 3D Showcase**:
+    - Synchronized `app/learning/page.tsx` and `components/learning/SequentialLearningPathView.tsx` with `useGlobalAcademic` (`GlobalAcademicContext`). When a student or teacher picks Class 6–12 or a Trade, the view strictly loads courses & chapters matching that filter.
+    - Upgraded empty states in `app/learning/[class]/[subject]/page.tsx` and `components/learning/SubjectsView.tsx` with high-contrast, attractive action cards featuring a direct `"➕ নতুন অধ্যায় তৈরি করুন"` / `"➕ নতুন বিষয় বা অধ্যায় তৈরি করুন"` button for Admin/Teachers.
+    - Overhauled `ChapterCard.tsx` and `CurvedPathwayRoadmap.tsx` into a 3D gamified adventure card showing:
+      1. Lesson and quiz count tags (`📖 Xটি লেসন`, `📝 Yটি কুইজ`)
+      2. Student completion percentage progress bar with smooth CSS gradients
+      3. Earned stars badge (`⭐ X / Y স্টার`)
+      4. Dynamic lock/unlock state with a pulsing active node beacon (`🔓 সক্রিয় মিশন 🚀`).
+  - **TASK 2: Admin/Teacher Chapter & Content Builder Polish**:
+    - Enhanced `CourseContentBuilderAdmin.tsx` with comprehensive loading spinners (`Loader2 className="animate-spin"`) on Course creation, Chapter save/update, Question item save, and Entity deletion.
+    - Supports full chapter & item reordering (via `@dnd-kit` and manual order adjustments) and editing.
+    - Verified complete Chapter Quiz editor supporting all 5 question types: `MCQ`, `TRUE_FALSE`, `FILL_BLANKS`, `MATCHING`, and `REORDER`.
+    - Integrated `AiSlideToBlogModal.tsx` directly with `POST /api/learning/chapters/[id]/items` into Prisma MySQL database with instant loading feedback, generating structured Bengali educational blogs with callouts and saving directly to the selected chapter.
+    - Secured `app/api/learning/chapters/[id]/items/route.ts` with direct Prisma MySQL creation (`p.chapterContentItem.create`) for all item types.
+  - **TASK 3: Student Sequential Lesson Reader & Universal Quiz Engine**:
+    - Polished `SplitScreenChapterLearningView.tsx` and `InternationalStoryLessonRenderer.tsx` with clean typography, reading progress bar, estimated reading time, callouts, and dark/light mode support.
+    - Embedded chapter quiz connected with `UniversalQuestionRenderer` and 20 rotating structural MCQ templates with strict Green=Correct / Red=Selected-Wrong instant feedback.
+    - Star Rating & XP Persistence: Verified `app/api/learning/items/[id]/complete-blog/route.ts` and `app/api/learning/items/[id]/submit-quiz/route.ts` save 1–5 Stars (`⭐`) and XP directly into Prisma MySQL `student_item_progress`, unlocking the next sequential item in the chapter timeline.
+  - **TASK 4: Chapter Doubt Box & Real Database Weak Topic Analytics**:
+    - Connected `StudentDoubtBox.tsx` and `TeacherDoubtReviewView.tsx` for real-time question and reply threads.
+    - Purged all hardcoded mock arrays and fake numbers from `app/api/learning/teacher-analytics/route.ts`. Aggregated real statistics directly from Prisma `studentItemProgress` and `Student` records, returning `0` and clean empty states if no attempts exist yet.
+    - Created dedicated DB endpoint `app/api/learning/leaderboard/route.ts` and connected `StudentLearningLeaderboard.tsx` for real-time gamified XP, accuracy, and star rankings.
+  - **TASK 5: Sidebar Active Scroll Synchronization**:
+    - Verified `HierarchicalSidebar.tsx` and updated `Sidebar.tsx` so navigating to `/learning/*` highlights the "অধ্যায় ভিত্তিক কন্টেন্ট" menu item and smoothly scrolls it into view via `scrollIntoView({ behavior: 'smooth', block: 'nearest' })`.
+
+### Group 3: ক্লাস, রুটিন ও হাজিরা (`academics`)
+- [ ] **Menu 3.1: মাস্টার রুটিন স্টুডিও (`/routine/master`)**
+- [ ] **Menu 3.2: হাজিরা খাতা ও BTEB রেজিস্টার (`/attendance`)**
+
+### Group 4: শিক্ষার্থী ও পরীক্ষা প্রশাসন (`students_exams`)
+- [ ] **Menu 4.1: শিক্ষার্থী প্রোফাইল সেলফ-সার্ভিস (`/student/profile`)**
+- [ ] **Menu 4.2: শিক্ষার্থী ডাটাবেজ ও ভর্তি (`/students`)**
+- [ ] **Menu 4.3: ফি কালেকশন ও রিসিট (`/accounts`)**
+- [ ] **Menu 4.4: ডিজিটাল আইডি কার্ড স্টুডিও (`/students/id-cards`)**
+- [ ] **Menu 4.5: পরীক্ষা সূচি ও ফলাফল হাব (`/examination`)**
+- [ ] **Menu 4.6: BTEB বাৎসরিক লেজার হাব (`/academic/bteb-annual-ledger`)**
+
+### Group 5: যোগাযোগ ও ইউনিভার্সাল প্রিন্ট (`comms_output`)
+- [ ] **Menu 5.1: এসএমএস ও নোটিশ বোর্ড (`/communication/sms`)**
+- [ ] **Menu 5.2: ইউনিভার্সাল প্রিন্ট ও এক্সপোর্ট (`/print`)**
+
+### Group 6: সিস্টেম ও নিরাপত্তা (`system`)
+- [ ] **Menu 6.1: AI পাইপলাইন সেটিংস (`/admin/ai-settings`)**
+- [ ] **Menu 6.2: আমার প্রোফাইল ও ক্রেডেনশিয়াল (`/admin/profile`)**

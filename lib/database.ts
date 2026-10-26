@@ -923,20 +923,45 @@ export interface LiveSession {
   activePreQuizActivity?: PreQuizActivity | null;
 }
 
+export type PreQuizSlideType =
+  | "icebreaker"
+  | "poll"
+  | "survey"
+  | "message"
+  | "WORD_CLOUD"
+  | "MOOD_CHECKIN"
+  | "STICKY_WALL"
+  | "OPEN_FEEDBACK"
+  | "OPINION_POLL"
+  | "INTRO_SLIDE"
+  | string;
+
+export interface PreQuizResponseItem {
+  playerId: string;
+  playerName: string;
+  avatar?: string;
+  response: string;
+  color?: string; // For sticky notes (amber, rose, cyan, emerald)
+  mood?: string; // For mood check-in (fire, happy, thinking, tired)
+  submittedAt: string;
+}
+
 export interface PreQuizActivity {
   id: string;
   sessionId: string;
-  type: "icebreaker" | "poll" | "survey" | "message";
+  type: PreQuizSlideType;
   prompt: string;
   options?: string[];
-  responses: {
-    playerId: string;
-    playerName: string;
-    response: string;
-    submittedAt: string;
-  }[];
+  responses: PreQuizResponseItem[];
   isActive: boolean;
   createdAt: string;
+  metadata?: {
+    tradeName?: string;
+    className?: string;
+    teacherNote?: string;
+    topic?: string;
+    [key: string]: any;
+  };
 }
 
 export interface LiveParticipant {
@@ -2307,6 +2332,10 @@ COMMIT;
 // Global Singleton
 const globalForDb = globalThis as unknown as { pgtscDatabaseInstance?: InstitutionalDatabase };
 export const institutionalDb = globalForDb.pgtscDatabaseInstance ?? new InstitutionalDatabase();
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.pgtscDatabaseInstance = institutionalDb;
+globalForDb.pgtscDatabaseInstance = institutionalDb;
+
+if (process.env.NODE_ENV === "production") {
+  console.info(
+    "[Institutional Database] In-memory database singleton initialized. Note: In live production, primary reads/writes are routed strictly through Prisma MySQL."
+  );
 }

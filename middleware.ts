@@ -64,11 +64,13 @@ export function middleware(request: NextRequest) {
     pathname === "/forbidden" ||
     pathname.startsWith("/quiz/join") ||
     pathname.startsWith("/live-quizzes/join") ||
+    pathname.startsWith("/live-quiz/join") ||
     pathname.startsWith("/_next") ||
     pathname.includes(".")
   ) {
     return NextResponse.next();
   }
+
 
   // Extract authentication token from cookie or Authorization Bearer header
   const authHeader = request.headers.get("authorization");
@@ -196,7 +198,7 @@ export function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
-    // Sensitive Backend ERP, Student Management, and AI APIs
+    // Sensitive Backend ERP, Student Management, MySQL Workbench, and AI APIs
     const isSensitiveApi =
       pathname.startsWith("/api/admin") ||
       pathname.startsWith("/api/ai") ||
@@ -205,6 +207,7 @@ export function middleware(request: NextRequest) {
       pathname.startsWith("/api/accounts") ||
       pathname.startsWith("/api/communication") ||
       pathname.startsWith("/api/students") ||
+      pathname.startsWith("/api/mysql-workbench") ||
       (pathname.startsWith("/api/faculty") && request.method !== "GET") ||
       (pathname.startsWith("/api/quizzes") && request.method !== "GET") ||
       (pathname.startsWith("/api/learning") && (request.method !== "GET" || pathname.includes("teacher-analytics")));
@@ -265,6 +268,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/routine") ||
     pathname.startsWith("/communication") ||
     pathname.startsWith("/bteb-annual-khata") ||
+    pathname.startsWith("/mysql-workbench") ||
+    (pathname.startsWith("/live-quiz") && !pathname.startsWith("/live-quiz/join")) ||
     (pathname.startsWith("/live-quizzes") && !pathname.startsWith("/live-quizzes/join"));
 
   if (isPrivateErpPage) {
@@ -300,6 +305,8 @@ export const config = {
     "/routine/:path*",
     "/communication/:path*",
     "/bteb-annual-khata/:path*",
+    "/mysql-workbench/:path*",
+    "/live-quiz/:path*",
     "/live-quizzes/:path*",
     "/api/admin/:path*",
     "/api/ai/:path*",
@@ -311,5 +318,7 @@ export const config = {
     "/api/student/:path*",
     "/api/auth/profile/:path*",
     "/api/learning/:path*",
+    "/api/mysql-workbench/:path*",
   ],
 };
+

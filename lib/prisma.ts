@@ -263,15 +263,107 @@ function isConnectionFailure(error: unknown): boolean {
   );
 }
 
+export interface DatabaseHealthCheckResult {
+  ok: boolean;
+  status: "connected" | "degraded" | "disconnected" | "fallback";
+  database: "mysql" | "mock/in-memory";
+  latencyMs: number | null;
+  error?: string;
+  pooled: boolean;
+  timestamp: string;
+}
+
+/**
+ * Clean, lightweight database health-check helper for production monitoring.
+ * Performs a fast `SELECT 1` ping query against MySQL via PrismaClient.
+ */
+export async function checkDatabaseHealth(): Promise<DatabaseHealthCheckResult> {
+  const timestamp = new Date().toISOString();
+
+  if (!hasDatabaseUrl) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn(
+        "[Prisma/Database Health] CRITICAL: DATABASE_URL is missing or placeholder in production! System running on ephemeral in-memory mock store."
+      );
+    }
+    return {
+      ok: false,
+      status: "fallback",
+      database: "mock/in-memory",
+      latencyMs: null,
+      error: "DATABASE_URL is not configured",
+      pooled: false,
+      timestamp,
+    };
+  }
+
+  if (!isPrismaAvailable()) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[Prisma/Database Health] CRITICAL: Prisma client is unavailable or in retry cooldown!"
+      );
+    }
+    return {
+      ok: false,
+      status: "disconnected",
+      database: "mysql",
+      latencyMs: null,
+      error: "Prisma client unavailable or cooldown active",
+      pooled: Boolean(pooledDbUrl),
+      timestamp,
+    };
+  }
+
+  const start = performance.now();
+  try {
+    if (prismaClientInstance?.$queryRawUnsafe) {
+      await prismaClientInstance.$queryRawUnsafe("SELECT 1");
+    } else {
+      await prisma.$queryRawUnsafe("SELECT 1");
+    }
+    const latencyMs = Math.round((performance.now() - start) * 100) / 100;
+    return {
+      ok: true,
+      status: "connected",
+      database: "mysql",
+      latencyMs,
+      pooled: Boolean(pooledDbUrl),
+      timestamp,
+    };
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        `[Prisma/Database Health] CRITICAL: MySQL ping query failed: ${errorMsg}`
+      );
+    }
+    return {
+      ok: false,
+      status: "degraded",
+      database: "mysql",
+      latencyMs: null,
+      error: errorMsg,
+      pooled: Boolean(pooledDbUrl),
+      timestamp,
+    };
+  }
+}
+
 /**
  * Safely executes a query on Prisma with automatic fallback if Prisma is
  * unavailable or if the query throws (e.g. database connection lost, timeout).
+ * In production, logs critical alerts whenever Prisma is bypassed or fails.
  */
 export async function safePrismaQuery<T>(
   queryFn: (client: PrismaLike) => Promise<T>,
   fallbackValue: T
 ): Promise<T> {
   if (!isPrismaAvailable()) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[Prisma SafeQuery CRITICAL] Query invoked while Prisma is unavailable in production! Falling back to in-memory/default data."
+      );
+    }
     return fallbackValue;
   }
 
@@ -282,12 +374,19 @@ export async function safePrismaQuery<T>(
       // Shared across route bundles so all callers back off together instead
       // of hammering an already-exhausted pool.
       globalForPrisma.prismaFailureAt = Date.now();
+      if (process.env.NODE_ENV === "production") {
+        console.error(
+          "[Prisma SafeQuery CRITICAL] Database connection error caught. Entering 60s cooldown:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    } else {
+      console.warn("[Prisma SafeQuery] Query failed gracefully:", err instanceof Error ? err.message : String(err));
     }
 
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn("[Prisma SafeQuery] Query failed gracefully:", message);
     return fallbackValue;
   }
 }
 
 export default prisma;
+
