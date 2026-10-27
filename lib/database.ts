@@ -706,6 +706,8 @@ export interface Quiz {
   showExplanation: boolean;
   showLeaderboard: boolean;
   presentationSlides?: any[];
+  scheduledStartTime?: string;
+  scheduledAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -921,6 +923,8 @@ export interface LiveSession {
   isQuizModeStarted?: boolean;
   preQuizActivities?: PreQuizActivity[];
   activePreQuizActivity?: PreQuizActivity | null;
+  scheduledStartTime?: string;
+  scheduledAt?: string;
 }
 
 export type PreQuizSlideType =

@@ -83,6 +83,8 @@ export async function POST(req: NextRequest) {
       showExplanation, showLeaderboard,
       questions = [],
       presentationSlides = [],
+      scheduledStartTime,
+      scheduledAt,
       publish = false,
     } = body;
 
@@ -148,6 +150,8 @@ export async function POST(req: NextRequest) {
       showExplanation: showExplanation !== false,
       showLeaderboard: showLeaderboard !== false,
       presentationSlides: Array.isArray(presentationSlides) ? presentationSlides : [],
+      scheduledStartTime: scheduledStartTime || scheduledAt || undefined,
+      scheduledAt: scheduledAt || scheduledStartTime || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

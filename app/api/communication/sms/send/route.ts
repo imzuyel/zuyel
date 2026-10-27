@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { sendSmsGateway, globalSmsLogs, formatSmsTemplate } from "@/lib/smsGatewayEngine";
-import { requireAdmin } from "@/lib/serverAuthGuard";
+import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req, "/api/communication/sms/send");
+  const auth = requireTeacherOrAdmin(req, "/api/communication/sms/send");
   if (!auth.authorized) {
     return auth.errorResponse!;
   }
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req, "/api/communication/sms/send");
+  const auth = requireTeacherOrAdmin(req, "/api/communication/sms/send");
   if (!auth.authorized) {
     return auth.errorResponse!;
   }
@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
       templateType = "custom",
       message = "",
       individualPhone = "",
-      studentName = "শিক্ষার্থী"
+      studentName = "শিক্ষার্থী",
+      recipients: customRecipients = []
     } = body || {};
 
     if (!message || !message.trim()) {
@@ -47,9 +48,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Determine target recipient list
-    let recipients: { phone: string; name: string; studentName: string }[] = [];
+    let recipients: { phone: string; name: string; studentName: string; score?: string | number; quizTitle?: string }[] = [];
 
-    if (targetAudience === "individual") {
+    if (Array.isArray(customRecipients) && customRecipients.length > 0) {
+      recipients = customRecipients.map((r: any) => ({
+        phone: r.phone || r.guardianPhone || "01700000000",
+        name: r.name || r.guardianName || `${r.studentName || "শিক্ষার্থী"}-এর অভিভাবক`,
+        studentName: r.studentName || "শিক্ষার্থী",
+        score: r.score,
+        quizTitle: r.quizTitle
+      }));
+    } else if (targetAudience === "individual") {
       if (!individualPhone) {
         return NextResponse.json(
           { success: false, message: "Individual phone number is required" },
@@ -94,13 +103,24 @@ export async function POST(req: NextRequest) {
 
     for (const rec of uniqueRecipients) {
       // Format message with individual replacement
-      const formattedMsg = formatSmsTemplate(message, {
+      let formattedMsg = formatSmsTemplate(message, {
         student_name: rec.studentName,
+        Name: rec.studentName,
         roll: "১০৪",
         trade: selectedTrade,
+        quiz_title: rec.quizTitle || "লাইভ কুইজ",
+        "Quiz Title": rec.quizTitle || "লাইভ কুইজ",
+        score: rec.score !== undefined ? `${rec.score}` : "৮৫",
+        "X%": rec.score !== undefined ? `${rec.score}%` : "৮৫%",
         gpa: "৪.৮৮",
-        exam_name: "অর্ধবার্ষিক পরীক্ষা"
+        exam_name: "কুইজ মূল্যায়ন"
       });
+      // Also handle direct [Name] and [Quiz Title] and [Score] bracket tokens if used in templates
+      formattedMsg = formattedMsg
+        .replace(/\[Name\]/gi, rec.studentName)
+        .replace(/\[Quiz Title\]/gi, rec.quizTitle || "লাইভ কুইজ")
+        .replace(/\[স্কোর[:\s]*X%\]/gi, `স্কোর: ${rec.score !== undefined ? rec.score : 85}%`)
+        .replace(/X%/g, `${rec.score !== undefined ? rec.score : 85}%`);
 
       const log = await sendSmsGateway(
         rec.phone,

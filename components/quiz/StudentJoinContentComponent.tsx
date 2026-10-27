@@ -106,6 +106,27 @@ export function StudentJoinContentComponent() {
   const [preQuizStickyColor, setPreQuizStickyColor] = useState<string>("amber");
   const [preQuizSubmitted, setPreQuizSubmitted] = useState<boolean>(false);
   const [isSubmittingPreQuiz, setIsSubmittingPreQuiz] = useState<boolean>(false);
+  const [scheduledSecondsLeft, setScheduledSecondsLeft] = useState<number | null>(null);
+
+  // Scheduled Auto-Start countdown timer
+  useEffect(() => {
+    const target = (activeSession as any)?.scheduledStartTime || (activeSession as any)?.scheduledAt;
+    if (!target) {
+      setScheduledSecondsLeft(null);
+      return;
+    }
+    const updateCountdown = () => {
+      const diff = Math.floor((new Date(target).getTime() - Date.now()) / 1000);
+      if (diff <= 0) {
+        setScheduledSecondsLeft(0);
+        return;
+      }
+      setScheduledSecondsLeft(diff);
+    };
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [activeSession]);
 
   // Auto-dismiss active motivation messages after their duration expires
   useEffect(() => {
@@ -900,6 +921,27 @@ export function StudentJoinContentComponent() {
                     </div>
                   )}
                 </div>
+
+                {/* SCHEDULED QUIZ AUTO-START COUNTDOWN BANNER */}
+                {scheduledSecondsLeft !== null && scheduledSecondsLeft > 0 && (
+                  <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 border-2 border-amber-500/60 shadow-[0_0_25px_rgba(245,158,11,0.25)] text-center space-y-2 animate-in fade-in">
+                    <div className="flex items-center justify-center gap-2 text-amber-400 font-black text-xs uppercase tracking-wider">
+                      <Clock className="w-4 h-4 animate-spin text-amber-400" />
+                      <span>⏰ নির্ধারিত সময়ে অটো-স্টার্ট হবে</span>
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-mono font-black text-amber-300 tracking-wider">
+                      ⏳ কুইজ শুরু হতে বাকি: {(() => {
+                        const m = Math.floor(scheduledSecondsLeft / 60);
+                        const s = scheduledSecondsLeft % 60;
+                        const toBn = (v: number) => String(v).padStart(2, "0").replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][parseInt(d)]);
+                        return `${toBn(m)} মিনিট ${toBn(s)} সেকেন্ড`;
+                      })()}
+                    </div>
+                    <p className="text-[11px] text-amber-200/90 font-medium">
+                      কাউন্টডাউন ০ সেকেন্ডে পৌঁছালে স্বয়ংক্রিয়ভাবে মূল কুইজ শুরু হবে! ততক্ষণ নিচের ওয়ার্মআপ বা মুড চেক-ইনে অংশ নিন।
+                    </p>
+                  </div>
+                )}
 
                 {/* MENTIMETER WARMUP INTERACTIVE CARD (UNGRADED PHASE) */}
                 {activePreQuiz && !isQuizModeStarted ? (

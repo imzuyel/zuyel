@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { quizId, hostUserId, competitionMode, teamSettings, motivationEnabled, motivationInterval } = body;
+    const { quizId, hostUserId, competitionMode, teamSettings, motivationEnabled, motivationInterval, scheduledStartTime, scheduledAt } = body;
 
     if (!quizId) {
       return NextResponse.json(
@@ -87,6 +87,8 @@ export async function POST(req: NextRequest) {
       hostLastSeenAt: new Date().toISOString(),
       motivationEnabled: motivationEnabled !== undefined ? Boolean(motivationEnabled) : true,
       motivationInterval: motivationInterval !== undefined ? Number(motivationInterval) : 3,
+      scheduledStartTime: scheduledStartTime || scheduledAt || (quiz as any)?.scheduledStartTime || undefined,
+      scheduledAt: scheduledAt || scheduledStartTime || (quiz as any)?.scheduledAt || undefined,
     };
 
     institutionalDb.liveSessions.unshift(newSession);

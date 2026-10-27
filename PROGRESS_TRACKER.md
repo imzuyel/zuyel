@@ -1103,31 +1103,36 @@
 - [x] **Menu 2.2: PDF কারিকুলাম ও প্রশ্ন রিপোজিটরি (`/dashboard/documents`, `/ai/pdf-manager`)** ✅ **COMPLETED**
   - Canonical route alias support in `lib/navigationConfig.ts` for `/dashboard/documents` and `/ai/pdf-manager`.
   - PDF chunk parsing and direct import into the unified Quiz Studio and Question Bank.
-- [x] **Menu 2.3: 🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও (`/live-quizzes`, `/quiz`, `/live-quiz`, `/api/live-quizzes/*`, `/api/tournaments/*`)** ✅ **COMPLETED & ARCHITECTURALLY MERGED**
-  - **TASK 1: Architectural Merge of 'লাইভ কুইজ পোর্টাল' & 'কুইজ স্টুডিও' into ONE Master Hub**:
-    - Merged duplicate sidebar links across `lib/navigationConfig.ts`, `components/navigation/AdminSidebar.tsx`, `components/navigation/HierarchicalSidebar.tsx`, `components/navigation/AiQuizSidebarSection.tsx`, and `components/layout/Sidebar.tsx` into a single master menu item: `"🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও"` (Badge: `Unified Hub`).
-    - Unified routes `/quiz`, `/live-quiz`, and `/live-quizzes` to render `components/quiz/UnifiedQuizMentimeterWorkspace.tsx` featuring 4 core studio tabs:
-      - Tab 1: **🎨 সেশন ও কুইজ বিল্ডার (Mentimeter + Kahoot Builder)** — Pre-Quiz Interactive Warmup Slides + Scored Quiz Questions (Manual + AI Topic + PDF Extractor).
-      - Tab 2: **📡 লাইভ হোস্ট ও লবি কন্ট্রোল (Live Host Center)** — Room PIN, QR Code, Lobby Players, Team Assignment, Proctoring Shield, and Live Whiteboard Presenter.
-      - Tab 3: **📚 প্রশ্ন ব্যাংক ও পিডিএফ লাইব্রেরি (Question Bank & PDF Hub)** — Full CRUD with Class/Trade filtering, search, and PDF Document Repository.
-      - Tab 4: **🏆 টুর্নামেন্ট ও পারফরম্যান্স অ্যানালিটিক্স (Tournaments & Reports)** — Brackets, Session Reports, and BTEB Eligibility Rules.
-  - **TASK 2: Mentimeter-Style Pre-Quiz Interactive Warmup & Whiteboard (Ungraded Phase - 0 Points)**:
-    - **☁️ Dynamic Word Cloud Whiteboard (`WORD_CLOUD`)**: Frequency-scaled words (`text-lg` up to `text-6xl font-black`), rotational physics (`-6deg`, `0deg`, `6deg`), dynamic gradients, and pop-in spring physics.
-    - **😊 Mood & Energy Check-In Radar (`MOOD_CHECKIN`)**: 4 mood states (`🔥`, `😊`, `🤔`, `😴`) with live percentage meters & floating reactions.
-    - **📌 Collaborative Whiteboard Sticky Notes (`STICKY_WALL` / `OPEN_FEEDBACK`)**: Digital whiteboard canvas with 3D tilted sticky cards (`amber`, `rose`, `cyan`, `emerald`), student name/avatar, and spotlight zoom modal on click.
-    - **📊 Live Opinion Poll Bars (`OPINION_POLL`)**: Animated vertical/horizontal percentage bars with real-time vote counter.
-    - **👋 Welcome / Intro Banner Slide (`INTRO_SLIDE`)**: Topic title, class/trade badge, teacher note, and live reaction emitters.
-    - **Real-Time DB Sync**: Pre-quiz activities and student submissions synchronize in real-time via Prisma MySQL in `app/api/live-quizzes/sessions/[id]/pre-quiz/route.ts` and `lib/database.ts`.
-  - **TASK 3: Seamless Transition from Mentimeter Warmup to Kahoot! Scored Quiz**:
-    - Pre-quiz slides clearly flagged with `"💬 মতামত ও ওয়ার্মআপ (নম্বরবিহীন)"` badge so students express themselves freely.
-    - Prominent Host button: `"🚀 মূল কুইজ প্রতিযোগিতা শুরু করুন (Launch Scored Quiz)"`.
-    - Exciting fullscreen **3-2-1 Kahoot-style Countdown Animation** with pulsing sound & visual effects upon entering the scored phase.
-  - **TASK 4: Scored Quiz Phase (Universal Engine + Live Podium)**:
-    - Real-time question rendering using `<UniversalQuizShowcaseEngine />` (20 rotating structural MCQ templates, Cross-Line SVG Matching, Capsule-Slot Fill-in-Blanks, Reorder Sequence, neutral True/False).
-    - Host live response counter (`"১৮ / ২৫ জন উত্তর দিয়েছে"`), countdown timer, intermediate Kahoot-style Leaderboard, and final 3D Champion Podium (`LivePodiumView.tsx`).
-  - **TASK 5: Loading Spinners & Sidebar Active Scroll**:
-    - Spinning loaders (`Loader2 className="animate-spin"`) on all interactive buttons across the unified studio.
-    - Added auto smooth-scroll on active items across `HierarchicalSidebar.tsx` and `AiQuizSidebarSection.tsx`.
+- [x] **Menu 2.3: 🎮 লাইভ কুইজ ও মেন্টিমিটার স্টুডিও (`/live-quizzes`, `/quiz`, `/live-quiz`, `/api/live-quizzes/*`, `/api/tournaments/*`)** ✅ **COMPLETED & OVERHAULED (COMPLETE UI REPLACEMENT & SMART SMS INTEGRATION)**
+  - **TASK 1: Complete UI Replacement of `UnifiedQuizMentimeterWorkspace.tsx` (Fresh 3-Mode Visual Studio)**:
+    - Banned and eliminated old cluttered nested tabs, duplicate sub-headers, and monotone black/white boxes.
+    - Built a 100% fresh, breathable, vibrant 3-mode segmented pill workspace inspired by Canva, Mentimeter, and Kahoot:
+      - **Mode 1: 🎨 কুইজ ও স্লাইড ডিজাইনার (Clean 3-Panel Visual Builder)**:
+        - *Left Panel (Slide Filmstrip - 240px)*: PowerPoint/Mentimeter style session flow separated into `💬 ওয়ার্মআপ স্লাইড (Pre-Quiz Icebreakers)` and `🏆 মূল কুইজ প্রশ্ন (Scored Questions)`. Includes `+ নতুন স্লাইড/প্রশ্ন` and `✨ ১-ক্লিকে AI ম্যাজিক কুইজ (AI + PDF Import)`.
+        - *Center Panel (Live Interactive Stage Preview)*: Spacious canvas with direct in-line click-to-edit for title and options, live preview of Word Cloud, Mood Check-in (🔥, 😊, 🤔, 😴), 3D Sticky Notes whiteboard, Kahoot MCQ, Matching pairs, Fill-in-Blanks, and True/False.
+        - *Right Panel (Simple Settings Inspector - 280px)*: Slide/question type selector, time limit pills (`15s`, `20s`, `30s`, `60s`), points (`100`, `200`, `0 for Warmup`), and scheduled start time picker (`⏰ নির্দিষ্ট সময়ে অটো-স্টার্ট`).
+      - **Mode 2: 📡 লাইভ কন্ট্রোল ও হোয়াইটবোর্ড প্রেজেন্টার (Live Host & Scheduled Lobby)**:
+        - Full-stage launchpad with instant (`🚀 এখনই লাইভ শুরু করুন`) and scheduled (`⏰ নির্দিষ্ট সময়ে শিডিউল করুন`) modes.
+        - Huge Room PIN, dynamic QR Code, joined student avatar list, and Team Auto-Assign (Individual vs 4 Teams: Padma, Meghna, Jamuna, Karnaphuli).
+        - Pre-Quiz Mentimeter Whiteboard (kinetic Word Cloud, Mood Radar, 3D Sticky Notes).
+        - 3-2-1 Kahoot-style animated countdown into Scored Quiz Arena with answer reveal, confetti, and final 3D Champions Podium.
+      - **Mode 3: 📊 লাইভ মনিটর ও স্মার্ট SMS অ্যালার্ট হাব (Real-Time Performance & SMS Trigger)**:
+        - Real-time student performance analytics: Total students, average accuracy, top performers count, struggling count.
+        - Split view separating `🌟 টপ পারফরমার (> 80% স্কোর)` and `⚠️ দুর্বল পারফরম্যান্স (< 40% স্কোর)`.
+  - **TASK 2: Mid-Quiz & Post-Quiz Smart SMS Integration (`/api/communication/sms/send`)**:
+    - Connected studio directly to `/api/communication/sms/send` and `lib/smsGatewayEngine.ts`.
+    - Auto / 1-Click Encouragement SMS for Good Performers: `"অভিনন্দন! আপনার সন্তান [Name] আজকের [Quiz Title] কুইজে অসাধারণ ভালো করেছে (স্কোর: [X%])। - PTSC"`.
+    - Auto / 1-Click Warning SMS for Struggling Students: `"সতর্কবার্তা: [Name] চলমান [Quiz Title] কুইজে বেশ কিছু প্রশ্নের ভুল উত্তর দিচ্ছে (বর্তমান স্কোর: [X%])। অনুগ্রহ করে তার পড়াশোনায় মনোযোগ দিন। - PTSC"`.
+    - Toggle: `⚡ কুইজের মাঝখানে বা শেষে অটোমেটিক SMS পাঠান` with real-time feedback and toast notifications.
+  - **TASK 3: Scheduled Quiz Auto-Start Timer (`scheduledStartTime` / `scheduledAt`)**:
+    - Supported `scheduledStartTime` and `scheduledAt` in `lib/database.ts` (`Quiz` and `LiveSession`) and API routes `/api/quizzes` and `/api/live-quizzes/sessions`.
+    - In Student Lobby (`components/quiz/StudentJoinContentComponent.tsx`), added colorful Bengali countdown banner (`"⏳ কুইজ শুরু হতে বাকি: ০৪ মিনিট ২৫ সেকেন্ড"`) with automatic transition when timer reaches 00:00.
+  - **TASK 4: Ultra-Vibrant Color Palette & Button Spinners**:
+    - Replaced flat monotone boxes with rich cosmic indigo/slate glass (`bg-slate-900/90`, border `indigo-500/20`), radiant gradient headers (emerald, violet, amber, rose), and glowing badges.
+    - Every save, update, AI generate, and SMS send button displays animated `Loader2` spinners while processing.
+  - **TASK 5: Entry Point Cleanup & Unification**:
+    - Cleaned up `app/live-quizzes/page.tsx` and `app/quiz/page.tsx` to render `UnifiedQuizMentimeterWorkspace` directly without redundant nested tab bars or duplicate breadcrumb pills.
+    - Preserved `UniversalQuizShowcaseEngine.tsx` as the question showcase renderer.
 - [x] **Menu 2.4: অধ্যায়ভিত্তিক কন্টেন্ট ও ক্লাস স্টুডিও (`/learning`)** ✅ **COMPLETED & OVERHAULED (SIDEBAR MENU 2 LMS LEARNING HUB UPGRADE MANDATE)**
   - **TASK 1: Global Class/Trade Filter Sync & Gamified 3D Showcase**:
     - Synchronized `app/learning/page.tsx` and `components/learning/SequentialLearningPathView.tsx` with `useGlobalAcademic` (`GlobalAcademicContext`). When a student or teacher picks Class 6–12 or a Trade, the view strictly loads courses & chapters matching that filter.
