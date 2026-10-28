@@ -4,12 +4,103 @@ import React from "react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
-interface SouthAsianStudentAvatarProps {
+export interface SouthAsianStudentAvatarProps {
   className?: string;
   glowColor?: "cyan" | "amber" | "purple" | "emerald" | "rose";
   animate?: boolean;
   size?: "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
   gender?: "male" | "female" | "neutral";
+}
+
+export interface StudentAvatarPreset {
+  id: string;
+  type: "south_asian" | "emoji";
+  name: string;
+  gender?: "male" | "female" | "neutral";
+  glowColor?: "cyan" | "amber" | "purple" | "emerald" | "rose";
+  emoji?: string;
+  badgeBg?: string;
+  border?: string;
+}
+
+export const STUDENT_AVATAR_PRESETS: StudentAvatarPreset[] = [
+  // South Asian Student Characters
+  { id: "sa_male_cyan", type: "south_asian", name: "ছাত্র (সায়ান)", gender: "male", glowColor: "cyan" },
+  { id: "sa_female_purple", type: "south_asian", name: "ছাত্রী (পার্পল)", gender: "female", glowColor: "purple" },
+  { id: "sa_male_emerald", type: "south_asian", name: "ছাত্র (গ্রিন)", gender: "male", glowColor: "emerald" },
+  { id: "sa_female_rose", type: "south_asian", name: "ছাত্রী (রোজ)", gender: "female", glowColor: "rose" },
+  { id: "sa_male_amber", type: "south_asian", name: "ছাত্র (অ্যাম্বার)", gender: "male", glowColor: "amber" },
+  { id: "sa_female_cyan", type: "south_asian", name: "ছাত্রী (সায়ান)", gender: "female", glowColor: "cyan" },
+  { id: "sa_neutral_purple", type: "south_asian", name: "স্কলার (পার্পল)", gender: "neutral", glowColor: "purple" },
+  // Gamified 3D Tech Emojis
+  { id: "emoji_rocket", type: "emoji", name: "রকেট", emoji: "🚀", badgeBg: "bg-rose-500/20", border: "border-rose-400" },
+  { id: "emoji_robot", type: "emoji", name: "রোবট", emoji: "🤖", badgeBg: "bg-indigo-500/20", border: "border-indigo-400" },
+  { id: "emoji_zap", type: "emoji", name: "ভোল্টেজ", emoji: "⚡", badgeBg: "bg-amber-500/20", border: "border-amber-400" },
+  { id: "emoji_lion", type: "emoji", name: "সিংহ", emoji: "🦁", badgeBg: "bg-orange-500/20", border: "border-orange-400" },
+  { id: "emoji_tiger", type: "emoji", name: "টাইগার", emoji: "🐯", badgeBg: "bg-yellow-500/20", border: "border-yellow-400" },
+  { id: "emoji_panda", type: "emoji", name: "পান্ডা", emoji: "🐼", badgeBg: "bg-teal-500/20", border: "border-teal-400" },
+  { id: "emoji_fox", type: "emoji", name: "ফক্স", emoji: "🦊", badgeBg: "bg-red-500/20", border: "border-red-400" },
+  { id: "emoji_trophy", type: "emoji", name: "ট্রফি", emoji: "🏆", badgeBg: "bg-amber-500/20", border: "border-amber-400" },
+  { id: "emoji_diamond", type: "emoji", name: "ডায়মন্ড", emoji: "💎", badgeBg: "bg-cyan-500/20", border: "border-cyan-400" },
+  { id: "emoji_target", type: "emoji", name: "টার্গেট", emoji: "🎯", badgeBg: "bg-rose-500/20", border: "border-rose-400" },
+  { id: "emoji_crown", type: "emoji", name: "ক্রাউন", emoji: "👑", badgeBg: "bg-yellow-500/20", border: "border-yellow-400" },
+  { id: "emoji_fire", type: "emoji", name: "ফায়ার", emoji: "🔥", badgeBg: "bg-orange-500/20", border: "border-orange-400" },
+  { id: "emoji_gamepad", type: "emoji", name: "গেমার", emoji: "🎮", badgeBg: "bg-purple-500/20", border: "border-purple-400" },
+  { id: "emoji_atom", type: "emoji", name: "বিজ্ঞান", emoji: "🔬", badgeBg: "bg-blue-500/20", border: "border-blue-400" },
+  { id: "emoji_gear", type: "emoji", name: "মেকানিক", emoji: "⚙️", badgeBg: "bg-slate-500/20", border: "border-slate-400" },
+  { id: "emoji_laptop", type: "emoji", name: "কোডার", emoji: "💻", badgeBg: "bg-teal-500/20", border: "border-teal-400" },
+];
+
+export function RenderStudentAvatar({
+  avatar,
+  size = "md",
+  animate = false,
+  className = "",
+}: {
+  avatar?: string | null;
+  size?: "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
+  animate?: boolean;
+  className?: string;
+}) {
+  const avStr = avatar || "sa_male_cyan";
+  const matchedPreset = STUDENT_AVATAR_PRESETS.find((p) => p.id === avStr);
+
+  if (avStr.startsWith("sa_") || matchedPreset?.type === "south_asian") {
+    const gender = matchedPreset?.gender || (avStr.includes("female") ? "female" : avStr.includes("neutral") ? "neutral" : "male");
+    const glow = matchedPreset?.glowColor || (avStr.includes("amber") ? "amber" : avStr.includes("purple") ? "purple" : avStr.includes("emerald") ? "emerald" : avStr.includes("rose") ? "rose" : "cyan");
+    return (
+      <SouthAsianStudentAvatar
+        gender={gender}
+        glowColor={glow}
+        size={size}
+        animate={animate}
+        className={className}
+      />
+    );
+  }
+
+  // Emoji or Icon avatar
+  const emojiChar = matchedPreset?.emoji || avStr;
+  const sizeMap = {
+    xs: "w-8 h-8 text-sm",
+    sm: "w-10 h-10 text-base",
+    md: "w-14 h-14 text-2xl",
+    lg: "w-20 h-20 text-3xl",
+    xl: "w-28 h-28 text-5xl",
+    "2xl": "w-36 h-36 text-6xl",
+  };
+
+  return (
+    <div
+      className={cn(
+        "rounded-full bg-slate-900/90 border-2 border-cyan-500/40 shadow-lg flex items-center justify-center shrink-0 transition-transform select-none",
+        sizeMap[size] || sizeMap.md,
+        className
+      )}
+    >
+      <span>{emojiChar}</span>
+    </div>
+  );
 }
 
 export default function SouthAsianStudentAvatar({

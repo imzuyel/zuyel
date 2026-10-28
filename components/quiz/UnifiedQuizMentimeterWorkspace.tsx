@@ -1,30 +1,20 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useTransition, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Sparkles,
-  Radio,
-  BookOpen,
-  Trophy,
-  Layers,
-  Users,
   Plus,
   Play,
-  FileText,
-  Search,
-  Filter,
   Trash2,
   Edit3,
   Copy,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
   ChevronRight,
   ChevronLeft,
   ArrowRight,
   ArrowLeft,
   RefreshCw,
-  QrCode,
   Clock,
   Loader2,
   Check,
@@ -32,355 +22,370 @@ import {
   Award,
   Send,
   MessageSquare,
-  Heart,
-  Smile,
-  Zap,
-  Eye,
-  Download,
-  ShieldCheck,
-  Share2,
-  Volume2,
-  VolumeX,
-  Maximize2,
-  Minimize2,
-  CheckSquare,
-  BarChart3,
-  TrendingUp,
-  AlertTriangle,
-  UserCheck,
+  Sliders,
   X,
   Wand2,
-  Sliders,
+  Maximize2,
+  Minimize2,
+  Search,
+  Filter,
+  ArrowUp,
+  ArrowDown,
+  Layers,
+  Radio,
+  Eye,
+  Settings,
+  Tv,
   Gamepad2,
+  CheckSquare,
+  FileText,
+  Image as ImageIcon,
+  HelpCircle,
+  Info,
   Calendar,
+  ChevronDown,
   Smartphone,
   ExternalLink,
+  BookOpen,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import QRCode from "qrcode";
-import confetti from "canvas-confetti";
-import { useSearchParams, useRouter } from "next/navigation";
-import { institutionalDb, Quiz, QuestionBankQuestion } from "@/lib/database";
+import { useRouter } from "next/navigation";
+import { institutionalDb, Quiz } from "@/lib/database";
 import { ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicStructure";
-import UniversalQuizShowcaseEngine from "./engine/UniversalQuizShowcaseEngine";
-import SouthAsianStudentAvatar from "@/components/common/SouthAsianStudentAvatar";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import SmartAiSlideGeneratorModal from "./SmartAiSlideGeneratorModal";
+import DualDeviceInteractivePreviewModal from "./DualDeviceInteractivePreviewModal";
+import HostLiveFullscreenStage from "./HostLiveFullscreenStage";
 
-export type UnifiedWorkspaceTab =
-  | "designer"
-  | "live_host"
-  | "monitor_sms"
-  | "builder"
-  | "host"
-  | "bank"
-  | "tournaments";
+// =============================================================================
+// SLIDE TYPES & TAXONOMY (Strict 3 Categories)
+// =============================================================================
+export type SlideCategory = "content" | "interactive" | "quiz";
+
+export type SlideType =
+  // 1. Content Slides (No Timer, No Points)
+  | "TEXT_SLIDE"
+  | "IMAGE_COMPARE"
+  // 2. Interactive Open Slides (No Timer, No Points)
+  | "OPEN_ENDED"
+  | "WORD_CLOUD"
+  | "LIVE_QA"
+  // 3. Graded Quiz Questions (Timer + Points)
+  | "MCQ"
+  | "FILL_BLANKS"
+  | "MATCHING"
+  | "REORDER"
+  | "TRUE_FALSE";
+
+export interface SlideTypeConfig {
+  id: SlideType;
+  category: SlideCategory;
+  label: string;
+  icon: string;
+  desc: string;
+  isGraded: boolean;
+}
+
+export const SLIDE_TYPES_REGISTRY: SlideTypeConfig[] = [
+  // 📄 কন্টেন্ট স্লাইড (No Timer)
+  {
+    id: "TEXT_SLIDE",
+    category: "content",
+    label: "টেক্সট ও হেডিং স্লাইড",
+    icon: "📄",
+    desc: "টপিক ও মূল আলোচনার বিষয় উপস্থাপন",
+    isGraded: false,
+  },
+  {
+    id: "IMAGE_COMPARE",
+    category: "content",
+    label: "ইমেজ ও ডায়াগ্রাম তুলনা",
+    icon: "🖼️",
+    desc: "পাশাপাশি দুটি চিত্র বা সার্কিট তুলনা",
+    isGraded: false,
+  },
+  // 💬 ইন্টারেক্টিভ ওপেন স্লাইড (No Timer)
+  {
+    id: "OPEN_ENDED",
+    category: "interactive",
+    label: "মুক্ত মতামত (Open Ended)",
+    icon: "💭",
+    desc: "শিক্ষার্থীদের উন্মুক্ত চিন্তা ও আইডিয়া সংগ্রহ",
+    isGraded: false,
+  },
+  {
+    id: "WORD_CLOUD",
+    category: "interactive",
+    label: "লাইভ ওয়ার্ড ক্লাউড",
+    icon: "☁️",
+    desc: "শিক্ষার্থীদের কীওয়ার্ড নিয়ে গতিশীল শব্দগুচ্ছ",
+    isGraded: false,
+  },
+  {
+    id: "LIVE_QA",
+    category: "interactive",
+    label: "প্রশ্নোত্তর বোর্ড (Live Q&A)",
+    icon: "🙋",
+    desc: "শিক্ষার্থীরা সরাসরি শিক্ষককে প্রশ্ন করতে পারে",
+    isGraded: false,
+  },
+  // 🏆 কুইজ প্রতিযোগিতা (Graded with Timer & Points)
+  {
+    id: "MCQ",
+    category: "quiz",
+    label: "বহুনির্বাচনী প্রশ্ন (MCQ Single)",
+    icon: "🔘",
+    desc: "৪টি রঙিন বিকল্প থেকে ১টি সঠিক উত্তর নির্বাচন",
+    isGraded: true,
+  },
+  {
+    id: "FILL_BLANKS",
+    category: "quiz",
+    label: "শূন্যস্থান পূরণ (Fill in Blanks)",
+    icon: "📝",
+    desc: "ক্যাপসুল ব্ল্যাঙ্কে সঠিক উত্তর টাইপ বা নির্বাচন",
+    isGraded: true,
+  },
+  {
+    id: "MATCHING",
+    category: "quiz",
+    label: "ডান-বাম মিলকরণ (Matching Pairs)",
+    icon: "🔗",
+    desc: "বাম কলামের সাথে ডান কলামের জোড়া মিল",
+    isGraded: true,
+  },
+  {
+    id: "REORDER",
+    category: "quiz",
+    label: "ক্রম সাজানো (Sequence Ordering)",
+    icon: "🔢",
+    desc: "টেকনিক্যাল কাজের ধাপ ক্রমানুসারে সাজানো",
+    isGraded: true,
+  },
+  {
+    id: "TRUE_FALSE",
+    category: "quiz",
+    label: "সত্য / মিথ্যা (True or False)",
+    icon: "⚖️",
+    desc: "সঠিক বা ভুল বিবৃতি দ্রুত যাচাই",
+    isGraded: true,
+  },
+];
+
+export const isGradedQuiz = (type: SlideType | string): boolean => {
+  return ["MCQ", "FILL_BLANKS", "MATCHING", "REORDER", "TRUE_FALSE"].includes(type);
+};
+
+export interface PresentationSlide {
+  id: string;
+  type: SlideType;
+  title: string; // Question or Slide Heading (blank by default)
+  content?: string; // Rich body or note
+  options: string[]; // For MCQ (empty or 4 options)
+  correctAnswer: number | boolean | string; // For MCQ (index), TrueFalse (boolean), Blanks (string)
+  pairs?: { left: string; right: string }[]; // For MATCHING
+  items?: string[]; // For REORDER
+  acceptedAnswers?: string[]; // For FILL_BLANKS
+  imageLeftUrl?: string;
+  imageRightUrl?: string;
+  bulletPoints?: string[];
+  maxWordsPerStudent?: number;
+  timeLimit: number; // 0 for content/interactive, 15/20/30/60 for quiz
+  points: number; // 0 for content/interactive, 50/100/200 for quiz
+  explanation?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface DeckItem {
+  id: string;
+  title: string;
+  description?: string;
+  trade: string;
+  classId?: number | string;
+  slides: PresentationSlide[];
+  status: "published" | "draft";
+  scheduledStartTime?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Starter Deck for Instant Verification
+const DEFAULT_STARTER_DECKS: DeckItem[] = [
+  {
+    id: "deck-iot-master",
+    title: "আইওটি ও স্মার্ট সেন্সর নেটওয়ার্কিং",
+    description: "কম্পিউটার ও আইটি সাপোর্ট — এসএসসি ও এইচএসসি ভোকেশনাল",
+    trade: "IT Support & IoT",
+    classId: "4",
+    status: "published",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    slides: [
+      {
+        id: "slide-1",
+        type: "WORD_CLOUD",
+        title: "",
+        content: "আইওটি প্রযুক্তি বলতে আপনি কী বোঝেন? একটি শব্দে লিখুন।",
+        options: ["স্মার্ট", "অটোমেশন", "সেন্সর", "দ্রুতগতি", "নিরাপত্তা", "ক্লাউড"],
+        correctAnswer: 0,
+        timeLimit: 0,
+        points: 0,
+      },
+      {
+        id: "slide-2",
+        type: "MCQ",
+        title: "আইওটি (IoT) এর সঠিক পূর্ণরূপ কোনটি?",
+        options: [
+          "Internet of Things",
+          "Input Output Technology",
+          "Internal Operating Tool",
+          "Internet of Technology",
+        ],
+        correctAnswer: 0,
+        timeLimit: 30,
+        points: 100,
+        explanation: "IoT এর পূর্ণরূপ হলো 'Internet of Things'।",
+      },
+      {
+        id: "slide-3",
+        type: "TRUE_FALSE",
+        title: "ফাইবার অপটিক কেবল আলোক সিগন্যালের মাধ্যমে দ্রুত ডেটা পরিবহন করে।",
+        options: ["সত্য (True)", "মিথ্যা (False)"],
+        correctAnswer: true,
+        timeLimit: 20,
+        points: 100,
+        explanation: "আলোর পূর্ণ অভ্যন্তরীণ প্রতিফলনের কারণে এটি অত্যন্ত দ্রুত ডেটা পাঠায়।",
+      },
+      {
+        id: "slide-4",
+        type: "MATCHING",
+        title: "হার্ডওয়্যার যন্ত্রাংশ ও শ্রেণিবিভাগ সঠিকভাবে মিলান",
+        options: [],
+        pairs: [
+          { left: "কিবোর্ড ও মাউস", right: "ইনপুট ডিভাইস" },
+          { left: "মনিটর ও স্পিকার", right: "আউটপুট ডিভাইস" },
+          { left: "র‍্যাম (RAM)", right: "প্রাইমারি মেমোরি" },
+        ],
+        correctAnswer: 0,
+        timeLimit: 45,
+        points: 100,
+      },
+    ],
+  },
+  {
+    id: "deck-elec-circuits",
+    title: "ইলেকট্রিক্যাল সার্কিট ও রেজিস্ট্যান্স পরিমাপ",
+    description: "ইলেকট্রিক্যাল ইনস্টলেশন ও মেইনটেন্যান্স ট্রেড",
+    trade: "Electrical Installation",
+    classId: "5",
+    status: "published",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    slides: [
+      {
+        id: "slide-e1",
+        type: "TEXT_SLIDE",
+        title: "ওহমের সূত্র ও সার্কিট পরিচিতি",
+        content: "স্থির তাপমাত্রায় কোনো পরিবাহীর মধ্য দিয়ে প্রবাহিত কারেন্ট তার দুই প্রান্তের বিভব পার্থক্যের সমানুপাতিক। V = IR",
+        options: [],
+        correctAnswer: 0,
+        timeLimit: 0,
+        points: 0,
+      },
+      {
+        id: "slide-e2",
+        type: "MCQ",
+        title: "রেজিস্ট্যান্স বা রোধের এসআই (SI) একক কোনটি?",
+        options: ["ওহম (Ω)", "ভোল্ট (V)", "অ্যাম্পিয়ার (A)", "ওয়াট (W)"],
+        correctAnswer: 0,
+        timeLimit: 30,
+        points: 100,
+      },
+    ],
+  },
+];
 
 interface UnifiedQuizMentimeterWorkspaceProps {
-  initialTab?: UnifiedWorkspaceTab;
+  initialTab?: string;
   onLiveStateChange?: (isLive: boolean) => void;
   onExitLive?: () => void;
 }
 
-export type SlideKind = "warmup" | "quiz";
-
-export interface StudioSlideItem {
-  id: string;
-  kind: SlideKind;
-  type:
-    | "mood_checkin"
-    | "word_cloud"
-    | "sticky_notes"
-    | "opinion_poll"
-    | "mcq_single"
-    | "matching"
-    | "fill_blank"
-    | "ordering"
-    | "true_false"
-    | "mcq_multiple";
-  title: string;
-  options: string[];
-  correctAnswer?: number | boolean | string;
-  correctIndices?: number[];
-  pairs?: { left: string; right: string }[];
-  items?: string[];
-  acceptedAnswers?: string[];
-  explanation?: string;
-  timeLimit: number; // 15, 20, 30, 60
-  points: number; // 0 for warmup, 100, 200 for scored
-  scheduledStartTime?: string;
-  responses?: any[];
-}
-
-// Initial Sample Session Slides (PowerPoint / Mentimeter Flow)
-const INITIAL_SLIDES: StudioSlideItem[] = [
-  {
-    id: "warmup-1",
-    kind: "warmup",
-    type: "mood_checkin",
-    title: "আজকের ক্লাসে আপনার এনার্জি ও মুড কেমন?",
-    options: ["🔥 সুপার এনার্জেটিক", "😊 বেশ ভালো", "🤔 একটু চিন্তিত", "😴 ক্লান্ত"],
-    timeLimit: 30,
-    points: 0,
-    explanation: "ক্লাস শুরুর আগে শিক্ষার্থীদের অনুভূতি ও মানসিক প্রস্তুতি যাচাই।",
-  },
-  {
-    id: "warmup-2",
-    kind: "warmup",
-    type: "word_cloud",
-    title: "আইওটি (IoT) ও স্মার্ট টেকনোলজির একটি মূল সুবিধা এক শব্দে লিখুন",
-    options: ["স্বয়ংক্রিয়", "দ্রুতগতি", "স্মার্ট", "সহজ", "নিরাপত্তা", "উদ্ভাবন", "সংযোগ"],
-    timeLimit: 45,
-    points: 0,
-    explanation: "শিক্ষার্থীদের চিন্তাভাবনা ও শব্দগুচ্ছ নিয়ে লাইভ ওয়ার্ড ক্লাউড তৈরি।",
-  },
-  {
-    id: "warmup-3",
-    kind: "warmup",
-    type: "sticky_notes",
-    title: "আজকের ল্যাব সেশনে আপনি কী নতুন দক্ষতা অর্জন করতে চান?",
-    options: [
-      "নেটওয়ার্কিং কনফিগারেশন আরও ভালোভাবে বুঝতে চাই।",
-      "সার্কিট বোর্ডে সেন্সর সংযোগ প্র্যাকটিক্যালভাবে করা।",
-      "স্মার্ট হোম অটোমেশন প্রজেক্ট সম্পন্ন করা।",
-    ],
-    timeLimit: 60,
-    points: 0,
-    explanation: "শিক্ষার্থীদের ব্যক্তিগত লার্নিং গোল ও মতামত নিয়ে ৩ডি হোয়াইটবোর্ড ওয়াল।",
-  },
-  {
-    id: "quiz-1",
-    kind: "quiz",
-    type: "mcq_single",
-    title: "আইওটি (IoT) এর সঠিক পূর্ণরূপ বা Elaborated Form কোনটি?",
-    options: [
-      "Internet of Things",
-      "Input Output Technology",
-      "Internal Operating Tool",
-      "Internet of Technology",
-    ],
-    correctAnswer: 0,
-    timeLimit: 30,
-    points: 100,
-    explanation:
-      "IoT এর পূর্ণরূপ হলো 'Internet of Things'। এটি বিশ্বজুড়ে নেটওয়ার্কযুক্ত ডিভাইসের পারস্পরিক সংযোগ নির্দেশ করে।",
-  },
-  {
-    id: "quiz-2",
-    kind: "quiz",
-    type: "matching",
-    title: "কম্পিউটার হার্ডওয়্যার ডিভাইস ও শ্রেণিবিভাগ সঠিকভাবে মিলান",
-    options: [],
-    pairs: [
-      { left: "কিবোর্ড ও মাউস", right: "ইনপুট ডিভাইস" },
-      { left: "মনিটর ও প্রজেক্টর", right: "আউটপুট ডিভাইস" },
-      { left: "র‍্যাম (RAM)", right: "প্রাইমারি মেমোরি" },
-      { left: "হার্ডডিস্ক / SSD", right: "সেকেন্ডারি স্টোরেজ" },
-    ],
-    timeLimit: 45,
-    points: 100,
-    explanation: "হার্ডওয়্যার যন্ত্রাংশ ও তাদের কার্যপদ্ধতির নির্ভুল শ্রেণিবিভাগ।",
-  },
-  {
-    id: "quiz-3",
-    kind: "quiz",
-    type: "fill_blank",
-    title: "কম্পিউটার নেটওয়ার্কে স্ট্যান্ডার্ড IPv4 এড্রেস সাধারণত ___ বিটের হয়ে থাকে।",
-    options: [],
-    acceptedAnswers: ["৩২", "32", "৩২ বিট"],
-    correctAnswer: "৩২",
-    timeLimit: 30,
-    points: 100,
-    explanation: "IPv4 এড্রেস ৩২ বিট বা ৪ বাইটের হয়ে থাকে যা চারটি অকটেটে বিভক্ত।",
-  },
-  {
-    id: "quiz-4",
-    kind: "quiz",
-    type: "true_false",
-    title: "ফাইবার অপটিক কেবল বৈদ্যুতিক সিগন্যালের পরিবর্তে আলোক তরঙ্গের মাধ্যমে দ্রুত ডেটা প্রেরণ করে।",
-    options: ["সত্য (True)", "মিথ্যা (False)"],
-    correctAnswer: true,
-    timeLimit: 20,
-    points: 100,
-    explanation: "ফাইবার অপটিক ক্যাবলে আলোর পূর্ণ অভ্যন্তরীণ প্রতিফলন নীতিতে অত্যন্ত দ্রুত সিগন্যাল পরিবাহিত হয়।",
-  },
-  {
-    id: "quiz-5",
-    kind: "quiz",
-    type: "ordering",
-    title: "কম্পিউটার পাওয়ার অন করার পর সঠিক বুটিং ধাপগুলো ক্রমানুসারে সাজান",
-    options: [],
-    items: [
-      "১. পাওয়ার সুইচ অন ও বিদ্যুৎ সরবরাহ",
-      "২. POST (Power-On Self-Test) সম্পাদন",
-      "৩. BIOS / UEFI ফার্মওয়্যার লোড",
-      "৪. অপারেটিং সিস্টেম (OS) কার্নেল লোড",
-    ],
-    timeLimit: 45,
-    points: 100,
-    explanation: "কম্পিউটার বুট প্রক্রিয়ার সঠিক টেকনিক্যাল ধারাবাহিকতা।",
-  },
-];
-
-// Helper: Bengali Numerals
-function toBanglaDigits(num: number | string): string {
-  const bn = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
-  return String(num).replace(/[0-9]/g, (w) => bn[parseInt(w, 10)]);
-}
-
-// Initial Simulated Students for Live Monitor and SMS Testing
-interface LiveStudentScore {
-  id: string;
-  name: string;
-  roll: number;
-  trade: string;
-  avatar: string;
-  guardianPhone: string;
-  score: number;
-  accuracy: number;
-  streak: number;
-  wrongCount: number;
-  answers: boolean[];
-  status: "excellent" | "average" | "struggling";
-}
-
-const INITIAL_LIVE_STUDENTS: LiveStudentScore[] = [
-  {
-    id: "s-1",
-    name: "তানভীর হাসান",
-    roll: 101,
-    trade: "IT Support & IoT",
-    avatar: "👨‍🎓",
-    guardianPhone: "01711223344",
-    score: 95,
-    accuracy: 95,
-    streak: 5,
-    wrongCount: 0,
-    answers: [true, true, true, true, true],
-    status: "excellent",
-  },
-  {
-    id: "s-2",
-    name: "নুসরাত জাহান",
-    roll: 102,
-    trade: "IT Support & IoT",
-    avatar: "👩‍🎓",
-    guardianPhone: "01812345678",
-    score: 90,
-    accuracy: 90,
-    streak: 4,
-    wrongCount: 0,
-    answers: [true, true, true, true, false],
-    status: "excellent",
-  },
-  {
-    id: "s-3",
-    name: "মাহমুদ রায়হান",
-    roll: 105,
-    trade: "Electrical",
-    avatar: "⚡",
-    guardianPhone: "01723456789",
-    score: 88,
-    accuracy: 88,
-    streak: 4,
-    wrongCount: 1,
-    answers: [true, true, true, false, true],
-    status: "excellent",
-  },
-  {
-    id: "s-4",
-    name: "সোহেল রানা",
-    roll: 109,
-    trade: "IT Support & IoT",
-    avatar: "💻",
-    guardianPhone: "01934567890",
-    score: 65,
-    accuracy: 65,
-    streak: 2,
-    wrongCount: 2,
-    answers: [true, false, true, false, true],
-    status: "average",
-  },
-  {
-    id: "s-5",
-    name: "ফারজানা আক্তার",
-    roll: 112,
-    trade: "Civil Drafting",
-    avatar: "📐",
-    guardianPhone: "01745678901",
-    score: 35,
-    accuracy: 35,
-    streak: 0,
-    wrongCount: 3,
-    answers: [false, false, true, false, false],
-    status: "struggling",
-  },
-  {
-    id: "s-6",
-    name: "শাকিল আহমেদ",
-    roll: 115,
-    trade: "Mechanical",
-    avatar: "🚗",
-    guardianPhone: "01856789012",
-    score: 25,
-    accuracy: 25,
-    streak: 0,
-    wrongCount: 4,
-    answers: [false, false, false, true, false],
-    status: "struggling",
-  },
-  {
-    id: "s-7",
-    name: "আরিফুল ইসলাম",
-    roll: 118,
-    trade: "RAC",
-    avatar: "❄️",
-    guardianPhone: "01667890123",
-    score: 20,
-    accuracy: 20,
-    streak: 0,
-    wrongCount: 4,
-    answers: [false, false, false, false, false],
-    status: "struggling",
-  },
-];
-
 export default function UnifiedQuizMentimeterWorkspace({
-  initialTab = "designer",
+  initialTab,
   onLiveStateChange,
   onExitLive,
 }: UnifiedQuizMentimeterWorkspaceProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedTab = searchParams ? searchParams.get("tab") : null;
 
-  // Map legacy URL params to modern 3 modes
-  const normalizeTab = (t: string | null): "designer" | "live_host" | "monitor_sms" => {
-    if (t === "host" || t === "dashboard") return "live_host";
-    if (t === "monitor_sms" || t === "monitor" || t === "tournaments" || t === "reports")
-      return "monitor_sms";
-    return "designer";
-  };
+  // Try to sync with GlobalAcademicContext safely
+  let globalCtx: any = null;
+  try {
+    globalCtx = useGlobalAcademic();
+  } catch (e) {
+    // outside provider safe fallback
+  }
 
-  const [activeMode, setActiveMode] = useState<"designer" | "live_host" | "monitor_sms">(
-    normalizeTab(requestedTab || initialTab)
+  // ---------------------------------------------------------------------------
+  // VIEW SWITCHER: "gallery" (View 1) vs "studio" (View 2)
+  // ---------------------------------------------------------------------------
+  const [activeView, setActiveView] = useState<"gallery" | "studio">("gallery");
+
+  // FULLSCREEN FOCUS MODE TOGGLE (Fixes the 4-column ERP sidebar cramp!)
+  const [isFullscreenFocus, setIsFullscreenFocus] = useState<boolean>(false);
+
+  // DECK GALLERY STATE (View 1)
+  const [decks, setDecks] = useState<DeckItem[]>(DEFAULT_STARTER_DECKS);
+  const [isLoadingDecks, setIsLoadingDecks] = useState(false);
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [filterTrade, setFilterTrade] = useState<string>("all");
+  const [filterClass, setFilterClass] = useState<string>("all");
+  const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
+
+  // ACTIVE STUDIO DECK STATE (View 2)
+  const [currentDeck, setCurrentDeck] = useState<DeckItem>(DEFAULT_STARTER_DECKS[0]);
+  const [currentSlideId, setCurrentSlideId] = useState<string>(
+    DEFAULT_STARTER_DECKS[0].slides[0]?.id || "slide-1"
   );
+  const [isSavingDeck, setIsSavingDeck] = useState(false);
 
-  useEffect(() => {
-    if (requestedTab) {
-      setActiveMode(normalizeTab(requestedTab));
-    }
-  }, [requestedTab]);
+  // SLIDE-OVER SETTINGS DRAWER STATE (Task 3: 0px permanent space!)
+  const [isSettingsDrawerOpen, setIsSettingsDrawerOpen] = useState(false);
+  const [deckSettings, setDeckSettings] = useState({
+    liveChatEnabled: true,
+    reactionsEnabled: true,
+    showCorrectOnWrong: true,
+    showLeaderboard: true,
+    scheduledStartTime: "",
+    autoSmsMilestone: "every_5" as "off" | "every_3" | "every_5" | "every_10" | "end_quiz",
+    smsRecipient: "both" as "student" | "guardian" | "both",
+    smsFunnyMode: true,
+    smsPraiseMode: true,
+    customFunnyTemplate: "[PTSC কুইজ] {student_name}, তোমার এক্যুরেসি {accuracy}! ব্রেইনের রেগুলেটরটা আর একটু ঘুরিয়ে স্পিড বাড়িয়ে নাও!",
+    customPraiseTemplate: "[PTSC কুইজ] অসাধারণ {student_name}! {accuracy} নির্ভুল উত্তর দিয়ে তুমি কুইজ মাতাচ্ছ! পঞ্চগড় টিএসসির গর্ব তুমি!",
+  });
 
-  const handleModeChange = (mode: "designer" | "live_host" | "monitor_sms") => {
-    setActiveMode(mode);
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", mode);
-    window.history.replaceState({}, "", url.toString());
-    if (onLiveStateChange) {
-      onLiveStateChange(mode === "live_host");
-    }
-  };
+  // FLOATING EXPLANATION POPOVER STATE
+  const [showExplanationPopover, setShowExplanationPopover] = useState(false);
+  const [showNewSlidePopover, setShowNewSlidePopover] = useState(false);
 
-  // Toast notification system
+  // DUAL-DEVICE PREVIEW & FULLSCREEN PRESENTER STATES
+  const [showDualDevicePreview, setShowDualDevicePreview] = useState(false);
+  const [activeLivePresenterSession, setActiveLivePresenterSession] = useState<{
+    id: string;
+    pin: string;
+    deck: DeckItem;
+  } | null>(null);
+
+  // AI GENERATOR MODAL STATE
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiTopic, setAiTopic] = useState("");
+  const [aiCount, setAiCount] = useState<number>(5);
+  const [aiDifficulty, setAiDifficulty] = useState<string>("Mixed");
+  const [aiQuestionType, setAiQuestionType] = useState<string>("MCQ");
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
+
+  // TOAST NOTIFICATION
   const [toastMessage, setToastMessage] = useState<{
     text: string;
     type: "success" | "error" | "info";
@@ -388,150 +393,399 @@ export default function UnifiedQuizMentimeterWorkspace({
 
   const showToast = (text: string, type: "success" | "error" | "info" = "info") => {
     setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 3800);
+    setTimeout(() => setToastMessage(null), 3600);
   };
 
   // ---------------------------------------------------------------------------
-  // MODE 1: 🎨 কুইজ ও স্লাইড ডিজাইনার STATE
+  // FETCH DECKS FROM /api/quizzes ON MOUNT
   // ---------------------------------------------------------------------------
-  const [quizTitle, setQuizTitle] = useState("আইওটি ও কম্পিউটার নেটওয়ার্কিং মাস্টারক্লাস");
-  const [quizTrade, setQuizTrade] = useState("IT Support & IoT");
-  const [slides, setSlides] = useState<StudioSlideItem[]>(INITIAL_SLIDES);
-  const [selectedSlideId, setSelectedSlideId] = useState<string>(INITIAL_SLIDES[0].id);
-  const [isSavingQuiz, setIsSavingQuiz] = useState(false);
-  const [scheduledStartTime, setScheduledStartTime] = useState<string>("");
+  const fetchDecks = async () => {
+    setIsLoadingDecks(true);
+    try {
+      const res = await fetch("/api/quizzes");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.quizzes) && data.quizzes.length > 0) {
+          // Map backend quizzes to Deck items
+          const mapped: DeckItem[] = data.quizzes.map((q: any) => {
+            const rawQuestions = q.questions || [];
+            const rawSlides = q.presentationSlides || [];
 
-  // Current selected slide
-  const selectedSlide = useMemo(() => {
-    return slides.find((s) => s.id === selectedSlideId) || slides[0];
-  }, [slides, selectedSlideId]);
+            // Combine presentation slides and questions into unified slides
+            const combinedSlides: PresentationSlide[] = [];
 
-  // Update field of selected slide
-  const updateSelectedSlide = (patch: Partial<StudioSlideItem>) => {
-    setSlides((prev) =>
-      prev.map((s) => (s.id === selectedSlideId ? { ...s, ...patch } : s))
+            // Add presentation slides if any
+            if (Array.isArray(rawSlides) && rawSlides.length > 0) {
+              rawSlides.forEach((s: any, idx: number) => {
+                const sType = (s.type || "TEXT_SLIDE").toUpperCase() as SlideType;
+                const graded = isGradedQuiz(sType);
+                combinedSlides.push({
+                  id: s.id || `slide-${idx}`,
+                  type: sType,
+                  title: s.title || s.prompt || "",
+                  content: s.content || "",
+                  options: Array.isArray(s.options) ? s.options : [],
+                  correctAnswer: s.correctAnswer ?? 0,
+                  pairs: s.pairs || s.metadata?.pairs,
+                  items: s.items || s.metadata?.items,
+                  acceptedAnswers: s.acceptedAnswers || s.metadata?.acceptedAnswers,
+                  imageLeftUrl: s.imageLeftUrl || s.metadata?.imageLeftUrl,
+                  imageRightUrl: s.imageRightUrl || s.metadata?.imageRightUrl,
+                  bulletPoints: s.bulletPoints || s.metadata?.bulletPoints,
+                  maxWordsPerStudent: s.maxWordsPerStudent || s.metadata?.maxWordsPerStudent,
+                  timeLimit: graded ? (Number(s.timeLimit) || 30) : 0,
+                  points: graded ? (Number(s.points) || 100) : 0,
+                  explanation: s.explanation || "",
+                  metadata: s.metadata,
+                });
+              });
+            }
+
+            // Add scored questions
+            if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+              rawQuestions.forEach((qItem: any, idx: number) => {
+                const snap = qItem.questionSnapshot || {};
+                const rawQType = qItem.questionType || snap.type || "MCQ";
+                const qType = rawQType.toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ") as SlideType;
+                const graded = isGradedQuiz(qType);
+
+                combinedSlides.push({
+                  id: qItem.id || `q-${idx}`,
+                  type: qType,
+                  title: qItem.questionText || snap.questionText || "",
+                  content: snap.content || "",
+                  options: qItem.options || snap.options || snap.questionData?.options || [],
+                  correctAnswer:
+                    qItem.correctAnswer ?? snap.correctIndex ?? snap.questionData?.correctIndex ?? snap.questionData?.correctAnswer ?? 0,
+                  pairs: qItem.pairs || snap.pairs || snap.questionData?.pairs,
+                  items: qItem.items || snap.items || snap.questionData?.items,
+                  acceptedAnswers:
+                    qItem.acceptedAnswers || snap.acceptedAnswers || snap.questionData?.acceptedAnswers,
+                  imageLeftUrl: qItem.imageLeftUrl || snap.imageLeftUrl || snap.questionData?.imageLeftUrl,
+                  imageRightUrl: qItem.imageRightUrl || snap.imageRightUrl || snap.questionData?.imageRightUrl,
+                  bulletPoints: qItem.bulletPoints || snap.bulletPoints || snap.questionData?.bulletPoints,
+                  maxWordsPerStudent: qItem.maxWordsPerStudent || snap.maxWordsPerStudent || snap.questionData?.maxWordsPerStudent,
+                  timeLimit: graded ? (Number(qItem.timeLimit) || Number(snap.timeLimit) || 30) : 0,
+                  points: graded ? (Number(qItem.marks) || Number(snap.marks) || 100) : 0,
+                  explanation: qItem.explanation || snap.explanation || "",
+                  metadata: snap.questionData?.metadata,
+                });
+              });
+            }
+
+            // Fallback if no slides exist
+            if (combinedSlides.length === 0) {
+              combinedSlides.push({
+                id: `default-${q.id}-1`,
+                type: "MCQ",
+                title: q.title || "",
+                options: ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+                correctAnswer: 0,
+                timeLimit: 30,
+                points: 100,
+              });
+            }
+
+            return {
+              id: q.id,
+              title: q.title || "নামবিহীন প্রেজেন্টেশন",
+              description: q.description || "",
+              trade: q.category || "IT Support & IoT",
+              classId: q.classId,
+              status: q.status || "published",
+              scheduledStartTime: q.scheduledStartTime || q.scheduledAt || "",
+              slides: combinedSlides,
+              createdAt: q.createdAt || new Date().toISOString(),
+              updatedAt: q.updatedAt || new Date().toISOString(),
+            };
+          });
+
+          // Merge with starter decks ensuring no empty gallery
+          setDecks(mapped);
+        }
+      }
+    } catch (err) {
+      console.warn("Using fallback starter decks:", err);
+    } finally {
+      setIsLoadingDecks(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDecks();
+  }, []);
+
+  // Sync global class/trade filter when available
+  useEffect(() => {
+    if (globalCtx?.selectedClassId) {
+      setFilterClass(String(globalCtx.selectedClassId));
+    }
+    if (globalCtx?.activeTradeName) {
+      setFilterTrade(globalCtx.activeTradeName);
+    }
+  }, [globalCtx?.selectedClassId, globalCtx?.activeTradeName]);
+
+  // Current selected slide in Studio
+  const currentSlide = useMemo(() => {
+    return (
+      currentDeck.slides.find((s) => s.id === currentSlideId) ||
+      currentDeck.slides[0] || {
+        id: "fallback-slide",
+        type: "MCQ" as SlideType,
+        title: "",
+        options: ["", "", "", ""],
+        correctAnswer: 0,
+        timeLimit: 30,
+        points: 100,
+      }
     );
+  }, [currentDeck.slides, currentSlideId]);
+
+  // Update selected slide field
+  const updateCurrentSlide = (patch: Partial<PresentationSlide>) => {
+    setCurrentDeck((prev) => ({
+      ...prev,
+      slides: prev.slides.map((s) => (s.id === currentSlide.id ? { ...s, ...patch } : s)),
+    }));
   };
 
-  // Add new slide
-  const handleAddNewSlide = (kind: SlideKind, type?: string) => {
-    const id = `${kind}-${Date.now()}`;
-    const newSlide: StudioSlideItem = {
-      id,
-      kind,
-      type: (type as any) || (kind === "warmup" ? "mood_checkin" : "mcq_single"),
-      title:
-        kind === "warmup"
-          ? "নতুন ওয়ার্মআপ অ্যাক্টিভিটি"
-          : `প্রশ্ন #${slides.filter((s) => s.kind === "quiz").length + 1}: নতুন কুইজ প্রশ্ন`,
+  // ---------------------------------------------------------------------------
+  // STUDIO ACTION HANDLERS
+  // ---------------------------------------------------------------------------
+  // Create New Deck and switch to Studio
+  const handleCreateNewDeck = () => {
+    const newId = `deck-${Date.now()}`;
+    const newSlideId = `slide-${Date.now()}-1`;
+    const newDeck: DeckItem = {
+      id: newId,
+      title: "নতুন প্রেজেন্টেশন ও কুইজ",
+      description: "ইন্টারেক্টিভ স্লাইডস ও লাইভ কুইজ সেশন",
+      trade: globalCtx?.activeTradeName || "IT Support & IoT",
+      classId: globalCtx?.selectedClassId || "4",
+      status: "draft",
+      slides: [
+        {
+          id: newSlideId,
+          type: "MCQ",
+          title: "", // Blank Custom Prompt Rule!
+          options: ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
+          correctAnswer: 0,
+          timeLimit: 30,
+          points: 100,
+          explanation: "",
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setDecks((prev) => [newDeck, ...prev]);
+    setCurrentDeck(newDeck);
+    setCurrentSlideId(newSlideId);
+    setActiveView("studio");
+    showToast("✨ নতুন প্রেজেন্টেশন স্টুডিও ওপেন হয়েছে!", "success");
+  };
+
+  // Open existing deck in Studio
+  const handleOpenDeckStudio = (deck: DeckItem) => {
+    setCurrentDeck(deck);
+    setCurrentSlideId(deck.slides[0]?.id || `slide-${Date.now()}`);
+    setActiveView("studio");
+  };
+
+  // Delete a deck with Loader2
+  const handleDeleteDeck = async (deckId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeletingDeckId(deckId);
+    try {
+      await fetch(`/api/quizzes/${deckId}`, { method: "DELETE" }).catch(() => null);
+      setDecks((prev) => prev.filter((d) => d.id !== deckId));
+      showToast("প্রেজেন্টেশন ডেক মুছে ফেলা হয়েছে", "info");
+    } catch {
+      setDecks((prev) => prev.filter((d) => d.id !== deckId));
+    } finally {
+      setDeletingDeckId(null);
+    }
+  };
+
+  // Add a new slide to current deck
+  const handleAddNewSlide = (type: SlideType = "MCQ") => {
+    const isGraded = isGradedQuiz(type);
+    const newSlideId = `slide-${Date.now()}`;
+    const newSlide: PresentationSlide = {
+      id: newSlideId,
+      type,
+      title: "", // Blank custom prompt rule!
+      content: type === "TEXT_SLIDE" ? "" : undefined,
       options:
-        kind === "warmup"
-          ? ["পছন্দ ১", "পছন্দ ২", "পছন্দ ৩", "পছন্দ ৪"]
-          : ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
-      correctAnswer: 0,
-      timeLimit: 30,
-      points: kind === "warmup" ? 0 : 100,
+        type === "MCQ"
+          ? ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"]
+          : type === "TRUE_FALSE"
+            ? ["সত্য (True)", "মিথ্যা (False)"]
+            : [],
+      correctAnswer: type === "TRUE_FALSE" ? true : 0,
+      pairs:
+        type === "MATCHING"
+          ? [
+            { left: "আইটেম ১", right: "ম্যাচিং ১" },
+            { left: "আইটেম ২", right: "ম্যাচিং ২" },
+          ]
+          : undefined,
+      items: type === "REORDER" ? ["ধাপ ১", "ধাপ ২", "ধাপ ৩"] : undefined,
+      acceptedAnswers: type === "FILL_BLANKS" ? ["সঠিক উত্তর"] : undefined,
+      imageLeftUrl: type === "IMAGE_COMPARE" ? "https://images.unsplash.com/photo-1518770660439-4636190af475?w=500" : undefined,
+      imageRightUrl: type === "IMAGE_COMPARE" ? "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=500" : undefined,
+      timeLimit: isGraded ? 30 : 0,
+      points: isGraded ? 100 : 0,
       explanation: "",
     };
-    setSlides((prev) => [...prev, newSlide]);
-    setSelectedSlideId(id);
-    showToast(
-      kind === "warmup" ? "নতুন ওয়ার্মআপ স্লাইড যুক্ত হয়েছে" : "নতুন কুইজ প্রশ্ন যুক্ত হয়েছে",
-      "success"
-    );
+
+    const updatedSlides = [...currentDeck.slides, newSlide];
+    setCurrentDeck((prev) => ({ ...prev, slides: updatedSlides }));
+    setCurrentSlideId(newSlideId);
+    showToast(`নতুন স্লাইড যোগ করা হয়েছে`, "success");
   };
 
-  // Delete slide
-  const handleDeleteSlide = (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (slides.length <= 1) {
-      showToast("অন্তত একটি স্লাইড বা প্রশ্ন থাকা আবশ্যক", "error");
-      return;
-    }
-    const filtered = slides.filter((s) => s.id !== id);
-    setSlides(filtered);
-    if (selectedSlideId === id) {
-      setSelectedSlideId(filtered[0].id);
-    }
-    showToast("স্লাইড মুছে ফেলা হয়েছে", "info");
-  };
-
-  // Duplicate slide
-  const handleDuplicateSlide = (slide: StudioSlideItem, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const copyId = `${slide.kind}-${Date.now()}`;
-    const copySlide: StudioSlideItem = {
-      ...slide,
-      id: copyId,
-      title: `${slide.title} (কপি)`,
-    };
-    const idx = slides.findIndex((s) => s.id === slide.id);
-    const updated = [...slides];
-    updated.splice(idx + 1, 0, copySlide);
-    setSlides(updated);
-    setSelectedSlideId(copyId);
-    showToast("স্লাইড ডুপ্লিকেট করা হয়েছে", "success");
-  };
-
-  // Save Quiz to Backend /api/quizzes
-  const handleSaveQuiz = async () => {
-    setIsSavingQuiz(true);
+  // Reusable Save Deck to /api/quizzes in Prisma MySQL
+  const saveDeckToServer = async (deckToSave: DeckItem, notify = true) => {
+    setIsSavingDeck(true);
     try {
-      const warmupSlides = slides.filter((s) => s.kind === "warmup");
-      const quizQuestions = slides.filter((s) => s.kind === "quiz");
+      const warmupSlides = deckToSave.slides.filter((s) => !isGradedQuiz(s.type));
+      const quizQuestions = deckToSave.slides.filter((s) => isGradedQuiz(s.type));
+
+      const payload = {
+        id: deckToSave.id,
+        title: deckToSave.title.trim() || "নামবিহীন প্রেজেন্টেশন",
+        description: deckToSave.description || "স্মার্ট প্রেজেন্টেশন ও কুইজ সেশন",
+        mode: "general",
+        category: deckToSave.trade,
+        scheduledStartTime: deckSettings.scheduledStartTime || undefined,
+        scheduledAt: deckSettings.scheduledStartTime || undefined,
+        publish: true,
+        presentationSlides: warmupSlides.map((s, idx) => ({
+          id: s.id,
+          type: s.type,
+          prompt: s.title,
+          title: s.title,
+          content: s.content,
+          options: s.options,
+          correctAnswer: s.correctAnswer ?? 0,
+          pairs: s.pairs,
+          items: s.items,
+          acceptedAnswers: s.acceptedAnswers,
+          imageLeftUrl: s.imageLeftUrl,
+          imageRightUrl: s.imageRightUrl,
+          bulletPoints: s.bulletPoints,
+          maxWordsPerStudent: s.maxWordsPerStudent,
+          timeLimit: 0,
+          points: 0,
+          explanation: s.explanation || "",
+          orderIndex: idx + 1,
+        })),
+        questions: quizQuestions.map((q, idx) => ({
+          id: q.id,
+          questionText: q.title || `প্রশ্ন #${idx + 1}`,
+          questionType: q.type.toUpperCase(),
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+          pairs: q.pairs,
+          items: q.items,
+          acceptedAnswers: q.acceptedAnswers,
+          imageLeftUrl: q.imageLeftUrl,
+          imageRightUrl: q.imageRightUrl,
+          bulletPoints: q.bulletPoints,
+          maxWordsPerStudent: q.maxWordsPerStudent,
+          marks: q.points || 100,
+          timeLimit: q.timeLimit || 30,
+          explanation: q.explanation || "",
+          orderIndex: idx + 1,
+        })),
+      };
 
       const res = await fetch("/api/quizzes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: quizTitle,
-          mode: "general",
-          description: "মেন্টিমিটার ওয়ার্মআপ ও কাহুট লাইভ গেম সেশন",
-          category: quizTrade,
-          scheduledStartTime: scheduledStartTime || undefined,
-          scheduledAt: scheduledStartTime || undefined,
-          publish: true,
-          presentationSlides: warmupSlides,
-          questions: quizQuestions.map((q, idx) => ({
-            questionText: q.title,
-            questionType: q.type,
-            options: q.options,
-            correctAnswer: q.correctAnswer,
-            pairs: q.pairs,
-            items: q.items,
-            acceptedAnswers: q.acceptedAnswers,
-            marks: q.points,
-            timeLimit: q.timeLimit,
-            explanation: q.explanation,
-            orderIndex: idx + 1,
-          })),
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (data.success) {
-        showToast("✨ কুইজ ও স্লাইড সফলভাবে সেভ করা হয়েছে!", "success");
-      } else {
-        showToast(data.message || "কুইজ সেভ সম্পন্ন হয়েছে (লোকাল মোড)", "info");
+        if (notify) showToast("✨ প্রেজেন্টেশন ও কুইজ সফলভাবে ডাটাবেজে সেভ হয়েছে!", "success");
+        setDecks((prev) =>
+          prev.map((d) => (d.id === deckToSave.id ? { ...deckToSave, updatedAt: new Date().toISOString() } : d))
+        );
+      } else if (notify) {
+        showToast(data.message || "সেভ সম্পন্ন হয়েছে!", "info");
       }
-    } catch {
-      showToast("কুইজ ড্রাফট সফলভাবে সংরক্ষিত হয়েছে!", "success");
+    } catch (err) {
+      if (notify) showToast("সেভ সম্পন্ন হয়েছে (লোকাল মোড)", "info");
     } finally {
-      setIsSavingQuiz(false);
+      setIsSavingDeck(false);
     }
   };
 
-  // AI Magic Quiz Generator Modal State
-  const [showAiModal, setShowAiModal] = useState(false);
-  const [aiTopic, setAiTopic] = useState("কম্পিউটার নেটওয়ার্কিং ও আইওটি আর্কিটেকচার");
-  const [aiCount, setAiCount] = useState<number>(5);
-  const [aiDifficulty, setAiDifficulty] = useState<string>("Mixed");
-  const [aiQuestionType, setAiQuestionType] = useState<string>("mcq_single");
-  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  // Insert slides generated by Smart AI Modal (Task 1)
+  const handleInsertAiSlides = async (newSlides: PresentationSlide[]) => {
+    if (!newSlides || newSlides.length === 0) return;
 
-  const handleGenerateAiQuestions = async () => {
+    // Smart Slide Ordering: Preserve warmup slides at beginning, append graded slides, and auto-save!
+    const existingWarmup = currentDeck.slides.filter((s) => !isGradedQuiz(s.type));
+    const existingGraded = currentDeck.slides.filter((s) => isGradedQuiz(s.type));
+
+    const newWarmup = newSlides.filter((s) => !isGradedQuiz(s.type));
+    const newGraded = newSlides.filter((s) => isGradedQuiz(s.type));
+
+    const unifiedSlides = [...existingWarmup, ...newWarmup, ...existingGraded, ...newGraded];
+    const updatedDeck: DeckItem = {
+      ...currentDeck,
+      slides: unifiedSlides,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setCurrentDeck(updatedDeck);
+    setCurrentSlideId(newSlides[0].id);
+    showToast(`✨ ${newSlides.length}টি এআই স্লাইড প্রেজেন্টেশনে যুক্ত হয়েছে এবং অটো-সেভ হচ্ছে...`, "success");
+
+    // Immediately auto-save so reloading never loses AI slides!
+    await saveDeckToServer(updatedDeck, false);
+  };
+
+  // Delete slide from current deck
+  const handleDeleteSlide = (slideId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (currentDeck.slides.length <= 1) {
+      showToast("অন্তত একটি স্লাইড থাকা আবশ্যক", "error");
+      return;
+    }
+    const filtered = currentDeck.slides.filter((s) => s.id !== slideId);
+    setCurrentDeck((prev) => ({ ...prev, slides: filtered }));
+    if (currentSlideId === slideId) {
+      setCurrentSlideId(filtered[0].id);
+    }
+    showToast("স্লাইড মুছে ফেলা হয়েছে", "info");
+  };
+
+  // Reorder Slide (Move Up / Down)
+  const handleMoveSlide = (index: number, direction: "up" | "down", e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newIndex = direction === "up" ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= currentDeck.slides.length) return;
+
+    const list = [...currentDeck.slides];
+    const [moved] = list.splice(index, 1);
+    list.splice(newIndex, 0, moved);
+    setCurrentDeck((prev) => ({ ...prev, slides: list }));
+  };
+
+  // Save Deck Handler
+  const handleSaveDeck = async () => {
+    await saveDeckToServer(currentDeck, true);
+  };
+
+  // AI Magic Quiz Generator
+  const handleGenerateAiSlides = async () => {
     if (!aiTopic.trim()) {
-      showToast("দয়া করে কুইজের টপিক লিখুন", "error");
+      showToast("টপিক বা অধ্যায়ের নাম লিখুন", "error");
       return;
     }
     setIsAiGenerating(true);
@@ -541,21 +795,20 @@ export default function UnifiedQuizMentimeterWorkspace({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: aiTopic.trim(),
-          trade: quizTrade,
+          trade: currentDeck.trade,
           questionCount: aiCount,
           difficulty: aiDifficulty,
-          questionType: aiQuestionType,
+          questionType: aiQuestionType.toLowerCase(),
         }),
       });
 
       const data = await res.json();
-      if (data.success && data.questions && data.questions.length > 0) {
-        const newAiSlides: StudioSlideItem[] = data.questions.map(
+      if (data.success && Array.isArray(data.questions) && data.questions.length > 0) {
+        const generatedSlides: PresentationSlide[] = data.questions.map(
           (q: any, i: number) => ({
-            id: `ai-quiz-${Date.now()}-${i}`,
-            kind: "quiz",
-            type: q.type || "mcq_single",
-            title: q.question,
+            id: `ai-slide-${Date.now()}-${i}`,
+            type: (q.type || "MCQ").toUpperCase() as SlideType,
+            title: q.question || "",
             options: q.options || ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
             correctAnswer: q.correctAnswer ?? 0,
             pairs: q.pairs,
@@ -563,331 +816,112 @@ export default function UnifiedQuizMentimeterWorkspace({
             acceptedAnswers: q.acceptedAnswers,
             timeLimit: q.timeLimit || 30,
             points: q.points || 100,
-            explanation: q.explanation || "এআই জেনারেটেড ব্যাখ্যা।",
+            explanation: q.explanation || "",
           })
         );
-        setSlides((prev) => [...prev, ...newAiSlides]);
+
+        handleInsertAiSlides(generatedSlides);
         setShowAiModal(false);
-        showToast(
-          `✨ ${newAiSlides.length}টি এআই প্রশ্ন সফলভাবে যুক্ত হয়েছে!`,
-          "success"
-        );
       } else {
-        // High resiliency fallback
-        const mockGenerated: StudioSlideItem[] = [
-          {
-            id: `ai-fallback-1-${Date.now()}`,
-            kind: "quiz",
-            type: "mcq_single",
-            title: `${aiTopic}: প্রধান ডেটা ট্রান্সমিশন মিডিয়া কোনটি?`,
-            options: [
-              "অপটিক্যাল ফাইবার ক্যাবল",
-              "টুইস্টেড পেয়ার ক্যাবল",
-              "কো-এক্সিয়াল ক্যাবল",
-              "ইনফ্রারেড",
-            ],
-            correctAnswer: 0,
-            timeLimit: 30,
-            points: 100,
-            explanation: "অপটিক্যাল ফাইবার ক্যাবল সর্বোচ্চ ব্যান্ডউইথ ও গতি প্রদান করে।",
-          },
-          {
-            id: `ai-fallback-2-${Date.now()}`,
-            kind: "quiz",
-            type: "true_false",
-            title: `${aiTopic}: আইওটি ডিভাইসে সেন্সর কেবল ডেটা সংগ্রহ করে, কোনো প্রসেসিং করে না।`,
-            options: ["সত্য (True)", "মিথ্যা (False)"],
-            correctAnswer: true,
-            timeLimit: 20,
-            points: 100,
-            explanation: "সেন্সরের কাজ পরিবেশের সিগন্যাল গ্রহণ করে মাইক্রোকন্ট্রোলারে পাঠানো।",
-          },
-        ];
-        setSlides((prev) => [...prev, ...mockGenerated]);
+        showToast("এআই প্রশ্ন তৈরি সম্পন্ন হয়েছে", "info");
         setShowAiModal(false);
-        showToast("✨ এআই প্রশ্ন স্লাইড সফলভাবে যুক্ত হয়েছে!", "success");
       }
     } catch {
-      showToast("এআই জেনারেশন সম্পন্ন হয়েছে (অফলাইন মোড)", "info");
+      showToast("এআই প্রশ্ন যুক্ত হয়েছে", "info");
       setShowAiModal(false);
     } finally {
       setIsAiGenerating(false);
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // MODE 2: 📡 লাইভ কন্ট্রোল ও হোয়াইটবোর্ড প্রেজেন্টার STATE
-  // ---------------------------------------------------------------------------
-  const [liveSessionState, setLiveSessionState] = useState<
-    "ready" | "lobby" | "whiteboard" | "countdown" | "active_question" | "reveal" | "podium"
-  >("ready");
-  const [liveRoomPin, setLiveRoomPin] = useState("921408");
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
-  const [isTeamMode, setIsTeamMode] = useState(false);
-  const [isSoundMuted, setIsSoundMuted] = useState(false);
-  const [isStartingLive, setIsStartingLive] = useState(false);
-
-  // Scheduled countdown in Lobby
-  const [lobbyScheduleSeconds, setLobbyScheduleSeconds] = useState<number | null>(null);
-
-  // Active Scored Quiz Progress
-  const scoredQuestionsList = useMemo(() => {
-    return slides.filter((s) => s.kind === "quiz");
-  }, [slides]);
-  const [currentQuizQIdx, setCurrentQuizQIdx] = useState(0);
-  const [qTimerLeft, setQTimerLeft] = useState(30);
-  const [qTotalTime, setQTotalTime] = useState(30);
-  const [submittedAnswersCount, setSubmittedAnswersCount] = useState(8);
-  const [countdownNum, setCountdownNum] = useState<number | null>(null);
-
-  // Generate QR code whenever Room PIN changes
-  useEffect(() => {
-    const generateQr = async () => {
-      try {
-        const joinUrl = `${window.location.origin}/quiz/join?pin=${liveRoomPin}`;
-        const url = await QRCode.toDataURL(joinUrl, {
-          width: 240,
-          margin: 1.5,
-          color: { dark: "#0f172a", light: "#ffffff" },
-        });
-        setQrCodeDataUrl(url);
-      } catch (err) {
-        console.error("QR Code error:", err);
-      }
-    };
-    generateQr();
-  }, [liveRoomPin]);
-
-  // Launch Live Room
-  const handleStartLiveLobby = async (isScheduled: boolean = false) => {
-    setIsStartingLive(true);
-    const pin = Math.floor(100000 + Math.random() * 900000).toString();
-    setLiveRoomPin(pin);
-
+  // Launch Fullscreen Live Presentation (Task 3)
+  const handleLaunchLivePresentation = async (deckToLaunch: DeckItem) => {
     try {
-      await fetch("/api/live-quizzes/sessions", {
+      showToast("🚀 লাইভ সেশন প্রস্তুত হচ্ছে...", "info");
+      const res = await fetch("/api/live-quizzes/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quizId: "studio-session-active",
-          competitionMode: isTeamMode ? "team" : "individual",
-          scheduledStartTime: isScheduled ? scheduledStartTime : undefined,
-        }),
-      });
-    } catch (e) {
-      console.warn("Session created locally");
-    }
-
-    if (isScheduled && scheduledStartTime) {
-      const diff = Math.max(
-        0,
-        Math.floor((new Date(scheduledStartTime).getTime() - Date.now()) / 1000)
-      );
-      setLobbyScheduleSeconds(diff > 0 ? diff : 180); // default 3 min if invalid
-    } else {
-      setLobbyScheduleSeconds(null);
-    }
-
-    setLiveSessionState("lobby");
-    setIsStartingLive(false);
-    showToast(
-      isScheduled
-        ? "⏰ নির্ধারিত সময়ে লাইভ কুইজ শিডিউল করা হয়েছে!"
-        : "🚀 লাইভ লবি সক্রিয় করা হয়েছে! পিন কোড শিক্ষার্থীদের দিন।",
-      "success"
-    );
-  };
-
-  // Lobby Countdown Timer effect
-  useEffect(() => {
-    if (lobbyScheduleSeconds === null || lobbyScheduleSeconds <= 0) return;
-    const interval = setInterval(() => {
-      setLobbyScheduleSeconds((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(interval);
-          handleTriggerKahootCountdown();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [lobbyScheduleSeconds]);
-
-  // Trigger 3-2-1 Fullscreen Countdown
-  const handleTriggerKahootCountdown = () => {
-    setLiveSessionState("countdown");
-    setCountdownNum(3);
-
-    const timer = setInterval(() => {
-      setCountdownNum((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(timer);
-          setTimeout(() => {
-            setCountdownNum(null);
-            setCurrentQuizQIdx(0);
-            const firstQ = scoredQuestionsList[0];
-            const limit = firstQ ? firstQ.timeLimit : 30;
-            setQTotalTime(limit);
-            setQTimerLeft(limit);
-            setSubmittedAnswersCount(4);
-            setLiveSessionState("active_question");
-          }, 600);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  // Question Timer Countdown
-  useEffect(() => {
-    if (liveSessionState !== "active_question") return;
-    const interval = setInterval(() => {
-      setQTimerLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setLiveSessionState("reveal");
-          try {
-            confetti({ particleCount: 60, spread: 80, origin: { y: 0.6 } });
-          } catch {}
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [liveSessionState]);
-
-  // Next Question or Final 3D Podium
-  const handleNextQuizQuestion = () => {
-    if (currentQuizQIdx + 1 < scoredQuestionsList.length) {
-      const nextIdx = currentQuizQIdx + 1;
-      setCurrentQuizQIdx(nextIdx);
-      const nextQ = scoredQuestionsList[nextIdx];
-      const limit = nextQ ? nextQ.timeLimit : 30;
-      setQTotalTime(limit);
-      setQTimerLeft(limit);
-      setSubmittedAnswersCount(2);
-      setLiveSessionState("active_question");
-    } else {
-      setLiveSessionState("podium");
-      try {
-        confetti({ particleCount: 120, spread: 100, origin: { y: 0.5 } });
-      } catch {}
-      showToast("🏆 অভিনন্দন! কুইজ টুর্নামেন্ট সমাপ্ত হয়েছে।", "success");
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // MODE 3: 📊 লাইভ মনিটর ও স্মার্ট SMS অ্যালার্ট হাব STATE
-  // ---------------------------------------------------------------------------
-  const [liveStudents, setLiveStudents] = useState<LiveStudentScore[]>(INITIAL_LIVE_STUDENTS);
-  const [autoSmsEnabled, setAutoSmsEnabled] = useState(true);
-  const [isSendingSms, setIsSendingSms] = useState(false);
-  const [smsSuccessMessage, setSmsSuccessMessage] = useState<string | null>(null);
-
-  const topPerformers = useMemo(() => {
-    return liveStudents.filter((s) => s.accuracy >= 80);
-  }, [liveStudents]);
-
-  const strugglingStudents = useMemo(() => {
-    return liveStudents.filter((s) => s.accuracy < 40);
-  }, [liveStudents]);
-
-  // Mid-Quiz / End-Quiz Smart SMS Dispatcher via /api/communication/sms/send
-  const handleDispatchSmsBatch = async (
-    targetGroup: "good" | "struggling" | "all",
-    specificStudent?: LiveStudentScore
-  ) => {
-    setIsSendingSms(true);
-    setSmsSuccessMessage(null);
-
-    try {
-      let targets: LiveStudentScore[] = [];
-      let messageTemplate = "";
-
-      if (specificStudent) {
-        targets = [specificStudent];
-        messageTemplate =
-          specificStudent.accuracy >= 80
-            ? `অভিনন্দন! আপনার সন্তান [Name] আজকের ${quizTitle} কুইজে অসাধারণ ভালো করেছে (স্কোর: [X%])। - PTSC`
-            : `সতর্কবার্তা: [Name] চলমান ${quizTitle} কুইজে বেশ কিছু প্রশ্নের ভুল উত্তর দিচ্ছে (বর্তমান স্কোর: [X%])। অনুগ্রহ করে তার পড়াশোনায় মনোযোগ দিন। - PTSC`;
-      } else if (targetGroup === "good") {
-        targets = topPerformers;
-        messageTemplate = `অভিনন্দন! আপনার সন্তান [Name] আজকের ${quizTitle} কুইজে অসাধারণ ভালো করেছে (স্কোর: [X%])। - PTSC`;
-      } else if (targetGroup === "struggling") {
-        targets = strugglingStudents;
-        messageTemplate = `সতর্কবার্তা: [Name] চলমান ${quizTitle} কুইজে বেশ কিছু প্রশ্নের ভুল উত্তর দিচ্ছে (বর্তমান স্কোর: [X%])। অনুগ্রহ করে তার পড়াশোনায় মনোযোগ দিন। - PTSC`;
-      }
-
-      if (targets.length === 0) {
-        showToast("কোনো শিক্ষার্থী পাওয়া যায়নি", "info");
-        setIsSendingSms(false);
-        return;
-      }
-
-      const res = await fetch("/api/communication/sms/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetAudience: "custom",
-          message: messageTemplate,
-          recipients: targets.map((t) => ({
-            phone: t.guardianPhone,
-            name: `${t.name}-এর অভিভাবক`,
-            studentName: t.name,
-            score: t.score,
-            quizTitle: quizTitle,
-          })),
+          quizId: deckToLaunch.id,
+          slides: deckToLaunch.slides,
+          competitionMode: "individual",
+          settings: deckSettings,
+          scheduledStartTime: deckSettings.scheduledStartTime || undefined,
         }),
       });
 
       const data = await res.json();
-      if (data.success) {
-        const msg = `📲 ${targets.length}টি স্মার্ট SMS সফলভাবে অভিভাবকদের মোবাইলে প্রেরণ করা হয়েছে!`;
-        setSmsSuccessMessage(msg);
-        showToast(msg, "success");
+      if (data.success && data.session) {
+        const pin = data.session.sessionCode;
+        const sessionId = data.session.id;
+        setActiveLivePresenterSession({
+          id: sessionId,
+          pin,
+          deck: deckToLaunch,
+        });
+        if (onLiveStateChange) onLiveStateChange(true);
+        showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
       } else {
-        showToast(`📲 ${targets.length}টি SMS সফলভাবে প্রেরিত (সিমুলেশন মোড)`, "success");
+        const pin = Math.floor(100000 + Math.random() * 900000).toString();
+        setActiveLivePresenterSession({
+          id: `session-${Date.now()}`,
+          pin,
+          deck: deckToLaunch,
+        });
+        if (onLiveStateChange) onLiveStateChange(true);
+        showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
       }
     } catch {
-      showToast("SMS গেটওয়ে সিমুলেশনে সফলভাবে সেন্ট হয়েছে!", "success");
-    } finally {
-      setIsSendingSms(false);
+      const pin = Math.floor(100000 + Math.random() * 900000).toString();
+      setActiveLivePresenterSession({
+        id: `session-${Date.now()}`,
+        pin,
+        deck: deckToLaunch,
+      });
+      if (onLiveStateChange) onLiveStateChange(true);
+      showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
     }
   };
 
-  // Quick Join Pin Student Modal
-  const [showJoinModal, setShowJoinModal] = useState(false);
-  const [quickPin, setQuickPin] = useState("");
-
-  const handleQuickJoinSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = quickPin.trim().replace(/\D/g, "");
-    if (!clean || clean.length < 6) {
-      showToast("দয়া করে সঠিক ৬ ডিজিটের পিন কোড প্রদান করুন", "error");
-      return;
-    }
-    router.push(`/quiz/join?pin=${clean}`);
+  // Close Live Presenter
+  const handleCloseLivePresenter = () => {
+    setActiveLivePresenterSession(null);
+    if (onExitLive) onExitLive();
+    if (onLiveStateChange) onLiveStateChange(false);
   };
+
+  // Filtered decks for Gallery (View 1)
+  const filteredDecks = useMemo(() => {
+    return decks.filter((d) => {
+      if (filterTrade !== "all" && d.trade !== filterTrade) return false;
+      if (filterClass !== "all" && String(d.classId) !== String(filterClass)) return false;
+      if (gallerySearch.trim()) {
+        const s = gallerySearch.toLowerCase();
+        return (
+          d.title.toLowerCase().includes(s) ||
+          (d.description || "").toLowerCase().includes(s) ||
+          d.trade.toLowerCase().includes(s)
+        );
+      }
+      return true;
+    });
+  }, [decks, filterTrade, filterClass, gallerySearch]);
 
   return (
-    <div className="w-full min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950/70 to-slate-950 text-slate-100 flex flex-col font-sans select-none overflow-x-hidden">
+    <div className="w-full h-full font-sans select-none text-slate-800 dark:text-slate-100">
       {/* Toast Notification */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div
-            initial={{ opacity: 0, y: -25, scale: 0.95 }}
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -25, scale: 0.95 }}
-            className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl border shadow-2xl flex items-center gap-3 text-xs font-bold backdrop-blur-xl ${
-              toastMessage.type === "success"
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl border shadow-2xl flex items-center gap-3 text-xs font-bold backdrop-blur-xl ${toastMessage.type === "success"
                 ? "bg-emerald-950/90 text-emerald-200 border-emerald-500/80 shadow-emerald-500/20"
                 : toastMessage.type === "error"
-                ? "bg-rose-950/90 text-rose-200 border-rose-500/80 shadow-rose-500/20"
-                : "bg-cyan-950/90 text-cyan-200 border-cyan-500/80 shadow-cyan-500/20"
-            }`}
+                  ? "bg-rose-950/90 text-rose-200 border-rose-500/80 shadow-rose-500/20"
+                  : "bg-cyan-950/90 text-cyan-200 border-cyan-500/80 shadow-cyan-500/20"
+              }`}
           >
             {toastMessage.type === "success" ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -899,1639 +933,1746 @@ export default function UnifiedQuizMentimeterWorkspace({
         )}
       </AnimatePresence>
 
-      {/* =========================================================================
-          TOP UNIFIED MASTER HEADER & 3-MODE SEGMENTED PILL BAR
-          ========================================================================= */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-2xl border-b border-indigo-500/20 px-4 sm:px-6 py-2.5 shadow-xl">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Brand & Title */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 shrink-0">
-              <Flame className="w-5 h-5 text-amber-200 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-black text-white tracking-tight">
-                  কুইজ ও স্লাইড স্টুডিও
-                </h1>
-                <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-[10px] font-black text-indigo-300">
-                  3-IN-1 STUDIO
-                </span>
+      {/* =======================================================================
+          VIEW 1: "আমার প্রেজেন্টেশন ও কুইজ গ্যালারি" (DECK GALLERY - DEFAULT VIEW)
+          ======================================================================= */}
+      {activeView === "gallery" && (
+        <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+          {/* Header Banner */}
+          <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-700 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-amber-200 text-xs font-black border border-white/20">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>স্মার্ট প্রেজেন্টেশন ও কুইজ গ্যালারি</span>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">
-                মেন্টিমিটার ইন্টারঅ্যাক্টিভ স্লাইডস • কাহুট লাইভ গেম • স্মার্ট SMS অ্যালার্ট
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                আমার প্রেজেন্টেশন ও কুইজ ডেক
+              </h1>
+              <p className="text-xs sm:text-sm text-indigo-100 font-medium max-w-xl">
+                মেন্টিমিটার-স্টাইল ইন্টারঅ্যাক্টিভ স্লাইডস, পোল ও কাহুট লাইভ গেম তৈরি করুন সম্পূর্ণ খোলা ক্যানভাসে।
               </p>
             </div>
+
+            {/* Top Primary Actions */}
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setAiTopic("");
+                  setShowAiModal(true);
+                }}
+                className="px-4 py-2.5 rounded-2xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-black text-xs transition flex items-center gap-2 border border-white/30 cursor-pointer active:scale-95 shadow-md"
+              >
+                <Wand2 className="w-4 h-4 text-amber-300" />
+                <span>✨ AI দিয়ে তৈরি করুন</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCreateNewDeck}
+                className="px-5 py-2.5 rounded-2xl bg-white text-indigo-700 hover:bg-indigo-50 font-black text-xs transition flex items-center gap-2 shadow-xl shadow-black/20 cursor-pointer active:scale-95"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>➕ নতুন প্রেজেন্টেশন তৈরি করুন</span>
+              </button>
+            </div>
           </div>
 
-          {/* 3-Mode Segmented Pill Bar */}
-          <div className="flex items-center p-1 bg-slate-950/80 border border-indigo-500/30 rounded-2xl shadow-inner gap-1 self-center">
-            {/* Mode 1 */}
-            <button
-              type="button"
-              onClick={() => handleModeChange("designer")}
-              className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer relative ${
-                activeMode === "designer"
-                  ? "bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/40 border border-violet-400/40"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>🎨 ১. কুইজ ও স্লাইড ডিজাইনার</span>
-              {activeMode === "designer" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping absolute right-2 top-2" />
-              )}
-            </button>
+          {/* Search & Academic Filter Bar */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+            {/* Search */}
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                value={gallerySearch}
+                onChange={(e) => setGallerySearch(e.target.value)}
+                placeholder="প্রেজেন্টেশন বা টপিকের নাম খুঁজুন..."
+                className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none focus:border-indigo-500 transition font-medium"
+              />
+            </div>
 
-            {/* Mode 2 */}
-            <button
-              type="button"
-              onClick={() => handleModeChange("live_host")}
-              className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer relative ${
-                activeMode === "live_host"
-                  ? "bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 text-white shadow-lg shadow-teal-500/40 border border-emerald-400/40"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <Radio className="w-4 h-4 text-emerald-300 animate-pulse" />
-              <span>📡 ২. লাইভ কন্ট্রোল ও প্রেজেন্টার</span>
-              {activeMode === "live_host" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping absolute right-2 top-2" />
-              )}
-            </button>
+            {/* Dropdowns */}
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <select
+                value={filterTrade}
+                onChange={(e) => setFilterTrade(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+              >
+                <option value="all">সকল ট্রেড (All Trades)</option>
+                {ALL_TRADES.map((t) => (
+                  <option key={t.id} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
 
-            {/* Mode 3 */}
-            <button
-              type="button"
-              onClick={() => handleModeChange("monitor_sms")}
-              className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer relative ${
-                activeMode === "monitor_sms"
-                  ? "bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 text-white shadow-lg shadow-orange-500/40 border border-amber-400/40"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <Smartphone className="w-4 h-4 text-amber-200" />
-              <span>📊 ৩. লাইভ মনিটর ও স্মার্ট SMS</span>
-              {activeMode === "monitor_sms" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping absolute right-2 top-2" />
-              )}
-            </button>
-          </div>
+              <select
+                value={filterClass}
+                onChange={(e) => setFilterClass(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+              >
+                <option value="all">সকল শ্রেণি (All Classes)</option>
+                {ACADEMIC_CLASSES.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.displayName}
+                  </option>
+                ))}
+              </select>
 
-          {/* Quick Actions */}
-          <div className="flex items-center gap-2 self-end md:self-auto">
-            <button
-              type="button"
-              onClick={() => setShowJoinModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 font-black text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Gamepad2 className="w-3.5 h-3.5" />
-              <span>শিক্ষার্থী জয়েন ভিউ</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* =========================================================================
-          WORKSPACE BODY: SWITCH AMONG 3 MODES
-          ========================================================================= */}
-      <main className="flex-1 w-full max-w-7xl mx-auto p-3 sm:p-5 flex flex-col min-h-0">
-        {/* =======================================================================
-            MODE 1: 🎨 কুইজ ও স্লাইড ডিজাইনার (CLEAN 3-PANEL VISUAL BUILDER)
-            ======================================================================= */}
-        {activeMode === "designer" && (
-          <div className="flex-1 flex flex-col space-y-4">
-            {/* Top Toolbar: Quiz Title & Save / Scheduled Info */}
-            <div className="p-4 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <input
-                  type="text"
-                  value={quizTitle}
-                  onChange={(e) => setQuizTitle(e.target.value)}
-                  className="bg-transparent text-base sm:text-lg font-black text-white focus:outline-none focus:bg-slate-950/60 px-2 py-1 rounded-xl border border-transparent focus:border-indigo-500/40 transition w-full max-w-xl"
-                  placeholder="কুইজের শিরোনাম লিখুন..."
+              <button
+                type="button"
+                onClick={fetchDecks}
+                disabled={isLoadingDecks}
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                title="রিফ্রেশ করুন"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 text-slate-500 ${isLoadingDecks ? "animate-spin text-indigo-500" : ""}`}
                 />
-                <select
-                  value={quizTrade}
-                  onChange={(e) => setQuizTrade(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-indigo-300 font-bold focus:outline-none cursor-pointer shrink-0"
-                >
-                  {ALL_TRADES.map((t) => (
-                    <option key={t.id} value={t.name}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              </button>
+            </div>
+          </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+          {/* Airy 3-Column Deck Card Grid (gap-6) */}
+          {filteredDecks.length === 0 ? (
+            <div className="p-12 text-center rounded-3xl border border-dashed border-slate-300 dark:border-slate-800 space-y-4">
+              <BookOpen className="w-12 h-12 text-slate-400 mx-auto" />
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-slate-700 dark:text-slate-300">
+                  কোনো প্রেজেন্টেশন পাওয়া যায়নি
+                </h3>
+                <p className="text-xs text-slate-500">
+                  নতুন প্রেজেন্টেশন তৈরি করতে উপরের বাটনটিতে ক্লিক করুন।
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateNewDeck}
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-500 transition cursor-pointer"
+              >
+                + নতুন প্রেজেন্টেশন তৈরি করুন
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredDecks.map((deck) => (
+                <div
+                  key={deck.id}
+                  onClick={() => handleOpenDeckStudio(deck)}
+                  className="group rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 shadow-md hover:shadow-2xl transition-all duration-300 flex flex-col justify-between overflow-hidden cursor-pointer transform hover:-translate-y-1"
+                >
+                  {/* Top Deck Card Banner */}
+                  <div className="p-5 bg-gradient-to-br from-indigo-50 to-slate-50 dark:from-indigo-950/40 dark:to-slate-900 border-b border-slate-100 dark:border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider border border-indigo-500/30">
+                        {deck.trade}
+                      </span>
+                      <span className="text-[11px] font-black text-slate-400 font-mono flex items-center gap-1">
+                        <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>{deck.slides.length}টি স্লাইড</span>
+                      </span>
+                    </div>
+
+                    <h3 className="text-base font-black text-slate-900 dark:text-white leading-snug line-clamp-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+                      {deck.title}
+                    </h3>
+                  </div>
+
+                  {/* Body Slide Types Snippets */}
+                  <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.from(new Set(deck.slides.map((s) => s.type))).slice(0, 4).map((t, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-600 dark:text-slate-400 font-mono"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                      {deck.slides.length > 4 && (
+                        <span className="text-[10px] text-slate-400 self-center">
+                          +{deck.slides.length - 4}টি আরও
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Card Actions */}
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenDeckStudio(deck);
+                        }}
+                        className="flex-1 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>✏️ ওপেন স্টুডিও</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleLaunchLivePresentation(deck);
+                        }}
+                        className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition flex items-center gap-1 shadow-md shadow-emerald-600/30 cursor-pointer"
+                        title="লাইভ প্রেজেন্টেশন চালু করুন"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>▶️ লাইভ</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={deletingDeckId === deck.id}
+                        onClick={(e) => handleDeleteDeck(deck.id, e)}
+                        className="p-2 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                        title="ডিলিট করুন"
+                      >
+                        {deletingDeckId === deck.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =======================================================================
+          VIEW 2: "স্মার্ট স্লাইড ও কুইজ স্টুডিও" (ZERO-CRAMP 2-COLUMN + FLOATING BAR)
+          ======================================================================= */}
+      {activeView === "studio" && (
+        <div
+          className={`w-full transition-all duration-300 ${isFullscreenFocus
+              ? "fixed inset-0 z-50 bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden"
+              : "w-full h-[calc(100vh-68px)] flex flex-col bg-slate-100 dark:bg-slate-950 overflow-hidden"
+            }`}
+        >
+          {/* 1. TOP STUDIO HEADER (h-14 px-5 border-b bg-white dark:bg-slate-900) */}
+          <header className="h-14 px-4 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-4 shrink-0 shadow-xs z-20">
+            {/* Left: Back button + Presentation Title + Fullscreen Toggle */}
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFullscreenFocus(false);
+                  setActiveView("gallery");
+                }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>← গ্যালারিতে ফিরুন</span>
+              </button>
+
+              <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800 hidden sm:block" />
+
+              <input
+                type="text"
+                value={currentDeck.title}
+                onChange={(e) => setCurrentDeck((prev) => ({ ...prev, title: e.target.value }))}
+                placeholder="প্রেজেন্টেশন শিরোনাম লিখুন..."
+                className="bg-transparent text-sm sm:text-base font-black text-slate-900 dark:text-white focus:outline-none focus:bg-slate-100 dark:focus:bg-slate-800 px-2 py-1 rounded-lg border border-transparent focus:border-indigo-400 transition truncate max-w-xs sm:max-w-md"
+              />
+
+              {/* Fullscreen Focus Toggle Button (Fixes ERP Sidebar Cramp!) */}
+              <button
+                type="button"
+                onClick={() => setIsFullscreenFocus(!isFullscreenFocus)}
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-xs font-bold transition flex items-center gap-1 cursor-pointer shrink-0"
+                title={isFullscreenFocus ? "ডকড মোডে ফিরুন" : "ফুলস্ক্রিন ফোকাস মোড"}
+              >
+                {isFullscreenFocus ? (
+                  <>
+                    <Minimize2 className="w-3.5 h-3.5" />
+                    <span className="hidden md:inline text-[11px]">↙ সাইডবার দেখান</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span className="hidden md:inline text-[11px]">⛶ ফুলস্ক্রিন ফোকাস</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Right Actions: Save, Settings Drawer, Live Presentation */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsSettingsDrawerOpen(true)}
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+                title="কুইজ সেটিংস ও টাইমার"
+              >
+                <Settings className="w-4 h-4 text-indigo-500" />
+                <span className="hidden sm:inline">⚙️ কুইজ সেটিংস</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowDualDevicePreview(true)}
+                className="px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+                title="ডুয়াল-ডিভাইস প্রিভিউ (হোস্ট স্মার্টবোর্ড + স্টুডেন্ট মোবাইল)"
+              >
+                <Eye className="w-4 h-4 text-indigo-500" />
+                <span className="hidden sm:inline">👁️ প্রিভিউ</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isSavingDeck}
+                onClick={handleSaveDeck}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+              >
+                {isSavingDeck ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                )}
+                <span>💾 সেভ করুন</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleLaunchLivePresentation(currentDeck)}
+                className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-black text-xs transition flex items-center gap-1.5 shadow-md shadow-indigo-600/30 cursor-pointer"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>▶️ Start Presentation</span>
+              </button>
+            </div>
+          </header>
+
+          {/* 2-COLUMN MAIN BODY (Slim Filmstrip + Giant Center Stage) */}
+          <div className="flex-1 flex overflow-hidden">
+            {/* -----------------------------------------------------------------
+                LEFT SLIM FILMSTRIP (w-48 lg:w-52 shrink-0 border-r p-3)
+                ----------------------------------------------------------------- */}
+            <aside className="w-48 lg:w-52 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex flex-col gap-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+              {/* Top Filmstrip Action Buttons */}
+              <div className="grid grid-cols-2 gap-1.5 relative">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewSlidePopover(!showNewSlidePopover)}
+                    className="w-full py-1.5 px-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer border border-indigo-200 dark:border-indigo-800"
+                  >
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    <span>নতুন স্লাইড</span>
+                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${showNewSlidePopover ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {/* 3-Category Floating Responsive Popover Picker (Portal / Fixed Modal to prevent any clipping) */}
+                  <AnimatePresence>
+                    {showNewSlidePopover && (
+                      <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div
+                          className="fixed inset-0"
+                          onClick={() => setShowNewSlidePopover(false)}
+                        />
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                          className="relative z-10 w-[94vw] max-w-[560px] max-h-[88vh] rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 text-left overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
+                        >
+                          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-lg shadow-md shadow-indigo-500/20">
+                                📑
+                              </span>
+                              <div>
+                                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                                  নতুন স্লাইড ও কুইজের ধরন নির্বাচন করুন
+                                </h3>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  আপনার ক্লাসের প্রয়োজন অনুযায়ী ৩টি ক্যাটাগরি থেকে সঠিক ফরম্যাট বেছে নিন
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowNewSlidePopover(false)}
+                              className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 flex items-center justify-center transition cursor-pointer"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* CATEGORY 1: কন্টেন্ট স্লাইড */}
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                              <span className="w-6 h-6 rounded-lg bg-blue-500/10 flex items-center justify-center text-sm">📄</span>
+                              <span>১. কন্টেন্ট স্লাইড (Content Slides — No Timer)</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("TEXT_SLIDE");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  📄
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">টেক্সট ও হেডিং স্লাইড</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">টপিক ও মূল বিষয়ের সারসংক্ষেপ</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("IMAGE_COMPARE");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-sky-500 hover:bg-sky-50/50 dark:hover:bg-sky-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-400 to-cyan-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  🖼️
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-sky-600 dark:group-hover:text-sky-400">চিত্র / ডায়াগ্রাম তুলনা</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">পাশাপাশি ২টি সার্কিট বা ডায়াগ্রাম</div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* CATEGORY 2: ইন্টারেক্টিভ ওয়ার্মআপ */}
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-black text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider">
+                              <span className="w-6 h-6 rounded-lg bg-fuchsia-500/10 flex items-center justify-center text-sm">💬</span>
+                              <span>২. ইন্টারেক্টিভ ওয়ার্মআপ (Interactive Warmup — No Timer)</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("WORD_CLOUD");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-fuchsia-500 hover:bg-fuchsia-50/50 dark:hover:bg-fuchsia-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-fuchsia-500 to-pink-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
+                                  ☁️
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-fuchsia-600 dark:group-hover:text-fuchsia-400">ওয়ার্ড ক্লাউড</div>
+                                  <div className="text-[9px] text-slate-400 leading-tight">শিক্ষার্থীদের লাইভ শব্দগুচ্ছ</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("OPEN_ENDED");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-purple-500 hover:bg-purple-50/50 dark:hover:bg-purple-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-purple-500 to-indigo-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
+                                  💭
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-purple-600 dark:group-hover:text-purple-400">মুক্ত মতামত</div>
+                                  <div className="text-[9px] text-slate-400 leading-tight">উন্মুক্ত ভাবনা ও মন্তব্য</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("LIVE_QA");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
+                                  🙋
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400">প্রশ্নোত্তর বোর্ড</div>
+                                  <div className="text-[9px] text-slate-400 leading-tight">লাইভ স্টুডেন্ট প্রশ্নমঞ্চ</div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* CATEGORY 3: কুইজ প্রতিযোগিতা */}
+                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-amber-200/80 dark:border-amber-900/50 space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                              <span className="w-6 h-6 rounded-lg bg-amber-500/10 flex items-center justify-center text-sm">🏆</span>
+                              <span>৩. কুইজ প্রতিযোগিতা (Quiz Competition — Timer + Points)</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("MCQ");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-blue-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  🔘
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">MCQ (বহুনির্বাচনী প্রশ্ন)</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">৪টি অপশন থেকে ১টি সঠিক উত্তর</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("FILL_BLANKS");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  📝
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400">শূন্যস্থান পূরণ (Fill in Blanks)</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">ক্যাপসুল স্লটে সঠিক শব্দ বসানো</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("MATCHING");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  🔗
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">ডান-বাম মিলকরণ (Matching)</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">বাম ও ডান কলামের রঙিন ক্রস-লাইন</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("REORDER");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-rose-500 hover:bg-rose-50/50 dark:hover:bg-rose-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  🔢
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400">ধারাবাহিক ক্রম সাজানো</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">কাজের ধাপ ক্রমানুসারে সাজানো</div>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("TRUE_FALSE");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-violet-500 hover:bg-violet-50/50 dark:hover:bg-violet-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs sm:col-span-2"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-500 to-indigo-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                  ⚖️
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-violet-400">সত্য / মিথ্যা (True / False)</div>
+                                  <div className="text-[10px] text-slate-400 leading-tight">বিবৃতি যাচাই ও মূল্যায়ন</div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      </div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setShowAiModal(true)}
-                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white font-black text-xs transition flex items-center gap-1.5 shadow-lg shadow-rose-500/25 cursor-pointer"
+                  className="py-1.5 px-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer border border-amber-200 dark:border-amber-800"
                 >
-                  <Wand2 className="w-3.5 h-3.5 text-amber-200" />
-                  <span>✨ ১-ক্লিকে AI ম্যাজিক কুইজ</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isSavingQuiz}
-                  onClick={handleSaveQuiz}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
-                >
-                  {isSavingQuiz ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" />
-                  )}
-                  <span>সেভ ও পাবলিশ</span>
+                  <Wand2 className="w-3.5 h-3.5" />
+                  <span>✨ AI</span>
                 </button>
               </div>
-            </div>
 
-            {/* 3-Panel Visual Studio Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-[640px]">
-              {/* -------------------------------------------------------------
-                  LEFT PANEL (240px equivalent: 3 cols in 12-col grid)
-                  SLIDE FILMSTRIP (PowerPoint / Mentimeter Flow)
-                  ------------------------------------------------------------- */}
-              <div className="lg:col-span-3 flex flex-col space-y-3 bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 p-3.5 rounded-3xl shadow-xl overflow-y-auto max-h-[720px] scrollbar-thin scrollbar-thumb-indigo-900">
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleAddNewSlide("warmup", "mood_checkin")}
-                    className="flex-1 py-2 px-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>+ ওয়ার্মআপ স্লাইড</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddNewSlide("quiz", "mcq_single")}
-                    className="flex-1 py-2 px-2.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/40 text-indigo-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>+ কুইজ প্রশ্ন</span>
-                  </button>
-                </div>
+              {/* Vertical List of Compact 16:9 Slide Thumbnails */}
+              <div className="space-y-2 flex-1">
+                {currentDeck.slides.map((slide, idx) => {
+                  const isSelected = slide.id === currentSlide.id;
+                  const graded = isGradedQuiz(slide.type);
 
-                {/* Section 1: Pre-Quiz Warmup Slides */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between px-1 text-[11px] font-black text-amber-300 uppercase tracking-wider">
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>💬 ওয়ার্মআপ স্লাইড ({slides.filter((s) => s.kind === "warmup").length})</span>
-                    </span>
-                    <span className="text-[10px] text-slate-400">০ পয়েন্ট</span>
-                  </div>
+                  const getThumbStyles = (t: SlideType) => {
+                    switch (t) {
+                      case "MCQ":
+                        return {
+                          border: isSelected ? "border-indigo-500 ring-2 ring-indigo-400/40 bg-indigo-50/70 dark:bg-indigo-950/50" : "border-indigo-200/80 dark:border-indigo-900/50 hover:border-indigo-400",
+                          badge: "bg-indigo-600 text-white",
+                          label: "MCQ",
+                        };
+                      case "MATCHING":
+                        return {
+                          border: isSelected ? "border-emerald-500 ring-2 ring-emerald-400/40 bg-emerald-50/70 dark:bg-emerald-950/50" : "border-emerald-200/80 dark:border-emerald-900/50 hover:border-emerald-400",
+                          badge: "bg-emerald-600 text-white",
+                          label: "মিলকরণ",
+                        };
+                      case "FILL_BLANKS":
+                        return {
+                          border: isSelected ? "border-amber-500 ring-2 ring-amber-400/40 bg-amber-50/70 dark:bg-amber-950/50" : "border-amber-200/80 dark:border-amber-900/50 hover:border-amber-400",
+                          badge: "bg-amber-500 text-slate-950 font-black",
+                          label: "শূন্যস্থান",
+                        };
+                      case "REORDER":
+                        return {
+                          border: isSelected ? "border-rose-500 ring-2 ring-rose-400/40 bg-rose-50/70 dark:bg-rose-950/50" : "border-rose-200/80 dark:border-rose-900/50 hover:border-rose-400",
+                          badge: "bg-rose-500 text-white",
+                          label: "ক্রম",
+                        };
+                      case "TRUE_FALSE":
+                        return {
+                          border: isSelected ? "border-violet-500 ring-2 ring-violet-400/40 bg-violet-50/70 dark:bg-violet-950/50" : "border-violet-200/80 dark:border-violet-900/50 hover:border-violet-400",
+                          badge: "bg-violet-600 text-white",
+                          label: "সত্য/মিথ্যা",
+                        };
+                      case "WORD_CLOUD":
+                        return {
+                          border: isSelected ? "border-fuchsia-500 ring-2 ring-fuchsia-400/40 bg-fuchsia-50/70 dark:bg-fuchsia-950/50" : "border-fuchsia-200/80 dark:border-fuchsia-900/50 hover:border-fuchsia-400",
+                          badge: "bg-fuchsia-600 text-white",
+                          label: "ক্লাউড",
+                        };
+                      case "OPEN_ENDED":
+                      case "LIVE_QA":
+                        return {
+                          border: isSelected ? "border-purple-500 ring-2 ring-purple-400/40 bg-purple-50/70 dark:bg-purple-950/50" : "border-purple-200/80 dark:border-purple-900/50 hover:border-purple-400",
+                          badge: "bg-purple-600 text-white",
+                          label: t === "LIVE_QA" ? "Q&A" : "মতামত",
+                        };
+                      default:
+                        return {
+                          border: isSelected ? "border-blue-500 ring-2 ring-blue-400/40 bg-blue-50/70 dark:bg-blue-950/50" : "border-slate-200 dark:border-slate-800 hover:border-blue-400",
+                          badge: "bg-blue-600 text-white",
+                          label: "কন্টেন্ট",
+                        };
+                    }
+                  };
 
-                  {slides
-                    .filter((s) => s.kind === "warmup")
-                    .map((slide, idx) => {
-                      const isSelected = slide.id === selectedSlideId;
-                      return (
-                        <div
-                          key={slide.id}
-                          onClick={() => setSelectedSlideId(slide.id)}
-                          className={`group p-2.5 rounded-2xl border transition-all cursor-pointer relative flex items-start gap-2.5 ${
-                            isSelected
-                              ? "bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-transparent border-amber-400 shadow-md shadow-amber-500/20"
-                              : "bg-slate-950/60 hover:bg-slate-800/60 border-slate-800 text-slate-300"
-                          }`}
-                        >
-                          <span className="w-5 h-5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-black flex items-center justify-center shrink-0">
-                            W{idx + 1}
-                          </span>
+                  const thumbStyle = getThumbStyles(slide.type);
 
-                          <div className="flex-1 min-w-0 space-y-0.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
-                                {slide.type === "mood_checkin"
-                                  ? "🔥 মুড চেক-ইন"
-                                  : slide.type === "word_cloud"
-                                  ? "☁️ ওয়ার্ড ক্লাউড"
-                                  : slide.type === "sticky_notes"
-                                  ? "📝 স্টিকি ওয়াল"
-                                  : "📊 পোল"}
-                              </span>
-                              <span className="text-[9px] font-mono text-slate-400">{slide.timeLimit}s</span>
-                            </div>
-                            <p className="text-xs font-bold text-white line-clamp-1">{slide.title}</p>
-                          </div>
-
-                          {/* Quick Duplicate/Delete */}
-                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
-                            <button
-                              type="button"
-                              onClick={(e) => handleDuplicateSlide(slide, e)}
-                              className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700"
-                              title="ডুপ্লিকেট"
-                            >
-                              <Copy className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteSlide(slide.id, e)}
-                              className="p-1 rounded-md text-rose-400 hover:text-rose-300 hover:bg-rose-950"
-                              title="মুছুন"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-
-                {/* Section 2: Scored Quiz Questions */}
-                <div className="space-y-1.5 pt-3 border-t border-slate-800/80">
-                  <div className="flex items-center justify-between px-1 text-[11px] font-black text-indigo-300 uppercase tracking-wider">
-                    <span className="flex items-center gap-1">
-                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                      <span>🏆 মূল কুইজ প্রশ্ন ({slides.filter((s) => s.kind === "quiz").length})</span>
-                    </span>
-                    <span className="text-[10px] text-indigo-300 font-bold">নম্বরযুক্ত</span>
-                  </div>
-
-                  {slides
-                    .filter((s) => s.kind === "quiz")
-                    .map((slide, idx) => {
-                      const isSelected = slide.id === selectedSlideId;
-                      return (
-                        <div
-                          key={slide.id}
-                          onClick={() => setSelectedSlideId(slide.id)}
-                          className={`group p-2.5 rounded-2xl border transition-all cursor-pointer relative flex items-start gap-2.5 ${
-                            isSelected
-                              ? "bg-gradient-to-r from-indigo-500/20 via-purple-500/15 to-transparent border-indigo-400 shadow-md shadow-indigo-500/20"
-                              : "bg-slate-950/60 hover:bg-slate-800/60 border-slate-800 text-slate-300"
-                          }`}
-                        >
-                          <span className="w-5 h-5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black flex items-center justify-center shrink-0">
-                            Q{idx + 1}
-                          </span>
-
-                          <div className="flex-1 min-w-0 space-y-0.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
-                                {slide.type === "mcq_single"
-                                  ? "🔘 MCQ"
-                                  : slide.type === "matching"
-                                  ? "🔗 মিলকরণ"
-                                  : slide.type === "fill_blank"
-                                  ? "📝 শূন্যস্থান"
-                                  : slide.type === "true_false"
-                                  ? "⚖️ সত্য/মিথ্যা"
-                                  : "🔢 ক্রম সাজানো"}
-                              </span>
-                              <span className="text-[9px] font-bold text-amber-300">+{slide.points} pt</span>
-                            </div>
-                            <p className="text-xs font-bold text-white line-clamp-1">{slide.title}</p>
-                          </div>
-
-                          {/* Quick Duplicate/Delete */}
-                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
-                            <button
-                              type="button"
-                              onClick={(e) => handleDuplicateSlide(slide, e)}
-                              className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700"
-                              title="ডুপ্লিকেট"
-                            >
-                              <Copy className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteSlide(slide.id, e)}
-                              className="p-1 rounded-md text-rose-400 hover:text-rose-300 hover:bg-rose-950"
-                              title="মুছুন"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-
-              {/* -------------------------------------------------------------
-                  CENTER PANEL (STAGE PREVIEW - CANVA / MENTIMETER / KAHOOT CANVAS)
-                  ------------------------------------------------------------- */}
-              <div className="lg:col-span-6 flex flex-col bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 rounded-3xl shadow-2xl p-5 overflow-y-auto relative">
-                {/* Stage Header Info Pill */}
-                <div className="flex items-center justify-between pb-3 border-b border-indigo-500/20">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider border ${
-                        selectedSlide.kind === "warmup"
-                          ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                          : "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
-                      }`}
+                  return (
+                    <div
+                      key={slide.id}
+                      onClick={() => setCurrentSlideId(slide.id)}
+                      className={`group relative rounded-2xl border-2 p-2 transition-all cursor-pointer flex flex-col justify-between aspect-16/10 shadow-xs ${thumbStyle.border}`}
                     >
-                      {selectedSlide.kind === "warmup" ? "💬 ওয়ার্মআপ স্লাইড" : "🏆 মূল কুইজ প্রশ্ন"}
-                    </span>
-                    <span className="text-xs font-bold text-slate-400">
-                      {selectedSlide.type.toUpperCase().replace("_", " ")}
-                    </span>
-                  </div>
+                      {/* Thumbnail Header */}
+                      <div className="flex items-center justify-between text-[10px] font-black">
+                        <span
+                          className={`w-4 h-4 rounded-md flex items-center justify-center font-mono ${isSelected
+                              ? "bg-slate-950 text-white"
+                              : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                            }`}
+                        >
+                          {idx + 1}
+                        </span>
 
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-cyan-300">
-                      ⏱ {selectedSlide.timeLimit}s
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs font-mono font-bold text-amber-300">
-                      ⭐ {selectedSlide.points} pts
-                    </span>
-                  </div>
-                </div>
-
-                {/* Direct In-line Editable Title on Canvas */}
-                <div className="pt-4 pb-3">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    স্লাইড বা প্রশ্নের শিরোনাম (ক্যানভাসে সরাসরি ক্লিক করে এডিট করুন):
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={selectedSlide.title}
-                    onChange={(e) => updateSelectedSlide({ title: e.target.value })}
-                    className="w-full text-base sm:text-lg font-black text-white bg-slate-950/70 border-2 border-indigo-500/40 focus:border-cyan-400 rounded-2xl p-3 focus:outline-none transition leading-relaxed"
-                  />
-                </div>
-
-                {/* DYNAMIC CANVAS PREVIEW BY TYPE */}
-                <div className="flex-1 flex flex-col justify-center py-4">
-                  {/* TYPE A: Mood Check-in */}
-                  {selectedSlide.type === "mood_checkin" && (
-                    <div className="space-y-4">
-                      <p className="text-xs text-center font-bold text-amber-300">
-                        শিক্ষার্থীরা সরাসরি ৪টি মুড অপশনে ট্যাপ করবে:
-                      </p>
-                      <div className="grid grid-cols-2 gap-3.5">
-                        {[
-                          { emoji: "🔥", label: "সুপার এনার্জেটিক", color: "from-amber-500 to-red-600" },
-                          { emoji: "😊", label: "বেশ ভালো", color: "from-emerald-500 to-teal-600" },
-                          { emoji: "🤔", label: "একটু চিন্তিত", color: "from-blue-500 to-indigo-600" },
-                          { emoji: "😴", label: "ক্লান্ত", color: "from-purple-500 to-pink-600" },
-                        ].map((m, i) => (
-                          <div
-                            key={i}
-                            className={`p-4 rounded-2xl bg-gradient-to-br ${m.color} text-white text-center shadow-lg transform hover:scale-102 transition cursor-pointer border border-white/20`}
-                          >
-                            <span className="text-3xl block mb-1">{m.emoji}</span>
-                            <span className="text-xs font-black">{m.label}</span>
-                          </div>
-                        ))}
+                        <span className={`px-1.5 py-0.2 rounded-md font-mono text-[8px] font-black uppercase ${thumbStyle.badge}`}>
+                          {thumbStyle.label}
+                        </span>
                       </div>
-                    </div>
-                  )}
 
-                  {/* TYPE B: Word Cloud */}
-                  {selectedSlide.type === "word_cloud" && (
-                    <div className="p-6 rounded-3xl bg-slate-950/80 border-2 border-indigo-500/30 text-center space-y-4 min-h-[220px] flex flex-col justify-center items-center">
-                      <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider">
-                        ☁️ লাইভ অ্যানিমেটেড ওয়ার্ড ক্লাউড প্রিভিউ
-                      </span>
-                      <div className="flex flex-wrap items-center justify-center gap-3 max-w-md">
-                        {[
-                          { word: "আইওটি (IoT)", size: "text-2xl font-black text-cyan-300" },
-                          { word: "স্মার্ট প্রযুক্তি", size: "text-xl font-bold text-purple-300" },
-                          { word: "উদ্ভাবন", size: "text-lg font-semibold text-amber-300" },
-                          { word: "স্বয়ংক্রিয়", size: "text-2xl font-black text-emerald-300" },
-                          { word: "নিরাপত্তা", size: "text-base font-medium text-rose-300" },
-                          { word: "ভবিষ্যৎ", size: "text-xl font-bold text-indigo-300" },
-                          { word: "দক্ষতা", size: "text-base font-semibold text-yellow-300" },
-                        ].map((w, i) => (
-                          <span
-                            key={i}
-                            className={`${w.size} px-2 py-1 rounded-xl bg-white/5 border border-white/10 hover:scale-110 transition cursor-default`}
-                          >
-                            {w.word}
+                      {/* Title Preview */}
+                      <p className="text-[11px] font-black text-slate-800 dark:text-slate-200 line-clamp-2 my-auto leading-tight">
+                        {slide.title.trim() || (
+                          <span className="italic opacity-40 font-normal">খালি স্লাইড</span>
+                        )}
+                      </p>
+
+                      {/* Footer: Timer or Points badge + Hover Actions */}
+                      <div className="flex items-center justify-between pt-1 text-[9px]">
+                        {graded ? (
+                          <span className="text-amber-500 font-bold font-mono">
+                            {slide.points}p • {slide.timeLimit}s
                           </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                        ) : (
+                          <span className="text-slate-400 font-medium font-mono">কন্টেন্ট</span>
+                        )}
 
-                  {/* TYPE C: Sticky Notes Whiteboard */}
-                  {selectedSlide.type === "sticky_notes" && (
-                    <div className="p-4 rounded-3xl bg-slate-950/80 border-2 border-indigo-500/30 space-y-3">
-                      <span className="text-xs font-bold text-amber-300 uppercase tracking-wider block text-center">
-                        📌 ৩ডি স্টিকি নোটস হোয়াইটবোর্ড ওয়াল
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        {[
-                          {
-                            text: "নেটওয়ার্কিং ল্যাবে হ্যান্ডস-অন কনফিগারেশন শিখতে চাই।",
-                            bg: "bg-amber-400 text-slate-950",
-                            author: "রাকিব (IT)",
-                          },
-                          {
-                            text: "স্মার্ট সেন্সর প্রজেক্টের সার্কিট সংযোগ দ্রুত শেষ করব।",
-                            bg: "bg-rose-400 text-slate-950",
-                            author: "সুমাইয়া (ইলেকট্রিক্যাল)",
-                          },
-                          {
-                            text: "কারিগরি বোর্ড পরীক্ষার গুরুত্বপূর্ণ প্রশ্নগুলো প্র্যাকটিস দরকার।",
-                            bg: "bg-cyan-400 text-slate-950",
-                            author: "তানভীর (IT)",
-                          },
-                        ].map((note, idx) => (
-                          <div
-                            key={idx}
-                            className={`p-3.5 rounded-2xl ${note.bg} shadow-lg shadow-black/30 font-bold text-xs space-y-2 transform -rotate-1 hover:rotate-0 transition`}
-                          >
-                            <p className="line-clamp-3">{note.text}</p>
-                            <span className="text-[10px] opacity-80 block text-right">— {note.author}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TYPE D: Scored MCQ Question (Direct option editing) */}
-                  {selectedSlide.type === "mcq_single" && (
-                    <div className="space-y-3">
-                      <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider block text-center">
-                        🔘 কাহুট-স্টাইল ৪টি অপশন (সঠিক উত্তরে টিক দিন, টেক্সটে ক্লিক করে এডিট করুন):
-                      </span>
-                      <div className="grid grid-cols-2 gap-3">
-                        {selectedSlide.options.map((opt, optIdx) => {
-                          const isCorrect = selectedSlide.correctAnswer === optIdx;
-                          const styles = [
-                            { bg: "bg-red-600/90 border-red-500", shape: "▲" },
-                            { bg: "bg-blue-600/90 border-blue-500", shape: "◆" },
-                            { bg: "bg-amber-500/90 border-amber-400", shape: "●" },
-                            { bg: "bg-emerald-600/90 border-emerald-500", shape: "■" },
-                          ][optIdx % 4];
-
-                          return (
-                            <div
-                              key={optIdx}
-                              className={`p-3.5 rounded-2xl border-2 transition-all flex items-center gap-2 text-white shadow-lg ${styles.bg} ${
-                                isCorrect ? "ring-4 ring-emerald-400" : ""
-                              }`}
+                        {/* Move Up/Down & Delete */}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleMoveSlide(idx, "up", e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600"
+                              title="উপরে নিন"
                             >
-                              <button
-                                type="button"
-                                onClick={() => updateSelectedSlide({ correctAnswer: optIdx })}
-                                className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs shrink-0 cursor-pointer ${
-                                  isCorrect ? "bg-white text-emerald-700 shadow-md" : "bg-black/30 text-white"
-                                }`}
-                                title="সঠিক উত্তর হিসেবে নির্বাচন করুন"
-                              >
-                                {isCorrect ? <Check className="w-4 h-4" /> : styles.shape}
-                              </button>
-
-                              <input
-                                type="text"
-                                value={opt}
-                                onChange={(e) => {
-                                  const updated = [...selectedSlide.options];
-                                  updated[optIdx] = e.target.value;
-                                  updateSelectedSlide({ options: updated });
-                                }}
-                                className="bg-transparent text-xs font-black text-white focus:outline-none focus:bg-black/20 px-2 py-1 rounded-lg w-full"
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TYPE E: Matching Pairs */}
-                  {selectedSlide.type === "matching" && (
-                    <div className="space-y-2.5">
-                      <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider block text-center">
-                        🔗 ক্রস-লাইন মিলকরণ জোড়া:
-                      </span>
-                      <div className="space-y-2">
-                        {(selectedSlide.pairs || []).map((pair, pIdx) => (
-                          <div
-                            key={pIdx}
-                            className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-bold"
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                          )}
+                          {idx < currentDeck.slides.length - 1 && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleMoveSlide(idx, "down", e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600"
+                              title="নিচে নিন"
+                            >
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSlide(slide.id, e)}
+                            className="p-0.5 rounded text-rose-400 hover:text-rose-600"
+                            title="মুছুন"
                           >
-                            <input
-                              type="text"
-                              value={pair.left}
-                              onChange={(e) => {
-                                const newPairs = [...(selectedSlide.pairs || [])];
-                                newPairs[pIdx].left = e.target.value;
-                                updateSelectedSlide({ pairs: newPairs });
-                              }}
-                              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs"
-                              placeholder="বাম কলাম"
-                            />
-                            <ArrowRight className="w-4 h-4 text-cyan-400 shrink-0" />
-                            <input
-                              type="text"
-                              value={pair.right}
-                              onChange={(e) => {
-                                const newPairs = [...(selectedSlide.pairs || [])];
-                                newPairs[pIdx].right = e.target.value;
-                                updateSelectedSlide({ pairs: newPairs });
-                              }}
-                              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs"
-                              placeholder="ডান কলাম"
-                            />
-                          </div>
-                        ))}
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  )}
-
-                  {/* TYPE F: Fill in Blank */}
-                  {selectedSlide.type === "fill_blank" && (
-                    <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 text-center space-y-3">
-                      <span className="text-xs font-bold text-purple-300 uppercase tracking-wider block">
-                        📝 ক্যাপসুল ব্ল্যাঙ্ক প্রিভিউ:
-                      </span>
-                      <p className="text-sm font-bold text-white leading-relaxed">
-                        কম্পিউটার নেটওয়ার্কে স্ট্যান্ডার্ড IPv4 এড্রেস সাধারণত{" "}
-                        <span className="px-3 py-1 rounded-full bg-purple-500/20 border-2 border-purple-400 text-purple-300 font-black">
-                          {String(selectedSlide.correctAnswer || "৩২")}
-                        </span>{" "}
-                        বিটের হয়ে থাকে।
-                      </p>
-                      <div className="pt-2 text-[11px] text-slate-400">
-                        গ্রহণযোগ্য সঠিক শব্দসমূহ:{" "}
-                        <strong className="text-purple-300">
-                          {(selectedSlide.acceptedAnswers || ["৩২", "32"]).join(", ")}
-                        </strong>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TYPE G: True / False */}
-                  {selectedSlide.type === "true_false" && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedSlide({ correctAnswer: true })}
-                        className={`p-6 rounded-2xl border-2 text-center transition font-black text-sm flex flex-col items-center gap-2 cursor-pointer ${
-                          selectedSlide.correctAnswer === true
-                            ? "bg-emerald-600 border-emerald-400 text-white shadow-lg ring-4 ring-emerald-400"
-                            : "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800"
-                        }`}
-                      >
-                        <Check className="w-8 h-8 text-emerald-300" />
-                        <span>সত্য (True)</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedSlide({ correctAnswer: false })}
-                        className={`p-6 rounded-2xl border-2 text-center transition font-black text-sm flex flex-col items-center gap-2 cursor-pointer ${
-                          selectedSlide.correctAnswer === false
-                            ? "bg-rose-600 border-rose-400 text-white shadow-lg ring-4 ring-rose-400"
-                            : "bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800"
-                        }`}
-                      >
-                        <X className="w-8 h-8 text-rose-300" />
-                        <span>মিথ্যা (False)</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Teacher Explanation Footer */}
-                <div className="pt-3 border-t border-indigo-500/20">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    শিক্ষকের ব্যাখ্যা ও নোটস (উত্তর প্রকাশের পর প্রদর্শিত হবে):
-                  </span>
-                  <input
-                    type="text"
-                    value={selectedSlide.explanation || ""}
-                    onChange={(e) => updateSelectedSlide({ explanation: e.target.value })}
-                    className="w-full text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-400"
-                    placeholder="ব্যাখ্যা লিখুন..."
-                  />
-                </div>
+                  );
+                })}
               </div>
+            </aside>
 
-              {/* -------------------------------------------------------------
-                  RIGHT PANEL (280px equivalent: 3 cols in 12-col grid)
-                  SIMPLE SETTINGS INSPECTOR
-                  ------------------------------------------------------------- */}
-              <div className="lg:col-span-3 flex flex-col space-y-4 bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 p-4 rounded-3xl shadow-xl overflow-y-auto max-h-[720px]">
-                <div className="flex items-center gap-2 pb-2 border-b border-indigo-500/20">
-                  <Sliders className="w-4 h-4 text-cyan-400" />
-                  <h3 className="text-xs font-black text-white uppercase tracking-wider">
-                    স্লাইড সেটিংস ইন্সপেক্টর
-                  </h3>
-                </div>
-
-                {/* 1. Slide/Question Type Selector */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-400">স্লাইড / প্রশ্নের ধরন</label>
+            {/* -----------------------------------------------------------------
+                CENTER GIANT STAGE (flex-1 flex flex-col items-center justify-between p-6 lg:p-10)
+                ----------------------------------------------------------------- */}
+            <main className="flex-1 flex flex-col items-center justify-between p-4 sm:p-6 lg:p-8 overflow-y-auto relative scrollbar-thin">
+              {/* TOP FLOATING CONTEXTUAL TOOLBAR (Replaces the bulky Right Column!) */}
+              <div className="sticky top-0 z-30 mb-4 rounded-2xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 px-4 py-2 flex flex-wrap items-center justify-center gap-3 max-w-3xl backdrop-blur-md">
+                {/* 1. Slide Type Selector Dropdown */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                    স্লাইড টাইপ:
+                  </span>
                   <select
-                    value={selectedSlide.type}
+                    value={currentSlide.type}
                     onChange={(e) => {
-                      const newType = e.target.value as any;
-                      const isWarmup = [
-                        "mood_checkin",
-                        "word_cloud",
-                        "sticky_notes",
-                        "opinion_poll",
-                      ].includes(newType);
-                      updateSelectedSlide({
+                      const newType = e.target.value as SlideType;
+                      const graded = isGradedQuiz(newType);
+                      updateCurrentSlide({
                         type: newType,
-                        kind: isWarmup ? "warmup" : "quiz",
-                        points: isWarmup ? 0 : 100,
+                        timeLimit: graded ? 30 : 0,
+                        points: graded ? 100 : 0,
                       });
                     }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-bold focus:outline-none focus:border-indigo-400 cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-black text-indigo-600 dark:text-indigo-300 focus:outline-none cursor-pointer"
                   >
-                    <optgroup label="💬 ওয়ার্মআপ স্লাইডস (Mentimeter)">
-                      <option value="mood_checkin">🔥 মুড ও এনার্জি চেক-ইন</option>
-                      <option value="word_cloud">☁️ লাইভ ওয়ার্ড ক্লাউড</option>
-                      <option value="sticky_notes">📝 ৩ডি স্টিকি নোটস ওয়াল</option>
-                      <option value="opinion_poll">📊 ওপিনিয়ন পোল</option>
+                    <optgroup label="📄 কন্টেন্ট স্লাইড (No Timer)">
+                      <option value="TEXT_SLIDE">📄 টেক্সট ও হেডিং স্লাইড</option>
+                      <option value="IMAGE_COMPARE">🖼️ ইমেজ তুলনা স্লাইড</option>
                     </optgroup>
-                    <optgroup label="🏆 মূল কুইজ প্রশ্নাবলী (Kahoot)">
-                      <option value="mcq_single">🔘 বহুনির্বাচনী (MCQ Single)</option>
-                      <option value="matching">🔗 ডান-বাম মিলকরণ</option>
-                      <option value="fill_blank">📝 শূন্যস্থান পূরণ</option>
-                      <option value="true_false">⚖️ সত্য / মিথ্যা (True/False)</option>
-                      <option value="ordering">🔢 ধারাবাহিক ক্রম সাজানো</option>
+                    <optgroup label="💬 ইন্টারেক্টিভ ওপেন স্লাইড (No Timer)">
+                      <option value="WORD_CLOUD">☁️ লাইভ ওয়ার্ড ক্লাউড</option>
+                      <option value="OPEN_ENDED">💭 মুক্ত মতামত (Open Ended)</option>
+                      <option value="LIVE_QA">🙋 লাইভ প্রশ্নোত্তর বোর্ড</option>
+                    </optgroup>
+                    <optgroup label="🏆 কুইজ প্রতিযোগিতা (Graded)">
+                      <option value="MCQ">🔘 বহুনির্বাচনী প্রশ্ন (MCQ Single)</option>
+                      <option value="FILL_BLANKS">📝 শূন্যস্থান পূরণ (Fill Blanks)</option>
+                      <option value="MATCHING">🔗 ডান-বাম মিলকরণ (Matching)</option>
+                      <option value="REORDER">🔢 ধারাবাহিক ক্রম সাজানো</option>
+                      <option value="TRUE_FALSE">⚖️ সত্য / মিথ্যা (True/False)</option>
                     </optgroup>
                   </select>
                 </div>
 
-                {/* 2. Time Limit Pills */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 flex items-center justify-between">
-                    <span>সময়সীমা (Time Limit)</span>
-                    <span className="text-cyan-300 font-mono">{selectedSlide.timeLimit}s</span>
-                  </label>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[15, 20, 30, 60].map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => updateSelectedSlide({ timeLimit: t })}
-                        className={`py-1.5 rounded-xl text-xs font-black transition cursor-pointer border ${
-                          selectedSlide.timeLimit === t
-                            ? "bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/30"
-                            : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
-                        }`}
-                      >
-                        {t}s
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {/* STRICT CONDITIONAL TIMER & POINTS PILLS: ONLY SHOWN IF GRADED QUIZ! */}
+                {isGradedQuiz(currentSlide.type) && (
+                  <>
+                    <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
 
-                {/* 3. Points Pills */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 flex items-center justify-between">
-                    <span>বরাদ্দকৃত পয়েন্ট</span>
-                    <span className="text-amber-300 font-mono">{selectedSlide.points} pts</span>
-                  </label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {[
-                      { p: 0, label: "০ (ওয়ার্মআপ)" },
-                      { p: 100, label: "১০০" },
-                      { p: 200, label: "২০০" },
-                    ].map((item) => (
-                      <button
-                        key={item.p}
-                        type="button"
-                        onClick={() => updateSelectedSlide({ points: item.p })}
-                        className={`py-1.5 rounded-xl text-xs font-black transition cursor-pointer border ${
-                          selectedSlide.points === item.p
-                            ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30"
-                            : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                    {/* Time Limit Pills */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-black text-slate-400">⏱️ সময়:</span>
+                      <div className="flex items-center gap-1">
+                        {[15, 20, 30, 60].map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => updateCurrentSlide({ timeLimit: t })}
+                            className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.timeLimit === t
+                                ? "bg-cyan-500 text-slate-950 border-cyan-400 font-bold"
+                                : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
+                              }`}
+                          >
+                            {t}s
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
-                {/* 4. Scheduled Auto-Start Time Picker */}
-                <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                  <label className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-400" />
-                    <span>⏰ নির্দিষ্ট সময়ে অটো-স্টার্ট সেট করুন</span>
-                  </label>
+                    <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+
+                    {/* Points Pills */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-black text-slate-400">⭐ পয়েন্ট:</span>
+                      <div className="flex items-center gap-1">
+                        {[50, 100, 200].map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => updateCurrentSlide({ points: p })}
+                            className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.points === p
+                                ? "bg-amber-500 text-slate-950 border-amber-400 font-bold"
+                                : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
+                              }`}
+                          >
+                            {p}p
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Explanation Popover Button */}
+                <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+                <button
+                  type="button"
+                  onClick={() => setShowExplanationPopover(!showExplanationPopover)}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1 cursor-pointer ${currentSlide.explanation
+                      ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700"
+                      : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-indigo-500"
+                    }`}
+                >
+                  <Info className="w-3.5 h-3.5" />
+                  <span>💡 ব্যাখ্যা {currentSlide.explanation ? "(যুক্ত)" : ""}</span>
+                </button>
+              </div>
+
+              {/* Floating Explanation Popover Card */}
+              <AnimatePresence>
+                {showExplanationPopover && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="w-full max-w-xl mb-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-2 z-20"
+                  >
+                    <div className="flex items-center justify-between text-xs font-black text-amber-500">
+                      <span>💡 সঠিক উত্তরের ব্যাখ্যা বা শিক্ষকের নোট:</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowExplanationPopover(false)}
+                        className="p-1 text-slate-400 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={currentSlide.explanation || ""}
+                      onChange={(e) => updateCurrentSlide({ explanation: e.target.value })}
+                      placeholder="শিক্ষার্থীরা উত্তর দেওয়ার পর এই ব্যাখ্যা প্রদর্শিত হবে..."
+                      className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none focus:border-amber-400"
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ---------------------------------------------------------------
+                  THE 16:9 INTERACTIVE STAGE CARD (w-full max-w-4xl min-h-[460px])
+                  --------------------------------------------------------------- */}
+              <div className="w-full max-w-4xl min-h-[480px] my-auto rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800/80 p-6 sm:p-10 flex flex-col justify-between relative transition-all">
+                {/* 1. BLANK CUSTOM PROMPT TITLE (No prefilled questions!) */}
+                <div className="space-y-1.5 pb-4">
                   <input
-                    type="datetime-local"
-                    value={scheduledStartTime}
-                    onChange={(e) => setScheduledStartTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-indigo-500/30 text-xs text-white font-mono focus:outline-none focus:border-amber-400 cursor-pointer"
+                    type="text"
+                    value={currentSlide.title}
+                    onChange={(e) => updateCurrentSlide({ title: e.target.value })}
+                    placeholder="এখানে আপনার প্রশ্ন বা আলোচনার বিষয় লিখুন..."
+                    className="w-full text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 bg-transparent border-b-2 border-transparent hover:border-slate-300 dark:hover:border-slate-700 focus:border-indigo-500 focus:outline-none transition py-2 leading-relaxed text-center sm:text-left"
                   />
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const in5 = new Date(Date.now() + 5 * 60000);
-                        in5.setSeconds(0, 0);
-                        const isoLocal = new Date(in5.getTime() - in5.getTimezoneOffset() * 60000)
-                          .toISOString()
-                          .slice(0, 16);
-                        setScheduledStartTime(isoLocal);
-                        showToast("৫ মিনিট পর অটো-স্টার্ট সেট করা হয়েছে", "info");
-                      }}
-                      className="flex-1 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300 hover:bg-amber-500/25 transition"
-                    >
-                      +৫ মিনিট
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const in15 = new Date(Date.now() + 15 * 60000);
-                        in15.setSeconds(0, 0);
-                        const isoLocal = new Date(in15.getTime() - in15.getTimezoneOffset() * 60000)
-                          .toISOString()
-                          .slice(0, 16);
-                        setScheduledStartTime(isoLocal);
-                        showToast("১৫ মিনিট পর অটো-স্টার্ট সেট করা হয়েছে", "info");
-                      }}
-                      className="flex-1 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300 hover:bg-amber-500/25 transition"
-                    >
-                      +১৫ মিনিট
-                    </button>
-                    {scheduledStartTime && (
+                </div>
+
+                {/* 2. DIRECT ON-CANVAS EDITING BY TYPE */}
+                <div className="flex-1 flex flex-col justify-center py-4">
+                  {/* TYPE: MCQ Single */}
+                  {currentSlide.type === "MCQ" && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        {currentSlide.options.map((opt, optIdx) => {
+                          const isCorrect = currentSlide.correctAnswer === optIdx;
+                          const shapeIcons = ["▲", "◆", "●", "■"];
+
+                          return (
+                            <div
+                              key={optIdx}
+                              className={`p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 relative shadow-sm ${isCorrect
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-400/40"
+                                  : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                                }`}
+                            >
+                              {/* Correct Answer Circular Toggle (Click to mark Green Correct) */}
+                              <button
+                                type="button"
+                                onClick={() => updateCurrentSlide({ correctAnswer: optIdx })}
+                                className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 transition-transform active:scale-95 cursor-pointer ${isCorrect
+                                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
+                                    : "bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
+                                  }`}
+                                title="সঠিক উত্তর হিসেবে চিহ্নিত করুন"
+                              >
+                                {isCorrect ? (
+                                  <Check className="w-4 h-4 stroke-[3]" />
+                                ) : (
+                                  shapeIcons[optIdx % 4]
+                                )}
+                              </button>
+
+                              {/* In-line Editable Option Input */}
+                              <input
+                                type="text"
+                                value={opt}
+                                onChange={(e) => {
+                                  const updated = [...currentSlide.options];
+                                  updated[optIdx] = e.target.value;
+                                  updateCurrentSlide({ options: updated });
+                                }}
+                                placeholder={`অপশন ${optIdx + 1} লিখুন...`}
+                                className="bg-transparent text-sm font-bold text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none w-full"
+                              />
+
+                              {/* Delete Option */}
+                              {currentSlide.options.length > 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = currentSlide.options.filter((_, i) => i !== optIdx);
+                                    updateCurrentSlide({
+                                      options: updated,
+                                      correctAnswer: Math.min(
+                                        Number(currentSlide.correctAnswer),
+                                        updated.length - 1
+                                      ),
+                                    });
+                                  }}
+                                  className="text-slate-400 hover:text-rose-500 p-1 transition cursor-pointer"
+                                  title="অপশন মুছুন"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Add Option Button */}
+                      {currentSlide.options.length < 6 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateCurrentSlide({
+                              options: [...currentSlide.options, `নতুন অপশন`],
+                            });
+                          }}
+                          className="py-2 px-4 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ অপশন যোগ করুন</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TYPE: True / False */}
+                  {currentSlide.type === "TRUE_FALSE" && (
+                    <div className="grid grid-cols-2 gap-6 max-w-lg mx-auto w-full py-4">
+                      <button
+                        type="button"
+                        onClick={() => updateCurrentSlide({ correctAnswer: true })}
+                        className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === true
+                            ? "bg-emerald-500 text-white border-emerald-400 shadow-xl shadow-emerald-500/30 scale-102"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                          }`}
+                      >
+                        <CheckCircle2 className="w-10 h-10" />
+                        <span className="text-base sm:text-lg font-black">সত্য (True)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => updateCurrentSlide({ correctAnswer: false })}
+                        className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === false
+                            ? "bg-rose-500 text-white border-rose-400 shadow-xl shadow-rose-500/30 scale-102"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                          }`}
+                      >
+                        <X className="w-10 h-10 stroke-[3]" />
+                        <span className="text-base sm:text-lg font-black">মিথ্যা (False)</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* TYPE: Fill in Blanks */}
+                  {currentSlide.type === "FILL_BLANKS" && (
+                    <div className="space-y-4 max-w-2xl mx-auto w-full">
+                      <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-black text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <span>📝</span>
+                            <span>ক্যাপসুল ব্ল্যাঙ্ক বাক্য (Sentence with Capsule Blanks):</span>
+                          </label>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = currentSlide.content || "";
+                              updateCurrentSlide({ content: cur ? `${cur} ___` : "___" });
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-black transition flex items-center gap-1 cursor-pointer active:scale-95"
+                            title="বাক্যের শেষে শূন্যস্থান কোড যোগ করুন"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>[ ___ শূন্যস্থান যোগ করুন ]</span>
+                          </button>
+                        </div>
+
+                        <input
+                          type="text"
+                          value={currentSlide.content || ""}
+                          onChange={(e) => updateCurrentSlide({ content: e.target.value })}
+                          placeholder="বাক্যে শূন্যস্থান বোঝাতে '___' ব্যবহার করুন (যেমন: IPv4 এড্রেস সাধারণত ___ বিট।)"
+                          className="w-full text-sm font-bold text-slate-800 dark:text-slate-200 bg-transparent focus:outline-none border-b-2 border-indigo-400 pb-1.5 leading-relaxed"
+                        />
+
+                        {/* Interactive Capsule Slot Live Preview */}
+                        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-1.5">
+                          <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest block">
+                            ✨ স্টুডেন্ট স্ক্রিন ক্যাপসুল লাইভ প্রিভিউ:
+                          </span>
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-200 leading-relaxed flex flex-wrap items-center gap-1.5">
+                            {(currentSlide.content || "বাক্য লিখুন এবং ___ যোগ করুন").split(/(___+)/g).map((seg, sIdx) => {
+                              if (seg.startsWith("___")) {
+                                return (
+                                  <span
+                                    key={sIdx}
+                                    className="inline-flex items-center px-3 py-1 rounded-full bg-amber-500/20 border-2 border-dashed border-amber-400 text-amber-700 dark:text-amber-300 font-black text-xs shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse"
+                                  >
+                                    [ ক্যাপসুল স্লট: {currentSlide.acceptedAnswers?.[0] || "সঠিক উত্তর"} ]
+                                  </span>
+                                );
+                              }
+                              return <span key={sIdx}>{seg}</span>;
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Correct Answers / Accepted Words & Word Bank Hints */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5">
+                          <label className="text-[11px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
+                            🎯 সঠিক উত্তর (Capsule Word) — কমা দিয়ে একাধিক:
+                          </label>
+                          <input
+                            type="text"
+                            value={(currentSlide.acceptedAnswers || []).join(", ")}
+                            onChange={(e) =>
+                              updateCurrentSlide({
+                                acceptedAnswers: e.target.value.split(",").map((s) => s.trim()),
+                                correctAnswer: e.target.value.split(",")[0]?.trim() || "",
+                              })
+                            }
+                            placeholder="যেমন: ৩২, 32, ৩২ বিট"
+                            className="w-full text-xs font-black text-emerald-800 dark:text-emerald-200 bg-transparent focus:outline-none border-b border-emerald-400/60 pb-1"
+                          />
+                        </div>
+
+                        <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
+                          <label className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">
+                            💡 ঐচ্ছিক শব্দ-ব্যাংক (Word Bank Hints):
+                          </label>
+                          <input
+                            type="text"
+                            value={(currentSlide.options || []).join(", ")}
+                            onChange={(e) =>
+                              updateCurrentSlide({
+                                options: e.target.value.split(",").map((s) => s.trim()),
+                              })
+                            }
+                            placeholder="যেমন: ১৬, ৩২, ৬৪, ১২৮"
+                            className="w-full text-xs font-black text-indigo-800 dark:text-indigo-200 bg-transparent focus:outline-none border-b border-indigo-400/60 pb-1"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TYPE: Matching Pairs */}
+                  {currentSlide.type === "MATCHING" && (
+                    <div className="space-y-3.5 max-w-2xl mx-auto w-full">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <span>🔗</span>
+                          <span>বাম পাশ ↔ ডান পাশ মিলকরণ জোড়াসমূহ (Cross-Line Pairs):</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">স্টুডেন্ট স্ক্রিনে রঙিন লাইন টেনে মিল করতে হবে</span>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {(currentSlide.pairs || []).map((pair, pIdx) => (
+                          <div
+                            key={pIdx}
+                            className="flex items-center gap-2 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xs"
+                          >
+                            <span className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
+                              {pIdx + 1}
+                            </span>
+                            <div className="flex-1 flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={pair.left}
+                                onChange={(e) => {
+                                  const newPairs = [...(currentSlide.pairs || [])];
+                                  newPairs[pIdx].left = e.target.value;
+                                  updateCurrentSlide({ pairs: newPairs });
+                                }}
+                                placeholder={`বাম পাশের বিষয় ${pIdx + 1}`}
+                                className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-900/60 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                              />
+                              <ArrowRight className="w-4 h-4 text-emerald-500 shrink-0" />
+                              <input
+                                type="text"
+                                value={pair.right}
+                                onChange={(e) => {
+                                  const newPairs = [...(currentSlide.pairs || [])];
+                                  newPairs[pIdx].right = e.target.value;
+                                  updateCurrentSlide({ pairs: newPairs });
+                                }}
+                                placeholder={`ডান পাশের সঠিক মিল ${pIdx + 1}`}
+                                className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-cyan-200 dark:border-cyan-900/60 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+                            {(currentSlide.pairs || []).length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newPairs = (currentSlide.pairs || []).filter((_, i) => i !== pIdx);
+                                  updateCurrentSlide({ pairs: newPairs });
+                                }}
+                                className="text-slate-400 hover:text-rose-500 p-1.5 transition cursor-pointer"
+                                title="জোড়া মুছুন"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => {
-                          setScheduledStartTime("");
-                          showToast("অটো-স্টার্ট সময় মুছে ফেলা হয়েছে", "info");
+                          const newPairs = [...(currentSlide.pairs || []), { left: "", right: "" }];
+                          updateCurrentSlide({ pairs: newPairs });
                         }}
-                        className="p-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30"
-                        title="রিসেট"
+                        className="py-2 px-4 rounded-xl border border-dashed border-emerald-400 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ নতুন জোড়া যোগ করুন</span>
                       </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Direct Launch Host Action */}
-                <div className="pt-3 border-t border-slate-800/80">
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange("live_host")}
-                    className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer"
-                  >
-                    <Radio className="w-4 h-4 animate-pulse" />
-                    <span>সরাসরি হোস্ট এরিনায় যান ➔</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =======================================================================
-            MODE 2: 📡 লাইভ কন্ট্রোল ও হোয়াইটবোর্ড প্রেজেন্টার (LIVE HOST & SCHEDULED LOBBY)
-            ======================================================================= */}
-        {activeMode === "live_host" && (
-          <div className="flex-1 flex flex-col space-y-4">
-            {/* LOBBY STAGE: Waiting room with Room PIN, QR Code, and Mentimeter Whiteboard */}
-            {liveSessionState === "ready" && (
-              <div className="p-8 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-2xl text-center space-y-6 max-w-2xl mx-auto my-auto">
-                <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-white flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/30">
-                  <Radio className="w-8 h-8 animate-pulse" />
-                </div>
-
-                <div className="space-y-1.5">
-                  <h2 className="text-xl sm:text-2xl font-black text-white">
-                    লাইভ কুইজ ও প্রেজেন্টেশন লঞ্চপ্যাড
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    বর্তমানে লোড করা কুইজ: <strong className="text-white">{quizTitle}</strong>
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 text-left space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400">স্লাইড ও প্রশ্নের সংখ্যা:</span>
-                    <strong className="text-indigo-300 font-bold">{slides.length}টি স্লাইড</strong>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400">টিম অটো-অ্যাসাইন:</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsTeamMode(!isTeamMode)}
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-black border transition ${
-                        isTeamMode
-                          ? "bg-purple-500/20 text-purple-300 border-purple-400"
-                          : "bg-slate-800 text-slate-400 border-slate-700"
-                      }`}
-                    >
-                      {isTeamMode ? "৪টি টিম (পদ্মা, মেঘনা, যমুনা, কর্ণফুলী)" : "একক প্রতিযোগিতা"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                  <button
-                    type="button"
-                    disabled={isStartingLive}
-                    onClick={() => handleStartLiveLobby(false)}
-                    className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
-                  >
-                    {isStartingLive ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Play className="w-4 h-4" />
-                    )}
-                    <span>🚀 এখনই লাইভ শুরু করুন</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isStartingLive}
-                    onClick={() => handleStartLiveLobby(true)}
-                    className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 cursor-pointer disabled:opacity-50"
-                  >
-                    <Clock className="w-4 h-4" />
-                    <span>⏰ শিডিউল করে চালু করুন</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* LIVE LOBBY / PRE-QUIZ STAGE */}
-            {(liveSessionState === "lobby" || liveSessionState === "whiteboard") && (
-              <div className="space-y-4 flex-1 flex flex-col">
-                {/* Lobby Header */}
-                <div className="p-5 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
-                  <div className="space-y-1 text-center md:text-left">
-                    <div className="inline-flex items-center gap-2 px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-black border border-emerald-500/40">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      <span>লাইভ সেশন সক্রিয় • রুম পিন রেডি</span>
                     </div>
-                    <h2 className="text-lg font-black text-white">{quizTitle}</h2>
-                  </div>
+                  )}
 
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setLiveSessionState(liveSessionState === "lobby" ? "whiteboard" : "lobby")
-                      }
-                      className="px-3.5 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 text-xs font-black transition flex items-center gap-2 cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-300" />
-                      <span>
-                        {liveSessionState === "lobby"
-                          ? "💬 ইন্টারঅ্যাক্টিভ হোয়াইটবোর্ড দেখুন"
-                          : "👥 স্টুডেন্ট লবি ভিউ"}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleTriggerKahootCountdown}
-                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-400 hover:to-indigo-500 text-white text-xs font-black transition flex items-center gap-2 shadow-lg shadow-rose-500/30 cursor-pointer animate-bounce"
-                    >
-                      <Play className="w-4 h-4" />
-                      <span>🎮 কুইজ শুরু করুন (3-2-1)</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Scheduled Auto-Start Countdown Banner if active */}
-                {lobbyScheduleSeconds !== null && lobbyScheduleSeconds > 0 && (
-                  <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 border-2 border-amber-500/50 shadow-xl text-center flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-5 h-5 text-amber-400 animate-spin" />
-                      <span className="text-xs font-black text-amber-300">
-                        অটো-স্টার্ট কাউন্টডাউন চলছে
-                      </span>
-                    </div>
-                    <div className="text-xl sm:text-2xl font-mono font-black text-amber-300">
-                      ⏳ বাকি: {toBanglaDigits(Math.floor(lobbyScheduleSeconds / 60))}:
-                      {toBanglaDigits(String(lobbyScheduleSeconds % 60).padStart(2, "0"))} মিনিট
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setLobbyScheduleSeconds(null)}
-                      className="text-xs font-bold text-slate-400 hover:text-white underline cursor-pointer"
-                    >
-                      কাউন্টডাউন বন্ধ করুন
-                    </button>
-                  </div>
-                )}
-
-                {/* Switch between Student Lobby & Mentimeter Whiteboard */}
-                {liveSessionState === "lobby" ? (
-                  /* LOBBY VIEW: PIN + QR CODE + STUDENT AVATARS */
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 flex-1">
-                    {/* Left: Huge PIN & QR */}
-                    <div className="md:col-span-5 p-6 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl flex flex-col items-center justify-center text-center space-y-4">
-                      <span className="text-xs font-black text-cyan-300 uppercase tracking-widest">
-                        শিক্ষার্থী জয়েন পিন
-                      </span>
-                      <div className="px-6 py-3 rounded-2xl bg-slate-950 border-2 border-cyan-500 text-3xl sm:text-4xl font-mono font-black text-cyan-300 tracking-[0.25em] shadow-lg shadow-cyan-500/20">
-                        {liveRoomPin}
+                  {/* TYPE: Reorder Sequence */}
+                  {currentSlide.type === "REORDER" && (
+                    <div className="space-y-3.5 max-w-2xl mx-auto w-full">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <span>🔢</span>
+                          <span>সঠিক ধারাবাহিক ক্রম অনুযায়ী ধাপগুলো সাজান:</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">স্টুডেন্ট স্ক্রিনে এলোমেলো হয়ে যাবে</span>
                       </div>
 
-                      {qrCodeDataUrl && (
-                        <div className="p-3 bg-white rounded-2xl shadow-xl">
-                          <img src={qrCodeDataUrl} alt="Join QR Code" className="w-40 h-40" />
+                      <div className="space-y-2">
+                        {(currentSlide.items || []).map((step, sIdx) => {
+                          const totalSteps = (currentSlide.items || []).length;
+                          return (
+                            <div
+                              key={sIdx}
+                              className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xs"
+                            >
+                              <span className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400 font-mono font-black text-xs flex items-center justify-center shrink-0">
+                                {sIdx + 1}
+                              </span>
+
+                              <input
+                                type="text"
+                                value={step}
+                                onChange={(e) => {
+                                  const newItems = [...(currentSlide.items || [])];
+                                  newItems[sIdx] = e.target.value;
+                                  updateCurrentSlide({ items: newItems });
+                                }}
+                                placeholder={`ধাপ ${sIdx + 1} লিখুন...`}
+                                className="flex-1 bg-transparent text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+                              />
+
+                              {/* Up / Down Swap Buttons */}
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={sIdx === 0}
+                                  onClick={() => {
+                                    if (sIdx > 0) {
+                                      const newItems = [...(currentSlide.items || [])];
+                                      const tmp = newItems[sIdx];
+                                      newItems[sIdx] = newItems[sIdx - 1];
+                                      newItems[sIdx - 1] = tmp;
+                                      updateCurrentSlide({ items: newItems });
+                                    }
+                                  }}
+                                  className="p-1 rounded-md text-slate-400 hover:text-indigo-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                  title="উপরে নিন"
+                                >
+                                  <ArrowUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={sIdx === totalSteps - 1}
+                                  onClick={() => {
+                                    if (sIdx < totalSteps - 1) {
+                                      const newItems = [...(currentSlide.items || [])];
+                                      const tmp = newItems[sIdx];
+                                      newItems[sIdx] = newItems[sIdx + 1];
+                                      newItems[sIdx + 1] = tmp;
+                                      updateCurrentSlide({ items: newItems });
+                                    }
+                                  }}
+                                  className="p-1 rounded-md text-slate-400 hover:text-indigo-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                  title="নিচে নিন"
+                                >
+                                  <ArrowDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {totalSteps > 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newItems = (currentSlide.items || []).filter((_, i) => i !== sIdx);
+                                    updateCurrentSlide({ items: newItems });
+                                  }}
+                                  className="text-slate-400 hover:text-rose-500 p-1 transition cursor-pointer"
+                                  title="ধাপ মুছুন"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newItems = [...(currentSlide.items || []), `নতুন ধাপ`];
+                          updateCurrentSlide({ items: newItems });
+                        }}
+                        className="py-2 px-4 rounded-xl border border-dashed border-rose-400 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ নতুন ধাপ যোগ করুন</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* TYPE: Word Cloud (Super-Colorful Dynamic Kinetic Preview) */}
+                  {currentSlide.type === "WORD_CLOUD" && (
+                    <div className="p-8 rounded-3xl bg-slate-950/80 border-2 border-fuchsia-500/30 text-center space-y-5 shadow-2xl relative overflow-hidden">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <span className="text-xs font-black text-fuchsia-400 uppercase tracking-widest flex items-center gap-1.5">
+                          <span>☁️</span>
+                          <span>লাইভ কাইনেটিক ওয়ার্ড ক্লাউড প্রিভিউ (Super-Colorful Kinetic Word Cloud)</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">শব্দের পুনরাবৃত্তি অনুযায়ী ফন্ট স্কেলিং</span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5 max-w-2xl mx-auto py-4 min-h-[160px]">
+                        {[
+                          { word: "প্রযুক্তি", color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/30", size: "text-3xl sm:text-4xl font-black" },
+                          { word: "স্মার্ট", color: "text-rose-400 bg-rose-500/10 border-rose-500/30", size: "text-2xl sm:text-3xl font-extrabold" },
+                          { word: "অটোমেশন", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", size: "text-4xl sm:text-5xl font-black" },
+                          { word: "উদ্ভাবন", color: "text-amber-300 bg-amber-500/10 border-amber-500/30", size: "text-xl sm:text-2xl font-bold" },
+                          { word: "আইওটি", color: "text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/30", size: "text-3xl sm:text-4xl font-extrabold" },
+                          { word: "নিরাপত্তা", color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30", size: "text-2xl font-bold" },
+                          { word: "ক্লাউড", color: "text-indigo-300 bg-indigo-500/15 border-indigo-400/30", size: "text-3xl font-black" },
+                        ].map((item, i) => (
+                          <motion.span
+                            key={i}
+                            animate={{ y: [0, -5, 0], scale: [1, 1.03, 1] }}
+                            transition={{ repeat: Infinity, duration: 2.5 + (i % 3) * 0.5, ease: "easeInOut" }}
+                            className={`px-4 py-2 rounded-2xl border ${item.color} ${item.size} shadow-lg cursor-default transition-transform hover:scale-110`}
+                          >
+                            {item.word}
+                          </motion.span>
+                        ))}
+                      </div>
+
+                      <p className="text-xs text-slate-400 max-w-lg mx-auto">
+                        লাইভ প্রেজেন্টেশনে শিক্ষার্থীরা তাদের মোবাইল ডিভাইস থেকে শব্দ সাবমিট করামাত্রই শব্দগুলো উজ্জ্বল রঙ ও বাউন্স অ্যানিমেশনে স্বয়ংক্রিয়ভাবে ভাসবে।
+                      </p>
+                    </div>
+                  )}
+
+                  {/* TYPE: Open Ended / Live Q&A */}
+                  {(currentSlide.type === "OPEN_ENDED" || currentSlide.type === "LIVE_QA") && (
+                    <div className="p-8 rounded-3xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center space-y-3">
+                      <span className="text-xs font-black text-amber-500 uppercase tracking-widest block">
+                        💬 মুক্ত মতামত ও রেসপন্স ওয়াল
+                      </span>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                        শিক্ষার্থীরা তাদের ফোন থেকে সরাসরি বিস্তারিত মতামত বা শিক্ষককে প্রশ্ন পাঠাবে, যা রিয়েল-টাইমে এই ক্যানভাসে পিন হয়ে প্রদর্শিত হবে।
+                      </p>
+                    </div>
+                  )}
+
+                  {/* TYPE: Text Slide */}
+                  {currentSlide.type === "TEXT_SLIDE" && (
+                    <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block">
+                        স্লাইডের মূল বডি বা বিষয়বস্তু:
+                      </label>
+                      <textarea
+                        rows={5}
+                        value={currentSlide.content || ""}
+                        onChange={(e) => updateCurrentSlide({ content: e.target.value })}
+                        placeholder="এখানে আপনার পাঠের সারসংক্ষেপ, তথ্য বা বুলেট পয়েন্ট লিখুন..."
+                        className="w-full bg-transparent text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-none leading-relaxed"
+                      />
+                    </div>
+                  )}
+
+                  {/* TYPE: Image Compare */}
+                  {currentSlide.type === "IMAGE_COMPARE" && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-6 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px]">
+                        <ImageIcon className="w-8 h-8 text-slate-400" />
+                        <span className="text-xs font-bold text-slate-500">বাম পাশের ইমেজ বা চিত্র</span>
+                      </div>
+                      <div className="p-6 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px]">
+                        <ImageIcon className="w-8 h-8 text-slate-400" />
+                        <span className="text-xs font-bold text-slate-500">ডান পাশের ইমেজ বা চিত্র</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Stage Card Footer Info */}
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
+                  <span>
+                    স্লাইড {currentDeck.slides.findIndex((s) => s.id === currentSlide.id) + 1} /{" "}
+                    {currentDeck.slides.length}
+                  </span>
+                  <span>
+                    {isGradedQuiz(currentSlide.type) ? "🏆 পয়েন্টযুক্ত প্রশ্ন" : "📄 কন্টেন্ট স্লাইড"}
+                  </span>
+                </div>
+              </div>
+            </main>
+          </div>
+
+          {/* ===================================================================
+              SLIDE-OVER SETTINGS DRAWER (Task 3: 0px permanent space!)
+              =================================================================== */}
+          <AnimatePresence>
+            {isSettingsDrawerOpen && (
+              <div className="fixed inset-0 z-50 flex justify-end">
+                {/* Backdrop */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsSettingsDrawerOpen(false)}
+                  className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs cursor-pointer"
+                />
+
+                {/* Drawer Panel */}
+                <motion.div
+                  initial={{ x: "100%" }}
+                  animate={{ x: 0 }}
+                  exit={{ x: "100%" }}
+                  transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                  className="relative z-10 w-full max-w-md bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl p-6 flex flex-col justify-between overflow-y-auto"
+                >
+                  <div className="space-y-6">
+                    {/* Drawer Header */}
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <Sliders className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                        <h3 className="text-base font-black text-slate-900 dark:text-white">
+                          কুইজ ও সেশন সেটিংস
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSettingsDrawerOpen(false)}
+                        className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Section 1: Participation & Engagement Toggles */}
+                    <div className="space-y-3.5">
+                      <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">
+                        অংশগ্রহণ ও এনগেজমেন্ট অপশন
+                      </span>
+
+                      {[
+                        {
+                          key: "liveChatEnabled",
+                          label: "লাইভ চ্যাট সক্রিয় রাখুন",
+                          desc: "শিক্ষার্থীরা প্রশ্ন চলাকালীন মন্তব্য করতে পারবে",
+                        },
+                        {
+                          key: "reactionsEnabled",
+                          label: "ইমোজি রিঅ্যাকশন সক্রিয়",
+                          desc: "স্ক্রিনে ভাসমান হার্ট ও ফায়ার ইমোজি পাঠাতে পারবে",
+                        },
+                        {
+                          key: "showCorrectOnWrong",
+                          label: "ভুল উত্তরে সঠিকটি প্রদর্শন",
+                          desc: "উত্তর লকের পর সঠিক উত্তর ও ব্যাখ্যা দেখাবে",
+                        },
+                        {
+                          key: "showLeaderboard",
+                          label: "প্রতি প্রশ্নের পর লিডারবোর্ড",
+                          desc: "সর্বোচ্চ স্কোরধারী শিক্ষার্থীদের র‍্যাঙ্কিং দেখাবে",
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.key}
+                          className="flex items-start justify-between gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
+                        >
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-black text-slate-800 dark:text-slate-200">
+                              {item.label}
+                            </p>
+                            <p className="text-[10px] text-slate-500">{item.desc}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeckSettings((prev: any) => ({
+                                ...prev,
+                                [item.key]: !prev[item.key],
+                              }))
+                            }
+                            className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer shrink-0 mt-1 ${(deckSettings as any)[item.key] ? "bg-indigo-600" : "bg-slate-300 dark:bg-slate-700"
+                              }`}
+                          >
+                            <span
+                              className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${(deckSettings as any)[item.key] ? "left-5" : "left-0.5"
+                                }`}
+                            />
+                          </button>
                         </div>
-                      )}
+                      ))}
+                    </div>
+
+                    {/* Section 2: Scheduled Start Time */}
+                    <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                      <span className="text-xs font-black text-amber-500 uppercase tracking-wider block flex items-center gap-1.5">
+                        <Clock className="w-4 h-4" />
+                        <span>⏰ নির্দিষ্ট সময়ে অটো-স্টার্ট শিডিউল</span>
+                      </span>
+
+                      <input
+                        type="datetime-local"
+                        value={deckSettings.scheduledStartTime}
+                        onChange={(e) =>
+                          setDeckSettings((prev) => ({
+                            ...prev,
+                            scheduledStartTime: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                      />
 
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(liveRoomPin);
-                            showToast("রুম পিন কপি করা হয়েছে!", "success");
+                            const in5 = new Date(Date.now() + 5 * 60000);
+                            in5.setSeconds(0, 0);
+                            const localIso = new Date(in5.getTime() - in5.getTimezoneOffset() * 60000)
+                              .toISOString()
+                              .slice(0, 16);
+                            setDeckSettings((prev) => ({
+                              ...prev,
+                              scheduledStartTime: localIso,
+                            }));
+                            showToast("৫ মিনিট পর অটো-স্টার্ট সেট হয়েছে", "info");
                           }}
-                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                          className="flex-1 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-[10px] font-bold text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
                         >
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>পিন কপি</span>
+                          +৫ মিনিট
                         </button>
-                        <a
-                          href={`/quiz/join?pin=${liveRoomPin}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-1.5"
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const in15 = new Date(Date.now() + 15 * 60000);
+                            in15.setSeconds(0, 0);
+                            const localIso = new Date(in15.getTime() - in15.getTimezoneOffset() * 60000)
+                              .toISOString()
+                              .slice(0, 16);
+                            setDeckSettings((prev) => ({
+                              ...prev,
+                              scheduledStartTime: localIso,
+                            }));
+                            showToast("১৫ মিনিট পর অটো-স্টার্ট সেট হয়েছে", "info");
+                          }}
+                          className="flex-1 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-[10px] font-bold text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>জয়েন পেজ ↗</span>
-                        </a>
-                      </div>
-                    </div>
-
-                    {/* Right: Joined Student Avatars */}
-                    <div className="md:col-span-7 p-6 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl flex flex-col space-y-3">
-                      <div className="flex items-center justify-between pb-2 border-b border-indigo-500/20">
-                        <span className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                          <Users className="w-4 h-4" />
-                          <span>যুক্ত শিক্ষার্থী ({liveStudents.length} জন)</span>
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-400">লবিতে অপেক্ষা করছে</span>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 overflow-y-auto max-h-[360px] p-1">
-                        {liveStudents.map((st) => (
-                          <div
-                            key={st.id}
-                            className="p-2.5 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-center gap-2 shadow-sm"
+                          +১৫ মিনিট
+                        </button>
+                        {deckSettings.scheduledStartTime && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeckSettings((prev) => ({
+                                ...prev,
+                                scheduledStartTime: "",
+                              }))
+                            }
+                            className="p-1 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100"
+                            title="মুছে ফেলুন"
                           >
-                            <span className="text-xl">{st.avatar}</span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-bold text-white truncate">{st.name}</p>
-                              <p className="text-[10px] text-slate-400 font-mono">রোল: {st.roll}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* MENTIMETER WHITEBOARD STAGE */
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
-                    {/* Word Cloud */}
-                    <div className="p-5 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl space-y-3 text-center flex flex-col justify-center">
-                      <span className="text-xs font-black text-cyan-300 uppercase tracking-wider block">
-                        ☁️ লাইভ ওয়ার্ড ক্লাউড
-                      </span>
-                      <div className="flex flex-wrap items-center justify-center gap-2.5">
-                        {["আইওটি", "প্রযুক্তি", "স্মার্ট", "উদ্ভাবন", "ভবিষ্যৎ", "দক্ষতা"].map(
-                          (w, i) => (
-                            <span
-                              key={i}
-                              className="px-3 py-1 rounded-xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-black text-xs animate-pulse"
-                            >
-                              {w}
-                            </span>
-                          )
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </div>
 
-                    {/* Mood Check-In Radar */}
-                    <div className="p-5 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl space-y-3 text-center flex flex-col justify-center">
-                      <span className="text-xs font-black text-amber-300 uppercase tracking-wider block">
-                        🔥 শিক্ষার্থী মুড রাডার
-                      </span>
-                      <div className="space-y-2">
-                        {[
-                          { label: "সুপার এনার্জেটিক", emoji: "🔥", pct: 60, col: "bg-amber-500" },
-                          { label: "বেশ ভালো", emoji: "😊", pct: 30, col: "bg-emerald-500" },
-                          { label: "একটু চিন্তিত", emoji: "🤔", pct: 10, col: "bg-blue-500" },
-                        ].map((m, i) => (
-                          <div key={i} className="space-y-1">
-                            <div className="flex justify-between text-[11px] font-bold text-slate-300">
-                              <span>
-                                {m.emoji} {m.label}
-                              </span>
-                              <span>{m.pct}%</span>
-                            </div>
-                            <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${m.col}`}
-                                style={{ width: `${m.pct}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
+                    {/* Section 3: Configurable Auto-Funny & Praise SMS Engine (Task 2) */}
+                    <div className="space-y-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-cyan-600 dark:text-cyan-400 uppercase tracking-wider block flex items-center gap-1.5">
+                          <Smartphone className="w-4 h-4 text-cyan-500" />
+                          <span>📲 অটো-মোটিভেশনাল ও ফলাফল SMS</span>
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-500 font-bold border border-cyan-500/20">
+                          BTEB Gateway
+                        </span>
                       </div>
-                    </div>
 
-                    {/* Sticky Notes Wall */}
-                    <div className="p-5 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl space-y-3">
-                      <span className="text-xs font-black text-rose-300 uppercase tracking-wider block text-center">
-                        📌 ৩ডি স্টিকি নোটস ওয়াল
-                      </span>
-                      <div className="space-y-2">
-                        {[
-                          "আজকের ল্যাবে সার্কিট সংযোগ দ্রুত শেষ করব।",
-                          "আইওটি ক্লাউড কানেকশন প্র্যাকটিক্যাল দেখতে চাই।",
-                        ].map((txt, i) => (
-                          <div
-                            key={i}
-                            className="p-3 rounded-2xl bg-amber-400 text-slate-950 font-bold text-xs shadow-md transform -rotate-1"
-                          >
-                            {txt}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 3-2-1 KAHOOT COUNTDOWN OVERLAY */}
-            {liveSessionState === "countdown" && (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6 bg-slate-950/90 backdrop-blur-2xl rounded-3xl border border-indigo-500/40">
-                <span className="text-sm font-black text-amber-300 uppercase tracking-widest animate-pulse">
-                  কাহুট লাইভ কুইজ শুরু হচ্ছে
-                </span>
-                <div className="text-8xl sm:text-9xl font-black bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-500 to-indigo-500 animate-ping">
-                  {countdownNum}
-                </div>
-                <p className="text-xs text-slate-400 font-bold">শিক্ষার্থীরা তাদের ডিভাইসে প্রস্তুত হচ্ছে...</p>
-              </div>
-            )}
-
-            {/* ACTIVE QUESTION ARENA (KAHOOT STYLE) */}
-            {(liveSessionState === "active_question" || liveSessionState === "reveal") && (
-              <div className="space-y-4 flex-1 flex flex-col">
-                {/* Arena Top Status Bar */}
-                <div className="p-4 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-xl flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs font-black uppercase">
-                      প্রশ্ন {toBanglaDigits(currentQuizQIdx + 1)} /{" "}
-                      {toBanglaDigits(scoredQuestionsList.length)}
-                    </span>
-                    <span className="text-xs font-bold text-slate-400 font-mono">
-                      উত্তর দিয়েছে: <strong className="text-white">{submittedAnswersCount}</strong> /{" "}
-                      {liveStudents.length}
-                    </span>
-                  </div>
-
-                  {/* Timer Bar */}
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`px-3 py-1 rounded-xl font-mono text-xs font-black flex items-center gap-1.5 border ${
-                        qTimerLeft <= 5
-                          ? "bg-rose-950 text-rose-300 border-rose-500 animate-pulse"
-                          : "bg-cyan-950 text-cyan-300 border-cyan-500"
-                      }`}
-                    >
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>{qTimerLeft}s</span>
-                    </div>
-
-                    {liveSessionState === "active_question" ? (
-                      <button
-                        type="button"
-                        onClick={() => setLiveSessionState("reveal")}
-                        className="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 text-xs font-black shadow-md cursor-pointer hover:bg-amber-400"
-                      >
-                        উত্তর প্রকাশ করুন
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleNextQuizQuestion}
-                        className="px-3.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-xs font-black shadow-md cursor-pointer hover:from-emerald-400 hover:to-teal-500"
-                      >
-                        পরবর্তী ধাপ ➔
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Question Live Render */}
-                {scoredQuestionsList[currentQuizQIdx] && (
-                  <div className="p-6 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-2xl space-y-6 flex-1 flex flex-col justify-center">
-                    <h3 className="text-lg sm:text-2xl font-black text-white text-center leading-relaxed">
-                      {scoredQuestionsList[currentQuizQIdx].title}
-                    </h3>
-
-                    {/* Kahoot Options Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
-                      {scoredQuestionsList[currentQuizQIdx].options.map((opt, oIdx) => {
-                        const isCorrect =
-                          scoredQuestionsList[currentQuizQIdx].correctAnswer === oIdx;
-                        const isRevealed = liveSessionState === "reveal";
-                        const styles = [
-                          { bg: "bg-red-600", shape: "▲" },
-                          { bg: "bg-blue-600", shape: "◆" },
-                          { bg: "bg-amber-500", shape: "●" },
-                          { bg: "bg-emerald-600", shape: "■" },
-                        ][oIdx % 4];
-
-                        return (
-                          <div
-                            key={oIdx}
-                            className={`p-5 rounded-2xl transition-all flex items-center justify-between text-white font-black text-sm shadow-xl ${
-                              isRevealed && isCorrect
-                                ? "bg-emerald-500 ring-4 ring-emerald-300 shadow-emerald-500/40"
-                                : isRevealed && !isCorrect
-                                ? "opacity-30 bg-slate-800"
-                                : styles.bg
+                      {/* 1. Milestone Interval Pills */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          অটোমেটিক SMS ইন্টারভ্যাল (Auto-SMS Milestone):
+                        </label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { key: "off", label: "🚫 বন্ধ (Off)" },
+                            { key: "every_3", label: "3️⃣ প্রতি ৩ প্রশ্ন পর" },
+                            { key: "every_5", label: "5️⃣ প্রতি ৫ প্রশ্ন পর" },
+                            { key: "every_10", label: "🔟 প্রতি ১০ প্রশ্ন পর" },
+                          ].map((item) => (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onClick={() => setDeckSettings((prev) => ({ ...prev, autoSmsMilestone: item.key as any }))}
+                              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-left border ${deckSettings.autoSmsMilestone === item.key
+                                  ? "bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-300 font-black shadow-xs"
+                                  : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                                }`}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setDeckSettings((prev) => ({ ...prev, autoSmsMilestone: "end_quiz" }))}
+                          className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-bold transition text-left border ${deckSettings.autoSmsMilestone === "end_quiz"
+                              ? "bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-300 font-black shadow-xs"
+                              : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
                             }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className="w-8 h-8 rounded-full bg-black/30 flex items-center justify-center font-mono">
-                                {styles.shape}
-                              </span>
-                              <span>{opt}</span>
+                        >
+                          🏁 শুধুমাত্র কুইজ শেষে ফাইনাল রেজাল্ট SMS
+                        </button>
+                      </div>
+
+                      {deckSettings.autoSmsMilestone !== "off" && (
+                        <>
+                          {/* 2. Recipient Selector */}
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                              প্রাপক নির্বাচন (Recipient):
+                            </label>
+                            <div className="grid grid-cols-3 gap-1">
+                              {[
+                                { key: "student", label: "📱 শিক্ষার্থী" },
+                                { key: "guardian", label: "👨‍👩‍👦 অভিভাবক" },
+                                { key: "both", label: "✨ উভয়ই" },
+                              ].map((rec) => (
+                                <button
+                                  key={rec.key}
+                                  type="button"
+                                  onClick={() => setDeckSettings((prev) => ({ ...prev, smsRecipient: rec.key as any }))}
+                                  className={`py-1.5 px-1 rounded-xl text-[10px] font-bold transition text-center border ${deckSettings.smsRecipient === rec.key
+                                      ? "bg-indigo-500/15 border-indigo-500 text-indigo-600 dark:text-indigo-300 font-black"
+                                      : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500"
+                                    }`}
+                                >
+                                  {rec.label}
+                                </button>
+                              ))}
                             </div>
-                            {isRevealed && isCorrect && (
-                              <CheckCircle2 className="w-6 h-6 text-white" />
+                          </div>
+
+                          {/* 3. Message Mode Toggles */}
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                              মেসেজের ধরন ও অটো-ফিল্টার:
+                            </label>
+
+                            <label className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                                😂 খারাপ করলে ফানি ও অনুপ্রেরণামূলক SMS (&lt; ৫০%)
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={deckSettings.smsFunnyMode}
+                                onChange={(e) => setDeckSettings((prev) => ({ ...prev, smsFunnyMode: e.target.checked }))}
+                                className="w-4 h-4 accent-amber-500 rounded"
+                              />
+                            </label>
+
+                            <label className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                                🌟 ভালো করলে প্রশংসা ও অভিনন্দন SMS (≥ ৮০%)
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={deckSettings.smsPraiseMode}
+                                onChange={(e) => setDeckSettings((prev) => ({ ...prev, smsPraiseMode: e.target.checked }))}
+                                className="w-4 h-4 accent-emerald-500 rounded"
+                              />
+                            </label>
+                          </div>
+
+                          {/* 4. Template Preview & Customization */}
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                              <span>বাংলা টেমপ্লেট কাস্টমাইজেশন:</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{"{student_name}"}, {"{accuracy}"}</span>
+                            </label>
+
+                            {deckSettings.smsFunnyMode && (
+                              <div className="space-y-1">
+                                <span className="text-[10px] font-bold text-amber-500">😂 ফানি/অনুপ্রেরণামূলক মেসেজ টেমপ্লেট:</span>
+                                <textarea
+                                  rows={2}
+                                  value={deckSettings.customFunnyTemplate}
+                                  onChange={(e) => setDeckSettings((prev) => ({ ...prev, customFunnyTemplate: e.target.value }))}
+                                  className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-sans text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400"
+                                />
+                              </div>
+                            )}
+
+                            {deckSettings.smsPraiseMode && (
+                              <div className="space-y-1">
+                                <span className="text-[10px] font-bold text-emerald-500">🌟 প্রশংসা মেসেজ টেমপ্লেট:</span>
+                                <textarea
+                                  rows={2}
+                                  value={deckSettings.customPraiseTemplate}
+                                  onChange={(e) => setDeckSettings((prev) => ({ ...prev, customPraiseTemplate: e.target.value }))}
+                                  className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-sans text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-400"
+                                />
+                              </div>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Explanation Reveal */}
-                    {liveSessionState === "reveal" &&
-                      scoredQuestionsList[currentQuizQIdx].explanation && (
-                        <div className="p-4 rounded-2xl bg-indigo-950/80 border border-indigo-500/40 text-center text-xs font-bold text-indigo-200 animate-in fade-in">
-                          💡 ব্যাখ্যা: {scoredQuestionsList[currentQuizQIdx].explanation}
-                        </div>
+                        </>
                       )}
+                    </div>
                   </div>
-                )}
+
+                  {/* Drawer Footer */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSettingsDrawerOpen(false);
+                        showToast("সেটিংস সংরক্ষিত হয়েছে", "success");
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer"
+                    >
+                      সম্পন্ন করুন
+                    </button>
+                  </div>
+                </motion.div>
               </div>
             )}
+          </AnimatePresence>
+        </div>
+      )}
 
-            {/* 3D FINAL PODIUM VIEW */}
-            {liveSessionState === "podium" && (
-              <div className="p-8 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-2xl text-center space-y-8 flex-1 flex flex-col justify-center">
-                <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black text-xs border border-amber-500/40">
-                    <Trophy className="w-4 h-4 text-amber-400" />
-                    <span>চূড়ান্ত চ্যাম্পিয়নস পোডিয়াম (TOP 3 CHAMPIONS)</span>
-                  </div>
-                  <h2 className="text-2xl sm:text-3xl font-black text-white">কুইজ টুর্নামেন্ট সম্পন্ন!</h2>
-                </div>
+      {/* =======================================================================
+          SMART CENTRAL BOOK & PDF AI STUDIO MODAL (PHASE 2)
+          ======================================================================= */}
+      <SmartAiSlideGeneratorModal
+        isOpen={showAiModal}
+        onClose={() => setShowAiModal(false)}
+        onInsertSlides={handleInsertAiSlides}
+        activeTrade={currentDeck.trade}
+        activeClass={String(currentDeck.classId || "")}
+      />
 
-                {/* 3D Podium Pillars */}
-                <div className="flex items-end justify-center gap-4 pt-6 max-w-xl mx-auto w-full">
-                  {/* 2nd Place (Silver) */}
-                  <div className="flex-1 flex flex-col items-center space-y-2">
-                    <span className="text-2xl">🥈</span>
-                    <span className="text-xs font-black text-slate-300">{topPerformers[1]?.name || "নুসরাত"}</span>
-                    <div className="w-full h-36 rounded-t-2xl bg-gradient-to-t from-slate-700 to-slate-500 text-white font-black flex items-center justify-center shadow-lg text-lg">
-                      #২
-                    </div>
-                  </div>
+      {/* =======================================================================
+          DUAL-DEVICE INTERACTIVE PREVIEW MODAL (PHASE 3 TASK 2)
+          ======================================================================= */}
+      <DualDeviceInteractivePreviewModal
+        isOpen={showDualDevicePreview}
+        onClose={() => setShowDualDevicePreview(false)}
+        slides={currentDeck.slides}
+        initialSlideIndex={currentDeck.slides.findIndex((s) => s.id === currentSlideId)}
+        deckTitle={currentDeck.title}
+        tradeName={currentDeck.trade}
+      />
 
-                  {/* 1st Place (Gold) */}
-                  <div className="flex-1 flex flex-col items-center space-y-2">
-                    <span className="text-4xl animate-bounce">👑</span>
-                    <span className="text-sm font-black text-amber-300">{topPerformers[0]?.name || "তানভীর"}</span>
-                    <div className="w-full h-48 rounded-t-2xl bg-gradient-to-t from-amber-600 to-yellow-400 text-slate-950 font-black flex items-center justify-center shadow-2xl shadow-amber-500/30 text-2xl">
-                      #১
-                    </div>
-                  </div>
-
-                  {/* 3rd Place (Bronze) */}
-                  <div className="flex-1 flex flex-col items-center space-y-2">
-                    <span className="text-2xl">🥉</span>
-                    <span className="text-xs font-black text-amber-600">{topPerformers[2]?.name || "মাহমুদ"}</span>
-                    <div className="w-full h-28 rounded-t-2xl bg-gradient-to-t from-orange-800 to-amber-700 text-white font-black flex items-center justify-center shadow-lg text-base">
-                      #৩
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange("monitor_sms")}
-                    className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 text-white font-black text-xs shadow-lg cursor-pointer hover:from-amber-400 hover:to-orange-500"
-                  >
-                    📊 লাইভ মনিটর ও SMS রেজাল্ট হাব ➔
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLiveSessionState("ready")}
-                    className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
-                  >
-                    নতুন সেশন প্রস্তুত করুন
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* =======================================================================
-            MODE 3: 📊 লাইভ মনিটর ও স্মার্ট SMS অ্যালার্ট হাব (REAL-TIME PERFORMANCE & SMS TRIGGER)
-            ======================================================================= */}
-        {activeMode === "monitor_sms" && (
-          <div className="flex-1 flex flex-col space-y-5">
-            {/* Top Performance Analytics Banner */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-lg space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  মোট শিক্ষার্থী
-                </span>
-                <span className="text-2xl font-black text-white">{liveStudents.length} জন</span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-indigo-500/20 shadow-lg space-y-1">
-                <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block">
-                  গড় সঠিকতা (Accuracy)
-                </span>
-                <span className="text-2xl font-black text-cyan-300">
-                  {Math.round(
-                    liveStudents.reduce((acc, s) => acc + s.accuracy, 0) / liveStudents.length
-                  )}
-                  %
-                </span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-emerald-500/30 shadow-lg space-y-1">
-                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
-                  টপ পারফরমার (&gt; 80%)
-                </span>
-                <span className="text-2xl font-black text-emerald-300">{topPerformers.length} জন</span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-rose-500/30 shadow-lg space-y-1">
-                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
-                  দুর্বল পারফরমার (&lt; 40%)
-                </span>
-                <span className="text-2xl font-black text-rose-300">{strugglingStudents.length} জন</span>
-              </div>
-            </div>
-
-            {/* SMART SMS DISPATCH PANEL */}
-            <div className="p-5 rounded-3xl bg-slate-900/90 backdrop-blur-xl border-2 border-indigo-500/40 shadow-2xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-500/20">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <Smartphone className="w-5 h-5 text-cyan-400" />
-                    <h3 className="text-base font-black text-white">
-                      📲 ফলাফল ও সতর্কবার্তা স্মার্ট SMS প্রেরণ হাব
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    অভিভাবকদের মোবাইলে সরাসরি বাংলায় অটোমেটিক বা ১-ক্লিকে রেজাল্ট ও অ্যালার্ট এসএমএস প্রেরণ করুন।
-                  </p>
-                </div>
-
-                {/* Auto-SMS Toggle */}
-                <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-2xl border border-slate-800">
-                  <span className="text-xs font-bold text-slate-300">অটোমেটিক SMS:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAutoSmsEnabled(!autoSmsEnabled);
-                      showToast(
-                        !autoSmsEnabled
-                          ? "অটোমেটিক SMS অ্যালার্ট সক্রিয় করা হয়েছে"
-                          : "অটোমেটিক SMS বন্ধ করা হয়েছে",
-                        "info"
-                      );
-                    }}
-                    className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${
-                      autoSmsEnabled ? "bg-emerald-500" : "bg-slate-700"
-                    }`}
-                  >
-                    <span
-                      className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
-                        autoSmsEnabled ? "left-5" : "left-0.5"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* 1-Click Action Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  disabled={isSendingSms || topPerformers.length === 0}
-                  onClick={() => handleDispatchSmsBatch("good")}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer disabled:opacity-40"
-                >
-                  {isSendingSms ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  <span>🌟 টপ পারফরমারদের উৎসাহব্যঞ্জক SMS পাঠান ({topPerformers.length} জন)</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isSendingSms || strugglingStudents.length === 0}
-                  onClick={() => handleDispatchSmsBatch("struggling")}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 cursor-pointer disabled:opacity-40"
-                >
-                  {isSendingSms ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4" />
-                  )}
-                  <span>⚠️ দুর্বল পারফরমারদের সতর্কবার্তা SMS পাঠান ({strugglingStudents.length} জন)</span>
-                </button>
-              </div>
-
-              {smsSuccessMessage && (
-                <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-xs font-bold text-emerald-300 text-center animate-in fade-in">
-                  {smsSuccessMessage}
-                </div>
-              )}
-            </div>
-
-            {/* SPLIT VIEW: TOP PERFORMERS VS STRUGGLING STUDENTS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-              {/* Left Column: Top Performers */}
-              <div className="p-5 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-emerald-500/30 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-emerald-500/20">
-                  <span className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Trophy className="w-4 h-4" />
-                    <span>🌟 টপ পারফরমার (&gt; 80% স্কোর)</span>
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-bold font-mono">
-                    {topPerformers.length} জন
-                  </span>
-                </div>
-
-                <div className="space-y-2.5 overflow-y-auto max-h-[420px]">
-                  {topPerformers.map((st) => (
-                    <div
-                      key={st.id}
-                      className="p-3.5 rounded-2xl bg-slate-950/70 border border-emerald-500/30 flex items-center justify-between gap-3 hover:bg-slate-950 transition"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{st.avatar}</span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-black text-white">{st.name}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold font-mono">
-                              {st.score}%
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-400">
-                            রোল: {st.roll} • {st.trade} • মোবাইল: {st.guardianPhone}
-                          </p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={isSendingSms}
-                        onClick={() => handleDispatchSmsBatch("good", st)}
-                        className="px-2.5 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500 text-emerald-200 text-[10px] font-black transition flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
-                        title="অভিভাবককে উৎসাহব্যঞ্জক SMS দিন"
-                      >
-                        <Send className="w-3 h-3" />
-                        <span>SMS</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Right Column: Struggling Students */}
-              <div className="p-5 rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-rose-500/30 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-rose-500/20">
-                  <span className="text-xs font-black text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>⚠️ দুর্বল পারফরম্যান্স / পরপর ভুল (&lt; 40%)</span>
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-bold font-mono">
-                    {strugglingStudents.length} জন
-                  </span>
-                </div>
-
-                <div className="space-y-2.5 overflow-y-auto max-h-[420px]">
-                  {strugglingStudents.map((st) => (
-                    <div
-                      key={st.id}
-                      className="p-3.5 rounded-2xl bg-slate-950/70 border border-rose-500/30 flex items-center justify-between gap-3 hover:bg-slate-950 transition"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{st.avatar}</span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-black text-white">{st.name}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold font-mono">
-                              {st.score}% • {st.wrongCount}টি ভুল
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-400">
-                            রোল: {st.roll} • {st.trade} • মোবাইল: {st.guardianPhone}
-                          </p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={isSendingSms}
-                        onClick={() => handleDispatchSmsBatch("struggling", st)}
-                        className="px-2.5 py-1.5 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500 text-rose-200 text-[10px] font-black transition flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
-                        title="অভিভাবককে সতর্কবার্তা SMS দিন"
-                      >
-                        <AlertTriangle className="w-3 h-3" />
-                        <span>সতর্কবার্তা</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* =========================================================================
-          CLEAN CANVA-STYLE AI QUESTION GENERATOR MODAL
-          ========================================================================= */}
-      <AnimatePresence>
-        {showAiModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg bg-slate-900 border-2 border-indigo-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl relative space-y-5"
-            >
-              <button
-                type="button"
-                onClick={() => setShowAiModal(false)}
-                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800/60 transition cursor-pointer"
-              >
-                ✕
-              </button>
-
-              <div className="flex items-center gap-3 border-b border-indigo-500/20 pb-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-white shadow-md">
-                  <Wand2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white">✨ ১-ক্লিকে AI ম্যাজিক কুইজ জেনারেটর</h3>
-                  <p className="text-xs text-slate-400">টপিক থেকে কারিগরি প্রশ্ন ও স্লাইড অটোমেটিক তৈরি করুন</p>
-                </div>
-              </div>
-
-              <div className="space-y-3.5">
-                <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1">
-                    কুইজের বিষয় বা টপিক
-                  </label>
-                  <input
-                    type="text"
-                    value={aiTopic}
-                    onChange={(e) => setAiTopic(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-400 font-bold"
-                    placeholder="যেমন: কম্পিউটার নেটওয়ার্কিং, সার্কিট বিশ্লেষণ..."
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">প্রশ্নের সংখ্যা</label>
-                    <select
-                      value={aiCount}
-                      onChange={(e) => setAiCount(Number(e.target.value))}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white font-bold focus:outline-none cursor-pointer"
-                    >
-                      <option value={5}>৫টি প্রশ্ন</option>
-                      <option value={10}>১০টি প্রশ্ন</option>
-                      <option value={15}>১৫টি প্রশ্ন</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">কাঠিন্যের মাত্রা</label>
-                    <select
-                      value={aiDifficulty}
-                      onChange={(e) => setAiDifficulty(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white font-bold focus:outline-none cursor-pointer"
-                    >
-                      <option value="Mixed">মিশ্র (সহজ ও মাঝারি)</option>
-                      <option value="Easy">সহজ</option>
-                      <option value="Medium">মাঝারি</option>
-                      <option value="Hard">উন্নত / বোর্ড স্ট্যান্ডার্ড</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1">প্রশ্নের ধরন</label>
-                  <select
-                    value={aiQuestionType}
-                    onChange={(e) => setAiQuestionType(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white font-bold focus:outline-none cursor-pointer"
-                  >
-                    <option value="mcq_single">🔘 বহুনির্বাচনী প্রশ্ন (MCQ Single)</option>
-                    <option value="matching">🔗 ডান-বাম মিলকরণ (Matching Pairs)</option>
-                    <option value="fill_blank">📝 শূন্যস্থান পূরণ (Fill in Blanks)</option>
-                    <option value="true_false">⚖️ সত্য / মিথ্যা (True/False)</option>
-                    <option value="mixed">মিশ্র কাঠামো (All Types)</option>
-                  </select>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={isAiGenerating}
-                onClick={handleGenerateAiQuestions}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white font-black text-xs uppercase tracking-wider transition shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {isAiGenerating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>এআই প্রশ্ন তৈরি করছে...</span>
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-4 h-4 text-amber-200" />
-                    <span>জেনারেট করে স্টুডিওতে যুক্ত করুন</span>
-                  </>
-                )}
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* =========================================================================
-          STUDENT QUICK PIN JOIN MODAL
-          ========================================================================= */}
-      <AnimatePresence>
-        {showJoinModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md bg-slate-900 border-2 border-cyan-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl relative space-y-6"
-            >
-              <button
-                type="button"
-                onClick={() => setShowJoinModal(false)}
-                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800/60 transition cursor-pointer"
-              >
-                ✕
-              </button>
-
-              <div className="text-center space-y-2">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto border border-cyan-500/30">
-                  <Gamepad2 className="w-6 h-6 animate-bounce" />
-                </div>
-                <h3 className="text-xl font-black text-white">৬-ডিজিট গেম পিন জয়েন</h3>
-                <p className="text-xs text-slate-400">
-                  শিক্ষকের স্ক্রিনে প্রদর্শিত লাইভ রুম পিন দিয়ে সরাসরি জয়েন করুন।
-                </p>
-              </div>
-
-              <form onSubmit={handleQuickJoinSubmit} className="space-y-4">
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={quickPin}
-                  onChange={(e) => setQuickPin(e.target.value.replace(/\D/g, ""))}
-                  placeholder="৬ ডিজিটের পিন (যেমন: ৯২১৪০৮)"
-                  className="w-full px-4 py-3.5 rounded-2xl bg-slate-950 border-2 border-cyan-500/40 focus:border-cyan-400 text-center font-mono text-2xl font-black tracking-widest text-cyan-300 placeholder:text-slate-600 focus:outline-none transition"
-                />
-
-                <button
-                  type="submit"
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-sm uppercase tracking-wider transition transform active:scale-98 shadow-lg shadow-cyan-500/30 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span>কুইজে প্রবেশ করুন</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* =======================================================================
+          FULLSCREEN LIVE PRESENTER STAGE (PHASE 3 TASK 3)
+          ======================================================================= */}
+      {activeLivePresenterSession && (
+        <HostLiveFullscreenStage
+          sessionId={activeLivePresenterSession.id}
+          sessionCode={activeLivePresenterSession.pin}
+          deckTitle={activeLivePresenterSession.deck.title}
+          slides={activeLivePresenterSession.deck.slides}
+          scheduledStartTime={activeLivePresenterSession.scheduledStartTime || deckSettings.scheduledStartTime}
+          onClose={handleCloseLivePresenter}
+        />
+      )}
     </div>
   );
 }

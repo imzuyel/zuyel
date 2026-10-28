@@ -21,8 +21,13 @@ import {
   Lock,
   Sparkles,
   Radio,
-  Clock
+  Clock,
+  Cloud,
+  Send,
+  MessageSquare,
+  XCircle
 } from "lucide-react";
+import UniversalQuizShowcaseEngine from "@/components/quiz/engine/UniversalQuizShowcaseEngine";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function LiveQuizPage() {
@@ -47,10 +52,24 @@ export default function LiveQuizPage() {
     networkStatus,
     activeSession,
     participantId,
-    displayName
+    displayName,
+    lastAnswerFeedback,
+    allVoted,
+    isReady,
+    readyCount,
+    handleSetReady
   } = useQuizSession();
 
   const [localSelected, setLocalSelected] = useState<any>(null);
+  const [wordInput, setWordInput] = useState("");
+  const [openEndedInput, setOpenEndedInput] = useState("");
+
+  // Reset inputs on slide change
+  React.useEffect(() => {
+    setLocalSelected(null);
+    setWordInput("");
+    setOpenEndedInput("");
+  }, [currentQuestionIdx, currentQuestion?.id]);
 
   // Anti-Cheat Proctored Exam Hook
   const proctoring = useProctoredExam({
@@ -136,6 +155,31 @@ export default function LiveQuizPage() {
             </div>
           </div>
 
+          {/* 🙋‍♂️ I'm Ready Button (One-tap ready ping) */}
+          <motion.button
+            whileHover={!isReady ? { scale: 1.05 } : {}}
+            whileTap={!isReady ? { scale: 0.95 } : {}}
+            disabled={isReady}
+            onClick={handleSetReady}
+            className={`w-full max-w-sm py-4 rounded-2xl font-black text-base shadow-xl flex items-center justify-center gap-3 transition-transform cursor-pointer ${
+              isReady
+                ? "bg-emerald-950/80 border-2 border-emerald-400 text-emerald-300 shadow-emerald-500/20"
+                : "bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-amber-500/30 animate-pulse"
+            }`}
+          >
+            {isReady ? (
+              <>
+                <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                <span>✅ আপনি রেডি! ({readyCount} জন রেডি)</span>
+              </>
+            ) : (
+              <>
+                <Flame className="w-6 h-6 text-slate-950 fill-current" />
+                <span>🙋‍♂️ আমি পরবর্তী প্রশ্নের জন্য রেডি! (I&apos;m Ready!)</span>
+              </>
+            )}
+          </motion.button>
+
           <p className="text-xs sm:text-sm text-slate-300 max-w-sm font-medium">
             কিছুক্ষণের মধ্যেই ৩-২-১ কাউন্টডাউন ও প্রশ্ন পর্দায় ভেসে উঠবে
           </p>
@@ -144,6 +188,12 @@ export default function LiveQuizPage() {
             <span>প্রশ্ন {currentQuestionIdx + 1} / {totalQuestions}</span>
             <span>•</span>
             <span>খেলোয়াড়: {playerCount} জন</span>
+            {readyCount > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-amber-400 font-bold">🔥 {readyCount} জন রেডি</span>
+              </>
+            )}
           </div>
         </motion.div>
       </div>
@@ -219,10 +269,17 @@ export default function LiveQuizPage() {
     );
   }
 
+  // Slide Category & Type classification
+  const qType = (currentQuestion?.type || currentQuestion?.questionType || "MCQ").toUpperCase();
+  const isContentSlide = qType === "TEXT_SLIDE" || qType === "IMAGE_COMPARE";
+  const isOpenEnded = qType === "OPEN_ENDED" || qType === "LIVE_QA";
+  const isWordCloud = qType === "WORD_CLOUD";
+  const isNonGraded = isContentSlide || isOpenEnded || isWordCloud;
+
   // ==========================================
   // STEPS 2, 3, 4 — QUESTION PREVIEW & ACTIVE GAMEPLAY
   // ==========================================
-  const isPreviewPhase = currentPhase === "QUESTION_PREVIEW" || previewSeconds > 0;
+  const isPreviewPhase = !isNonGraded && (currentPhase === "QUESTION_PREVIEW" || previewSeconds > 0);
   const isOptionsRevealed = !isPreviewPhase && (currentPhase === "QUESTION_ACTIVE" || currentPhase === "QUESTION_ENDED");
 
   return (
@@ -245,7 +302,7 @@ export default function LiveQuizPage() {
       <div className="flex items-center justify-between gap-4 bg-slate-950/60 p-3 rounded-2xl border border-slate-800/80 backdrop-blur-md">
         <div className="flex-1 space-y-1.5">
           <div className="flex justify-between items-end text-[10px] font-black uppercase tracking-widest px-1">
-            <span className="text-cyan-400">প্রশ্ন {currentQuestionIdx + 1} / {totalQuestions}</span>
+            <span className="text-cyan-400">স্লাইড {currentQuestionIdx + 1} / {totalQuestions}</span>
             <span className="text-slate-400">{Math.round(progress)}% সম্পন্ন</span>
           </div>
           <div className="h-2.5 w-full bg-slate-900 rounded-full border border-slate-800 overflow-hidden">
@@ -258,8 +315,25 @@ export default function LiveQuizPage() {
           </div>
         </div>
 
-        {/* Dynamic Timer Badge */}
-        {isPreviewPhase ? (
+        {/* Dynamic Timer Badge OR Non-Graded Badge */}
+        {isNonGraded ? (
+          isContentSlide ? (
+            <div className="shrink-0 px-3 py-2 rounded-2xl border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 flex items-center gap-1.5 shadow-sm">
+              <Eye className="w-4 h-4 text-indigo-400" />
+              <span className="text-[11px] font-bold">বোর্ড স্লাইড</span>
+            </div>
+          ) : isWordCloud ? (
+            <div className="shrink-0 px-3 py-2 rounded-2xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 flex items-center gap-1.5 shadow-sm">
+              <Cloud className="w-4 h-4 text-cyan-400" />
+              <span className="text-[11px] font-bold">ওয়ার্ড ক্লাউড</span>
+            </div>
+          ) : (
+            <div className="shrink-0 px-3 py-2 rounded-2xl border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-300 flex items-center gap-1.5 shadow-sm">
+              <MessageSquare className="w-4 h-4 text-fuchsia-400" />
+              <span className="text-[11px] font-bold">উন্মুক্ত আলোচনা</span>
+            </div>
+          )
+        ) : isPreviewPhase ? (
           <div className="shrink-0 px-3 py-2 rounded-2xl border-2 border-amber-500/60 bg-amber-500/10 text-amber-400 flex items-center gap-2 shadow-[0_0_18px_rgba(245,158,11,0.25)]">
             <Eye className="w-5 h-5 animate-pulse" />
             <div className="text-left font-mono">
@@ -270,23 +344,41 @@ export default function LiveQuizPage() {
         ) : (
           <motion.div 
             className={`shrink-0 w-16 h-16 rounded-2xl border-2 flex flex-col items-center justify-center font-mono font-black transition-colors ${
-              timeLeft <= 5 
+              allVoted
+                ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.4)]"
+                : timeLeft <= 5 
                 ? "bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_25px_rgba(244,63,94,0.5)]" 
                 : timeLeft <= 10
                 ? "bg-amber-500/15 border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
                 : "bg-slate-900 border-slate-800 text-cyan-400"
             }`}
-            animate={timeLeft <= 5 ? { scale: [1, 1.08, 1] } : {}}
+            animate={timeLeft <= 5 && !allVoted ? { scale: [1, 1.08, 1] } : {}}
             transition={{ repeat: Infinity, duration: 0.8 }}
           >
-            <span className="text-[9px] opacity-60 leading-none mb-1 font-sans font-bold">TIMER</span>
-            <span className="text-2xl leading-none">{timeLeft}</span>
+            <span className="text-[9px] opacity-60 leading-none mb-1 font-sans font-bold">
+              {allVoted ? "VOTED" : "TIMER"}
+            </span>
+            <span className="text-2xl leading-none">{allVoted ? 0 : timeLeft}</span>
           </motion.div>
         )}
       </div>
 
-      {/* QUESTION PREVIEW ALERT BANNER */}
-      {isPreviewPhase && (
+      {/* ALL VOTED ALERT BANNER */}
+      {allVoted && (
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-600/30 via-teal-600/30 to-emerald-600/30 border-2 border-emerald-400 text-emerald-200 flex items-center justify-center gap-2.5 shadow-[0_0_25px_rgba(16,185,129,0.35)] animate-bounce"
+        >
+          <Sparkles className="w-5 h-5 text-emerald-400" />
+          <span className="text-xs sm:text-sm font-black text-white">
+            🎉 সবাই উত্তর দিয়েছে! (All Voted!) — তাৎক্ষণিক ফলাফল প্রকাশিত হলো
+          </span>
+        </motion.div>
+      )}
+
+      {/* QUESTION PREVIEW ALERT BANNER (Graded Quiz Only) */}
+      {!isNonGraded && isPreviewPhase && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -308,7 +400,7 @@ export default function LiveQuizPage() {
       {/* DYNAMIC QUIZ PLATE WRAPPER */}
       <QuizPlate template={currentPlate}>
         <div className="space-y-6">
-          {/* Question Text */}
+          {/* Question or Slide Text */}
           <motion.div
             key={currentQuestion.id}
             initial={{ opacity: 0, y: 15 }}
@@ -318,7 +410,7 @@ export default function LiveQuizPage() {
           >
             <div className="flex items-center justify-between">
               <span className="px-2.5 py-1 rounded-lg bg-white/10 text-white border border-white/15 font-mono text-[10px] uppercase font-bold tracking-wider">
-                Question {currentQuestionIdx + 1}
+                {isNonGraded ? "Slide" : "Question"} {currentQuestionIdx + 1}
               </span>
               {currentPlate && (
                 <span className="text-[10px] text-cyan-400 font-mono font-bold">
@@ -328,7 +420,7 @@ export default function LiveQuizPage() {
             </div>
 
             <h3 className="text-xl sm:text-2xl font-black text-white leading-relaxed tracking-tight">
-              {currentQuestion.questionText}
+              {currentQuestion.questionText || currentQuestion.title}
             </h3>
           </motion.div>
 
@@ -340,22 +432,165 @@ export default function LiveQuizPage() {
             >
               <img 
                 src={currentQuestion.imageUrl} 
-                alt="Question diagram" 
+                alt="Diagram" 
                 className="object-contain w-full h-full max-h-64" 
                 referrerPolicy="no-referrer" 
               />
             </motion.div>
           )}
 
-          {/* STEP 2: PREVIEW MASKING VS STEP 3: OPTIONS REVEAL */}
-          {isPreviewPhase ? (
-            /* Options are masked and teaser shown */
+          {/* SLIDE TYPE SPECIFIC STUDENT VIEWS */}
+          {isContentSlide ? (
+            /* 1. TEXT_SLIDE or IMAGE_COMPARE: Board Watch & Live Emojis */
+            <div className="space-y-6 py-4 text-center">
+              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-3">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto text-3xl">
+                  👀
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-white">
+                  বোর্ডের দিকে লক্ষ্য করো
+                </h3>
+                <p className="text-sm text-slate-300 max-w-md mx-auto">
+                  শিক্ষক স্মার্টবোর্ড / প্রজেক্টরে স্লাইড কন্টেন্ট উপস্থাপন করছেন। আপনার অনুভূতি জানাতে নিচের ইমোজিগুলোতে ট্যাপ করুন!
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">লাইভ প্রতিক্রিয়া দিন:</p>
+                <div className="flex items-center justify-center gap-3">
+                  {[
+                    { icon: "❤️", label: "Heart" },
+                    { icon: "🔥", label: "Fire" },
+                    { icon: "👏", label: "Clap" },
+                    { icon: "🤔", label: "Thinking" },
+                    { icon: "💡", label: "Idea" },
+                    { icon: "🎉", label: "Celebrate" }
+                  ].map((emo) => (
+                    <motion.button
+                      key={emo.label}
+                      whileTap={{ scale: 1.4 }}
+                      onClick={() => emitLiveReaction(emo.label.toLowerCase())}
+                      className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-slate-900 border border-slate-700/80 hover:border-cyan-400 flex items-center justify-center text-2xl sm:text-3xl shadow-lg transition-transform cursor-pointer"
+                    >
+                      {emo.icon}
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : isWordCloud ? (
+            /* 2. WORD CLOUD INTERACTION */
+            <div className="space-y-5 py-2">
+              {!playerAnswered ? (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 text-xs font-medium">
+                    ☁️ ১ বা ২টি অর্থপূর্ণ সংক্ষিপ্ত শব্দ লিখুন যা প্রশ্নের উত্তর প্রকাশ করে।
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={25}
+                    value={wordInput}
+                    onChange={(e) => setWordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && wordInput.trim() && !isSubmitting) {
+                        handleSubmitAnswer(wordInput.trim());
+                      }
+                    }}
+                    placeholder="এখানে আপনার শব্দ লিখুন (যেমন: প্রোগ্রামিং)..."
+                    className="w-full px-5 py-4 rounded-2xl bg-slate-900 border-2 border-slate-700 text-white placeholder-slate-500 font-bold text-lg focus:outline-none focus:border-cyan-400 transition-colors"
+                  />
+                  <motion.button
+                    whileHover={wordInput.trim() && !isSubmitting ? { scale: 1.02 } : {}}
+                    whileTap={wordInput.trim() && !isSubmitting ? { scale: 0.98 } : {}}
+                    disabled={!wordInput.trim() || isSubmitting}
+                    onClick={() => {
+                      if (wordInput.trim()) handleSubmitAnswer(wordInput.trim());
+                    }}
+                    className="w-full h-14 rounded-2xl bg-linear-to-r from-cyan-500 to-blue-600 text-white font-black text-base flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Cloud className="w-5 h-5" />
+                        <span>☁️ ওয়ার্ড পাঠাও (Submit Word)</span>
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              ) : (
+                <div className="p-6 rounded-3xl bg-gradient-to-br from-indigo-950/60 via-purple-950/50 to-fuchsia-950/60 border-2 border-fuchsia-500/50 text-center space-y-3 shadow-2xl backdrop-blur-xl">
+                  <motion.div 
+                    animate={{ y: [0, -6, 0] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                    className="w-14 h-14 rounded-2xl bg-fuchsia-500/25 border border-fuchsia-400/50 text-fuchsia-300 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(217,70,239,0.4)]"
+                  >
+                    <Cloud className="w-8 h-8" />
+                  </motion.div>
+                  <h4 className="text-base font-black text-white">ওয়ার্ড ক্লাউডে পাঠানো হয়েছে!</h4>
+                  <motion.div 
+                    initial={{ scale: 0.8 }}
+                    animate={{ scale: 1 }}
+                    className="inline-block px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-fuchsia-500/20 text-fuchsia-300 font-black text-xl border border-fuchsia-400/50 shadow-[0_0_25px_rgba(217,70,239,0.3)]"
+                  >
+                    &ldquo;{selectedOption || wordInput}&rdquo;
+                  </motion.div>
+                  <p className="text-xs text-slate-300 font-medium">প্রজেক্টরের কালারফুল ওয়ার্ড ক্লাউডে আপনার শব্দটি ভেসে উঠেছে লক্ষ্য করুন</p>
+                </div>
+              )}
+            </div>
+          ) : isOpenEnded ? (
+            /* 3. OPEN ENDED / LIVE QA INTERACTION */
+            <div className="space-y-5 py-2">
+              {!playerAnswered ? (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-200 text-xs font-medium">
+                    💬 আপনার ভাবনা বা উত্তরের সংক্ষিপ্ত ব্যাখ্যা বিস্তারিতভাবে লিখে জমা দিন।
+                  </div>
+                  <textarea
+                    rows={3}
+                    maxLength={250}
+                    value={openEndedInput}
+                    onChange={(e) => setOpenEndedInput(e.target.value)}
+                    placeholder="এখানে আপনার মতামত বা উত্তর লিখুন..."
+                    className="w-full px-5 py-4 rounded-2xl bg-slate-900 border-2 border-slate-700 text-white placeholder-slate-500 font-medium text-base focus:outline-none focus:border-fuchsia-400 transition-colors resize-none"
+                  />
+                  <motion.button
+                    whileHover={openEndedInput.trim() && !isSubmitting ? { scale: 1.02 } : {}}
+                    whileTap={openEndedInput.trim() && !isSubmitting ? { scale: 0.98 } : {}}
+                    disabled={!openEndedInput.trim() || isSubmitting}
+                    onClick={() => {
+                      if (openEndedInput.trim()) handleSubmitAnswer(openEndedInput.trim());
+                    }}
+                    className="w-full h-14 rounded-2xl bg-linear-to-r from-fuchsia-500 to-purple-600 text-white font-black text-base flex items-center justify-center gap-2 shadow-lg shadow-fuchsia-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Send className="w-5 h-5" />
+                        <span>🚀 পাঠিয়ে দাও (Submit)</span>
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              ) : (
+                <div className="p-6 rounded-2xl bg-fuchsia-500/15 border-2 border-fuchsia-500/40 text-center space-y-2">
+                  <CheckCircle2 className="w-10 h-10 text-fuchsia-400 mx-auto" />
+                  <h4 className="text-base font-black text-white">আপনার মতামত পাঠানো হয়েছে!</h4>
+                  <p className="text-xs text-slate-300 max-w-sm mx-auto italic">&ldquo;{selectedOption || openEndedInput}&rdquo;</p>
+                  <p className="text-[11px] text-slate-400">শিক্ষক বোর্ডে আপনার কার্ড প্রদর্শন করতে পারেন</p>
+                </div>
+              )}
+            </div>
+          ) : isPreviewPhase ? (
+            /* 4. GRADED QUIZ: PREVIEW MASKING */
             <div className="space-y-3 py-4">
               <div className="p-5 rounded-2xl bg-slate-950/60 border border-dashed border-amber-500/30 text-center space-y-2">
                 <Lock className="w-8 h-8 text-amber-400 mx-auto animate-pulse" />
                 <h4 className="text-sm font-black text-white">উত্তর অপশনসমূহ গোপন রয়েছে</h4>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  প্রিভিউ শেষ হলে উত্তর দেওয়ার জন্য ৪টি অপশন ও মূল টাইমার একসঙ্গে চালু হবে।
+                  প্রিভিউ শেষ হলে উত্তর দেওয়ার জন্য ইন্টারঅ্যাকশন ও মূল টাইমার একসঙ্গে চালু হবে।
                 </p>
                 <div className="w-32 h-1.5 bg-amber-500/20 rounded-full mx-auto overflow-hidden mt-3">
                   <motion.div
@@ -378,60 +613,121 @@ export default function LiveQuizPage() {
               </div>
             </div>
           ) : (
-            /* OPTIONS REVEALED WITH STAGGERED ANIMATION */
-            <div className="grid grid-cols-1 gap-3">
-              <AnimatePresence mode="popLayout">
-                {currentQuestion.options?.map((option: string, idx: number) => {
-                  const isSelected = (localSelected !== null && String(localSelected) === String(idx)) || 
-                    (selectedOption !== "" && selectedOption !== null && selectedOption !== undefined && String(selectedOption) === String(idx));
-                  const isConfirmed = playerAnswered && 
-                    (String(selectedOption) === String(idx) || String(selectedOption).trim().toLowerCase() === String(option).trim().toLowerCase());
-                  
-                  return (
-                    <motion.button
-                      key={idx}
-                      initial={{ opacity: 0, x: -20, scale: 0.98 }}
-                      animate={{ opacity: 1, x: 0, scale: 1 }}
-                      transition={{ delay: idx * 0.08, duration: 0.25 }}
-                      disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
-                      onClick={() => handleSelect(idx)}
-                      className={`relative group w-full p-4 rounded-2xl border-2 text-left transition-all flex items-center gap-4 cursor-pointer overflow-hidden ${
-                        isConfirmed 
-                          ? "bg-cyan-500/20 border-cyan-500 text-white shadow-[0_0_25px_rgba(6,182,212,0.4)]" 
-                          : isSelected
-                          ? "bg-indigo-600/30 border-indigo-400 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-                          : "bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-mono font-black text-lg shrink-0 transition-colors ${
-                        isSelected || isConfirmed 
-                          ? "bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/30" 
-                          : "bg-slate-800 text-slate-400 group-hover:bg-slate-700 group-hover:text-white"
-                      }`}>
-                        {String.fromCharCode(65 + idx)}
-                      </div>
-
-                      <span className="font-bold text-sm sm:text-base flex-1 leading-snug">{option}</span>
+            /* 5. GRADED QUIZ: ALL 5 QUESTION TYPES RENDERED ACCORDING TO TYPE */
+            <div className="w-full">
+              {qType === "MATCHING" || qType === "FILL_BLANKS" || qType === "REORDER" || qType === "TRUE_FALSE" ? (
+                <UniversalQuizShowcaseEngine
+                  question={currentQuestion}
+                  selectedAnswer={localSelected ?? selectedOption}
+                  onSelectAnswer={(ans) => {
+                    setLocalSelected(ans);
+                    handleSelect(ans);
+                  }}
+                  onConfirmAnswer={(ans) => {
+                    setLocalSelected(ans);
+                    handleSubmitAnswer(ans);
+                  }}
+                  isConfirmed={playerAnswered}
+                  isCorrect={lastAnswerFeedback?.isCorrect}
+                  disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
+                />
+              ) : (
+                /* MCQ (20 Structural Archetypes / Responsive Interactive Options) */
+                <div className="grid grid-cols-1 gap-3">
+                  <AnimatePresence mode="popLayout">
+                    {currentQuestion.options?.map((option: string, idx: number) => {
+                      const isSelected = (localSelected !== null && String(localSelected) === String(idx)) || 
+                        (selectedOption !== "" && selectedOption !== null && selectedOption !== undefined && String(selectedOption) === String(idx));
+                      const isConfirmed = playerAnswered && 
+                        (String(selectedOption) === String(idx) || String(selectedOption).trim().toLowerCase() === String(option).trim().toLowerCase());
                       
-                      {isConfirmed && (
-                        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                          <CheckCircle2 className="w-6 h-6 text-cyan-400 shrink-0" />
-                        </motion.div>
-                      )}
+                      // Strict emerald green / rose red evaluation
+                      const isCorrectChoice = lastAnswerFeedback?.correctAnswer !== undefined && (
+                        String(lastAnswerFeedback.correctAnswer) === String(idx) ||
+                        String(lastAnswerFeedback.correctAnswer).trim().toLowerCase() === String(option).trim().toLowerCase()
+                      );
 
-                      {/* Tech Lines Decoration on confirmed */}
-                      {isConfirmed && (
-                        <div className="absolute top-0 right-0 h-full w-2 bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </AnimatePresence>
+                      let optionStyle = "bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900";
+                      let badgeStyle = "bg-slate-800 text-slate-400 group-hover:bg-slate-700 group-hover:text-white";
+
+                      if (playerAnswered) {
+                        if (lastAnswerFeedback?.isCorrect === true) {
+                          if (isConfirmed) {
+                            // Highlight ONLY the student's selected correct option in Emerald Green!
+                            optionStyle = "!bg-emerald-500/20 !border-emerald-500 !text-white shadow-[0_0_25px_rgba(16,185,129,0.4)]";
+                            badgeStyle = "!bg-emerald-500 !text-slate-950 font-black";
+                          } else {
+                            // Other options stay dimmed
+                            optionStyle = "opacity-35 bg-slate-950/40 border-slate-800/60 text-slate-500";
+                          }
+                        } else if (lastAnswerFeedback?.isCorrect === false) {
+                          if (isConfirmed) {
+                            // Highlight ONLY the student's selected wrong option in Rose Red!
+                            optionStyle = "!bg-rose-500/20 !border-rose-500 !text-white shadow-[0_0_25px_rgba(244,63,94,0.4)]";
+                            badgeStyle = "!bg-rose-500 !text-white font-black";
+                          } else if (isCorrectChoice) {
+                            // AND reveal the true correct answer in Emerald Green!
+                            optionStyle = "!bg-emerald-500/20 !border-emerald-500 !text-white shadow-[0_0_25px_rgba(16,185,129,0.4)] animate-pulse";
+                            badgeStyle = "!bg-emerald-500 !text-slate-950 font-black";
+                          } else {
+                            // Other unselected options stay neutral/dimmed
+                            optionStyle = "opacity-30 bg-slate-950/40 border-slate-800/40 text-slate-600";
+                          }
+                        } else {
+                          // Pending feedback
+                          if (isConfirmed) {
+                            optionStyle = "bg-cyan-500/20 border-cyan-500 text-white shadow-[0_0_25px_rgba(6,182,212,0.4)]";
+                            badgeStyle = "bg-cyan-400 text-slate-950 font-black";
+                          } else {
+                            optionStyle = "opacity-40 bg-slate-950/40 border-slate-800 text-slate-500";
+                          }
+                        }
+                      } else if (isSelected) {
+                        optionStyle = "bg-indigo-600/30 border-indigo-400 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]";
+                        badgeStyle = "bg-indigo-500 text-white";
+                      }
+
+                      return (
+                        <motion.button
+                          key={idx}
+                          initial={{ opacity: 0, x: -20, scale: 0.98 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          transition={{ delay: idx * 0.08, duration: 0.25 }}
+                          disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
+                          onClick={() => handleSelect(idx)}
+                          className={`relative group w-full p-4 rounded-2xl border-2 text-left transition-all flex items-center gap-4 cursor-pointer overflow-hidden ${optionStyle}`}
+                        >
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-mono font-black text-lg shrink-0 transition-colors ${badgeStyle}`}>
+                            {String.fromCharCode(65 + idx)}
+                          </div>
+
+                          <span className="font-bold text-sm sm:text-base flex-1 leading-snug">{option}</span>
+                          
+                          {playerAnswered && isConfirmed && lastAnswerFeedback?.isCorrect === true && (
+                            <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                          )}
+                          {playerAnswered && isConfirmed && lastAnswerFeedback?.isCorrect === false && (
+                            <XCircle className="w-6 h-6 text-rose-400 shrink-0" />
+                          )}
+                          {playerAnswered && !isConfirmed && isCorrectChoice && lastAnswerFeedback?.isCorrect === false && (
+                            <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                          )}
+
+                          {/* Tech Lines Decoration on confirmed */}
+                          {isConfirmed && (
+                            <div className="absolute top-0 right-0 h-full w-2 bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
+                          )}
+                        </motion.button>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
           )}
 
-          {/* SUBMISSION CONTROL PANEL */}
-          {!isPreviewPhase && (
+          {/* GRADED SUBMISSION CONTROL PANEL */}
+          {!isNonGraded && !isPreviewPhase && (
             <div className="pt-2">
               {!playerAnswered ? (
                 <motion.button
@@ -458,16 +754,44 @@ export default function LiveQuizPage() {
                   )}
                 </motion.button>
               ) : (
-                <div className="p-4 bg-emerald-500/15 border-2 border-emerald-500/40 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/25 flex items-center justify-center shrink-0 border border-emerald-400/40">
-                    <Check className="w-6 h-6 text-emerald-300" />
-                  </div>
-                  <div className="text-left">
-                    <h4 className="text-emerald-300 font-black text-sm">উত্তর সংরক্ষিত হয়েছে!</h4>
-                    <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-                      টাইমার শেষ হওয়া পর্যন্ত অপেক্ষা করুন
-                    </p>
-                  </div>
+                <div className="space-y-3">
+                  {lastAnswerFeedback?.isCorrect === true ? (
+                    <div className="p-4 bg-emerald-500/15 border-2 border-emerald-500/50 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/25 flex items-center justify-center shrink-0 border border-emerald-400/50">
+                        <Check className="w-6 h-6 text-emerald-300" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-emerald-300 font-black text-sm">সঠিক উত্তর! চমৎকার উত্তর দিয়েছেন!</h4>
+                        <p className="text-[10px] text-emerald-400/80 uppercase tracking-widest font-bold">
+                          +{lastAnswerFeedback.totalPoints ?? 100} পয়েন্ট অর্জিত হয়েছে
+                        </p>
+                      </div>
+                    </div>
+                  ) : lastAnswerFeedback?.isCorrect === false ? (
+                    <div className="p-4 bg-rose-500/15 border-2 border-rose-500/50 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(244,63,94,0.3)]">
+                      <div className="w-10 h-10 rounded-full bg-rose-500/25 flex items-center justify-center shrink-0 border border-rose-400/50">
+                        <AlertCircle className="w-6 h-6 text-rose-400" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-rose-300 font-black text-sm">ভুল উত্তর! সঠিক উত্তরটি সবুজ রঙে নির্দেশিত হয়েছে।</h4>
+                        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
+                          পরবর্তী প্রশ্নের জন্য প্রস্তুত হোন
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-cyan-500/15 border-2 border-cyan-500/40 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+                      <div className="w-10 h-10 rounded-full bg-cyan-500/25 flex items-center justify-center shrink-0 border border-cyan-400/40">
+                        <Check className="w-6 h-6 text-cyan-300" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-cyan-300 font-black text-sm">উত্তর সংরক্ষিত হয়েছে!</h4>
+                        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
+                          টাইমার শেষ হওয়া পর্যন্ত অপেক্ষা করুন
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

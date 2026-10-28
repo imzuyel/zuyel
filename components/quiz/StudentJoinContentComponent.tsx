@@ -24,9 +24,16 @@ import {
   Timer,
   Flame,
   X,
-  User
+  User,
+  Search,
+  ChevronDown,
+  Radio,
+  Lock,
+  ShieldCheck,
+  Zap
 } from "lucide-react";
-import SouthAsianStudentAvatar from "@/components/common/SouthAsianStudentAvatar";
+import SouthAsianStudentAvatar, { STUDENT_AVATAR_PRESETS, RenderStudentAvatar } from "@/components/common/SouthAsianStudentAvatar";
+import { motion, AnimatePresence } from "motion/react";
 import confetti from "canvas-confetti";
 import UniversalQuestionRenderer from "@/components/quiz/shared/UniversalQuestionRenderer";
 import UniversalQuizShowcaseEngine from "@/components/quiz/engine/UniversalQuizShowcaseEngine";
@@ -98,6 +105,21 @@ export function StudentJoinContentComponent() {
     durationMs: number;
   } | null>(null);
 
+  // Attendance-Linked States & Avatar Picker (Task 1)
+  const [attendanceEligibleStudents, setAttendanceEligibleStudents] = useState<any[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | number | undefined>(undefined);
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
+  const [isAttendanceDropdownOpen, setIsAttendanceDropdownOpen] = useState(false);
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
+  const [selectedAvatar, setSelectedAvatar] = useState<string>("sa_male_cyan");
+
+  // 3-Stage Flow & All-Voted Auto-Reveal States (Task 2, 3, 4)
+  const [currentPhase, setCurrentPhase] = useState<"LOBBY" | "READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED" | "COMPLETED">("LOBBY");
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(3);
+  const [previewSeconds, setPreviewSeconds] = useState<number>(3.5);
+  const [allVoted, setAllVoted] = useState<boolean>(false);
+  const [isPlayerReady, setIsPlayerReady] = useState<boolean>(false);
+
   // Pre-Quiz & Mentimeter Warmup States
   const [activePreQuiz, setActivePreQuiz] = useState<any | null>(null);
   const [isQuizModeStarted, setIsQuizModeStarted] = useState<boolean>(false);
@@ -152,6 +174,40 @@ export function StudentJoinContentComponent() {
     };
     fetchStudents();
   }, []);
+
+  // Fetch Attendance Eligibility based on session PIN / date (Task 1)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAttendance = async () => {
+      try {
+        setIsLoadingAttendance(true);
+        const codeParam = sessionCode ? `&sessionCode=${encodeURIComponent(sessionCode.trim())}` : "";
+        const res = await fetch(`/api/attendance?action=quiz_eligibility${codeParam}`).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          if (isMounted && data && data.success && Array.isArray(data.students)) {
+            setAttendanceEligibleStudents(data.students);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load attendance eligibility:", err);
+      } finally {
+        if (isMounted) setIsLoadingAttendance(false);
+      }
+    };
+
+    fetchAttendance();
+  }, [sessionCode]);
+
+  // Local timer tick for Countdown and Preview phase (Task 3)
+  useEffect(() => {
+    if (!joined) return;
+    const interval = setInterval(() => {
+      setCountdownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      setPreviewSeconds((prev) => (prev > 0 ? Math.max(0, Number((prev - 0.5).toFixed(1))) : 0));
+    }, 500);
+    return () => clearInterval(interval);
+  }, [joined]);
 
   // Polling reference
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -247,12 +303,36 @@ export function StudentJoinContentComponent() {
             }
           }
 
+          if (data.phase) {
+            setCurrentPhase(data.phase);
+          }
+          if (data.countdownSeconds !== undefined) {
+            setCountdownSeconds(data.countdownSeconds);
+          }
+          if (data.previewSeconds !== undefined) {
+            setPreviewSeconds(data.previewSeconds);
+          }
+          if (data.allVoted !== undefined) {
+            setAllVoted(Boolean(data.allVoted));
+          }
+          if (data.allVoted) {
+            setTimeLeft(0);
+            if (data.correctAnswer !== undefined) {
+              setPlayerEvaluation((prev: any) => prev || {
+                isCorrect: selectedOption !== "" ? String(selectedOption) === String(data.correctAnswer) : false,
+                correctAnswer: data.correctAnswer
+              });
+            }
+          }
+
           if (data.currentQuestionIndex !== undefined) {
             if (data.currentQuestionIndex !== currentQuestionIdx) {
               setCurrentQuestionIdx(data.currentQuestionIndex);
               setPlayerAnswered(false);
               setSelectedOption("");
               setPlayerEvaluation(null);
+              setAllVoted(false);
+              setIsPlayerReady(false);
             }
           }
 
@@ -285,8 +365,8 @@ export function StudentJoinContentComponent() {
             setPlayerAnswered(data.playerAnswered);
           }
 
-          // Timer sync
-          if (data.timeLeft !== undefined) {
+          // Timer sync - only tick down during QUESTION_ACTIVE if not all voted
+          if (data.timeLeft !== undefined && !data.allVoted && (data.phase === "QUESTION_ACTIVE" || !data.phase)) {
             setTimeLeft(data.timeLeft);
           }
 
@@ -331,6 +411,26 @@ export function StudentJoinContentComponent() {
     };
   }, [joined, activeSession, participantId, networkStatus, currentQuestionIdx]);
 
+  // Handle Ready State
+  const handleSetReady = async () => {
+    if (!activeSession || !participantId) return;
+    try {
+      setIsPlayerReady(true);
+      await fetch(`/api/live-quizzes/sessions/${activeSession.id}/ready`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerId: participantId,
+          isReady: true,
+          studentName: displayName,
+          avatar: selectedAvatar,
+        })
+      });
+    } catch (e) {
+      console.warn("Failed to set ready:", e);
+    }
+  };
+
   // Handle Joining Quiz via PIN
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -353,6 +453,8 @@ export function StudentJoinContentComponent() {
         body: JSON.stringify({
           sessionCode: sessionCode.trim(),
           displayName: displayName.trim(),
+          studentId: selectedStudentId ? String(selectedStudentId) : undefined,
+          avatar: selectedAvatar,
           role: "student"
         })
       }).catch(() => null);
@@ -610,60 +712,200 @@ export function StudentJoinContentComponent() {
                   </div>
                 </div>
 
-                {/* 2. Student Name & Roll Field */}
-                <div className="space-y-2.5">
+                {/* 2. Attendance-Linked Student Dropdown & Manual Input (Task 1) */}
+                <div className="space-y-3">
                   <div className="flex items-center justify-between px-1">
                     <label className="text-xs sm:text-sm font-black text-purple-300 uppercase tracking-wider flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
                       <Users className="w-4 h-4 text-purple-400" />
-                      <span>আপনার নাম বা রোল নম্বর (Your Name/Roll)</span>
+                      <span>📋 আজকের উপস্থিত তালিকা থেকে নাম নির্বাচন</span>
                     </label>
-                    {registeredStudents.length > 0 && (
-                      <span className="text-[11px] text-purple-300 font-bold px-2 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30">
-                        {registeredStudents.length} জন রেজিস্টার্ড
-                      </span>
-                    )}
+                    <span className="text-[11px] text-emerald-300 font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      <span>{attendanceEligibleStudents.length > 0 ? `${attendanceEligibleStudents.length} জন উপস্থিত` : "হাজিরা তালিকা"}</span>
+                    </span>
                   </div>
-                  
-                  {registeredStudents.length > 0 && (
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          const st = registeredStudents.find(s => String(s.id) === e.target.value || s.studentId === e.target.value);
-                          if (st) {
-                            setDisplayName(`${st.name} (রোল: ${st.roll})`);
-                          }
-                        }
-                      }}
-                      className="w-full h-12 bg-slate-950 border-2 border-indigo-500/50 rounded-xl px-4 text-xs sm:text-sm text-cyan-200 focus:outline-none focus:border-cyan-400 font-bold mb-1.5 cursor-pointer hover:border-indigo-400 transition-all shadow-inner"
-                    >
-                      <option value="" className="bg-slate-900 text-slate-300">
-                        -- রেজিস্টার্ড স্টুডেন্ট সিলেক্ট করুন (ঐচ্ছিক) --
-                      </option>
-                      {registeredStudents.map((s) => (
-                        <option key={s.id} value={s.id} className="bg-slate-900 text-white">
-                          {s.name} - রোল: {s.roll} ({s.studentId})
-                        </option>
-                      ))}
-                    </select>
-                  )}
 
-                  <div className="relative group/name focus-within:shadow-[0_0_25px_rgba(168,85,247,0.4)] rounded-2xl transition-all">
-                    <input
-                      type="text"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder="যেমন: রাশেদুল ইসলাম (রোল ১০)"
-                      className="w-full h-14 sm:h-16 bg-slate-950 border-2 border-slate-700/80 rounded-2xl px-5 text-base text-white placeholder:text-slate-400 placeholder:font-medium focus:outline-none focus:border-purple-400 transition-all font-bold"
-                      required
-                    />
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-purple-400/70 pointer-events-none">
-                      <Users className="w-5 h-5" />
+                  {/* Smart Searchable Attendance Dropdown */}
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsAttendanceDropdownOpen(!isAttendanceDropdownOpen)}
+                        className="w-full min-h-[48px] bg-slate-950 border-2 border-indigo-500/50 hover:border-indigo-400 rounded-2xl px-4 py-2.5 text-left text-xs sm:text-sm text-cyan-200 font-bold flex items-center justify-between gap-2 shadow-inner transition-all cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          {selectedStudentId ? (
+                            <span className="text-emerald-300 font-black flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                              <span>{displayName}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">
+                              -- আজকের উপস্থিত তালিকা থেকে তোমার নাম সিলেক্ট করো --
+                            </span>
+                          )}
+                        </div>
+                        <ChevronDown className={`w-4 h-4 text-cyan-400 shrink-0 transition-transform ${isAttendanceDropdownOpen ? "rotate-180" : ""}`} />
+                      </button>
+
+                      {/* Dropdown Options Popup */}
+                      {isAttendanceDropdownOpen && (
+                        <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-slate-900 border-2 border-indigo-500/60 rounded-2xl shadow-2xl p-2.5 space-y-2 backdrop-blur-2xl max-h-72 flex flex-col">
+                          {/* Search Filter Input */}
+                          <div className="relative shrink-0">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              value={attendanceSearchQuery}
+                              onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                              placeholder="নাম বা রোল নম্বর দিয়ে ফিল্টার করো..."
+                              className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 font-medium"
+                            />
+                          </div>
+
+                          {/* Student List */}
+                          <div className="overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-slate-700">
+                            {(() => {
+                              const sourceList = attendanceEligibleStudents.length > 0 ? attendanceEligibleStudents : registeredStudents;
+                              const filtered = sourceList.filter((s: any) => {
+                                const q = attendanceSearchQuery.trim().toLowerCase();
+                                if (!q) return true;
+                                const n = (s.name || s.nameBangla || "").toLowerCase();
+                                const r = String(s.roll || s.studentId || "").toLowerCase();
+                                return n.includes(q) || r.includes(q);
+                              });
+
+                              if (filtered.length === 0) {
+                                return (
+                                  <div className="p-3 text-center text-xs text-slate-400">
+                                    কোনো শিক্ষার্থী পাওয়া যায়নি। নিচে ম্যানুয়ালি নাম লিখুন।
+                                  </div>
+                                );
+                              }
+
+                              return filtered.map((st: any) => {
+                                const isPresent = st.statusCode === "P" || st.attendanceStatus?.includes("Present") || st.attendanceStatus?.includes("উপস্থিত");
+                                const isLate = st.statusCode === "L" || st.attendanceStatus?.includes("Late") || st.attendanceStatus?.includes("বিলম্বে");
+                                const isSelected = String(selectedStudentId) === String(st.id);
+
+                                return (
+                                  <button
+                                    key={st.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedStudentId(st.id);
+                                      setDisplayName(`${st.name || st.nameBangla} (রোল: ${st.roll})`);
+                                      setIsAttendanceDropdownOpen(false);
+                                    }}
+                                    className={`w-full text-left p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                                      isSelected
+                                        ? "bg-cyan-500/20 border-cyan-400 text-white shadow-md shadow-cyan-500/20"
+                                        : "bg-slate-950/70 hover:bg-slate-800 border-slate-800 text-slate-200"
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="font-bold text-xs sm:text-sm text-white truncate">
+                                        {st.name || st.nameBangla}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400 font-mono">
+                                        রোল: <strong className="text-cyan-300">{st.roll}</strong> {st.trade ? `• ${st.trade}` : ""}
+                                      </div>
+                                    </div>
+                                    <div className="shrink-0 flex items-center gap-1.5">
+                                      {isPresent ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[10px] font-black flex items-center gap-1">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                          <span>🟢 আজ উপস্থিত</span>
+                                        </span>
+                                      ) : isLate ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-[10px] font-black flex items-center gap-1">
+                                          <span>🟡 বিলম্বে উপস্থিত</span>
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-semibold">
+                                          📋 ক্লাসের শিক্ষার্থী
+                                        </span>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              });
+                            })()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Manual Override Text Input */}
+                    <div className="relative group/name focus-within:shadow-[0_0_25px_rgba(168,85,247,0.4)] rounded-2xl transition-all">
+                      <input
+                        type="text"
+                        value={displayName}
+                        onChange={(e) => {
+                          setDisplayName(e.target.value);
+                          setSelectedStudentId(undefined);
+                        }}
+                        placeholder="অথবা সরাসরি নাম ও রোল লিখুন (যেমন: আরিয়ান খান, রোল ১০)"
+                        className="w-full h-13 sm:h-14 bg-slate-950 border-2 border-slate-700/80 rounded-2xl px-5 text-sm sm:text-base text-white placeholder:text-slate-500 dark:text-slate-400 placeholder:font-medium focus:outline-none focus:border-purple-400 transition-all font-bold"
+                        required
+                      />
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 text-purple-400/70 pointer-events-none">
+                        <Users className="w-5 h-5" />
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 3. Action Button */}
+                {/* 3. Avatar & Icon Grid Picker (Task 1.2) */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-xs sm:text-sm font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-400" />
+                      <span>🎨 তোমার অ্যাভাটার পছন্দ করো (Avatar & Icon Grid)</span>
+                    </label>
+                    <span className="text-[11px] font-bold text-amber-300 font-mono bg-amber-400/10 px-2.5 py-0.5 rounded-full border border-amber-400/30 flex items-center gap-1.5">
+                      <span>নির্বাচিত:</span>
+                      <strong className="text-white">{STUDENT_AVATAR_PRESETS.find(p => p.id === selectedAvatar)?.name || selectedAvatar}</strong>
+                    </span>
+                  </div>
+
+                  {/* Multi-Row Avatar Selection Grid */}
+                  <div className="p-3 bg-slate-950/80 border-2 border-slate-800 rounded-2xl">
+                    <div className="grid grid-cols-5 sm:grid-cols-7 gap-2 max-h-48 overflow-y-auto pr-1 select-none scrollbar-thin scrollbar-thumb-slate-700">
+                      {STUDENT_AVATAR_PRESETS.map((preset) => {
+                        const isSel = selectedAvatar === preset.id;
+                        return (
+                          <motion.button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => setSelectedAvatar(preset.id)}
+                            whileHover={{ scale: 1.12 }}
+                            whileTap={{ scale: 0.92 }}
+                            className={`relative p-2 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                              isSel
+                                ? "bg-amber-400/20 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)] ring-2 ring-amber-300/60 scale-105"
+                                : "bg-slate-900 border-slate-800 hover:border-slate-700 hover:bg-slate-800/80 text-white"
+                            }`}
+                            title={preset.name}
+                          >
+                            <RenderStudentAvatar avatar={preset.id} size="sm" animate={false} />
+                            <span className="text-[9px] font-bold text-slate-300 truncate max-w-full block">
+                              {preset.name}
+                            </span>
+                            {isSel && (
+                              <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-400 rounded-full flex items-center justify-center shadow-md">
+                                <Check className="w-2.5 h-2.5 text-slate-950 stroke-[3]" />
+                              </div>
+                            )}
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Action Button */}
                 <button
                   type="submit"
                   disabled={loading}
@@ -672,11 +914,12 @@ export function StudentJoinContentComponent() {
                   {loading ? (
                     <>
                       <Loader2 className="w-6 h-6 animate-spin text-slate-950" />
-                      <span>কুইজে যুক্ত হচ্ছে...</span>
+                      <span>লাইভে যুক্ত হচ্ছে...</span>
                     </>
                   ) : (
                     <>
-                      <span>কুইজে প্রবেশ করুন (Join Live)</span>
+                      <Flame className="w-5 h-5 text-amber-950 fill-amber-900" />
+                      <span>🚀 লাইভে যুক্ত হও (Join Live)</span>
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1.5 transition-transform" />
                     </>
                   )}
@@ -693,24 +936,122 @@ export function StudentJoinContentComponent() {
         ) : (
           /* ==================== ACTIVE SESSION VIEWS ==================== */
           (() => {
-            if (sessionStatus === "QUESTION_ACTIVE" && currentQuestion) {
+            // ==================== STAGE A: READY CHECK STAGE ====================
+            if (currentPhase === "READY") {
+              return (
+                <div className="bg-slate-900/95 border-2 border-amber-500/40 rounded-3xl p-6 sm:p-8 text-center space-y-6 shadow-2xl backdrop-blur-xl">
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-black uppercase tracking-wider">
+                    <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span>⚡ রেডি চেক: পরবর্তী প্রশ্নের প্রস্তুতি</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h2 className="text-2xl sm:text-3xl font-black text-white">
+                      প্রশ্ন {currentQuestionIdx + 1} আসছে!
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
+                      তুমি প্রস্তুত থাকলে নিচের বাটনে ক্লিক করো। শিক্ষক লাইভ কুইজ লঞ্চ করবেন।
+                    </p>
+                  </div>
+
+                  {/* Ready Toggle Button */}
+                  <div className="pt-2">
+                    {!isPlayerReady ? (
+                      <motion.button
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={handleSetReady}
+                        className="w-full max-w-sm mx-auto h-16 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-base sm:text-lg shadow-[0_0_30px_rgba(245,158,11,0.5)] flex items-center justify-center gap-3 cursor-pointer"
+                      >
+                        <span className="text-2xl">🙋‍♂️</span>
+                        <span>আমি রেডি! (I&apos;m Ready!)</span>
+                      </motion.button>
+                    ) : (
+                      <div className="p-4 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 text-emerald-300 max-w-sm mx-auto space-y-1 shadow-lg shadow-emerald-500/20">
+                        <div className="flex items-center justify-center gap-2 font-black text-sm">
+                          <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                          <span>✅ আপনি রেডি হয়েছেন!</span>
+                        </div>
+                        <p className="text-[11px] text-emerald-200/80">
+                          শিক্ষক কুইজ শুরু করার অপেক্ষা...
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-center gap-4 text-xs text-slate-400 font-mono pt-2">
+                    <span>প্রশ্ন {currentQuestionIdx + 1} / {totalQuestions || "?"}</span>
+                    <span>•</span>
+                    <span>মোট প্রতিযোগী: {playerCount} জন</span>
+                  </div>
+                </div>
+              );
+            }
+
+            // ==================== STAGE B: COUNTDOWN (3-2-1 GO!) ====================
+            if (currentPhase === "COUNTDOWN" || countdownSeconds > 0) {
+              const displayVal = countdownSeconds > 0 ? countdownSeconds : "GO!";
+              return (
+                <div className="bg-slate-900/95 border-2 border-cyan-500/40 rounded-3xl p-8 sm:p-12 text-center space-y-6 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-400 text-cyan-300 text-xs font-black uppercase tracking-wider">
+                    <Radio className="w-4 h-4 text-cyan-400 animate-ping" />
+                    <span>ধাপ ১: ৩-২-১ কাউন্টডাউন</span>
+                  </div>
+
+                  <div className="relative w-36 h-36 mx-auto flex items-center justify-center">
+                    <div className="absolute inset-0 rounded-full border-4 border-dashed border-cyan-400/50 animate-spin" style={{ animationDuration: "3s" }} />
+                    <motion.span
+                      key={displayVal}
+                      initial={{ scale: 0.3, opacity: 0 }}
+                      animate={{ scale: [1.4, 1], opacity: 1 }}
+                      transition={{ duration: 0.4 }}
+                      className="font-mono text-7xl font-black text-cyan-400 drop-shadow-[0_0_30px_rgba(6,182,212,0.8)]"
+                    >
+                      {displayVal}
+                    </motion.span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-xl font-black text-white">প্রশ্ন {currentQuestionIdx + 1} আসছে — প্রস্তুত হোন!</h3>
+                    <p className="text-xs text-slate-400">কাউন্টডাউন শেষে ৩.৫ সেকেন্ড প্রশ্ন প্রিভিউ চলবে।</p>
+                  </div>
+                </div>
+              );
+            }
+
+            // ==================== STAGE C & D: QUESTION ACTIVE / PREVIEW ====================
+            if ((sessionStatus === "QUESTION_ACTIVE" || currentPhase === "QUESTION_PREVIEW" || currentPhase === "QUESTION_ACTIVE") && currentQuestion) {
+              const isPreview = currentPhase === "QUESTION_PREVIEW" || previewSeconds > 0;
+
               const renderQuestionContent = () => (
                 <div className="space-y-5">
-                  {/* Top Bar: Question Number & Timer */}
+                  {/* Top Bar: Question Number & Timer & All-Voted Alert */}
                   <div className="flex items-center justify-between pb-3 border-b border-white/5">
                     <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-extrabold text-xs">
                       প্রশ্ন {currentQuestionIdx + 1} / {totalQuestions || "?"}
                     </span>
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 font-mono font-bold text-xs">
-                      <Timer className="w-3.5 h-3.5 animate-pulse" />
-                      <span>{timeLeft}s</span>
-                    </div>
+
+                    {allVoted ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-black text-xs animate-bounce shadow-md shadow-emerald-500/30">
+                        <span>🎉 সবাই উত্তর দিয়েছে! (All Voted!)</span>
+                      </div>
+                    ) : isPreview ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 font-mono font-bold text-xs">
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                        <span>প্রিভিউ: {previewSeconds.toFixed(1)}s</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 font-mono font-bold text-xs">
+                        <Timer className="w-3.5 h-3.5 animate-pulse" />
+                        <span>{timeLeft}s</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Question Text */}
                   <div className="space-y-2">
-                    <h3 className="text-lg font-black text-white leading-relaxed">
-                      {currentQuestion.questionText}
+                    <h3 className="text-xl sm:text-2xl font-black text-white leading-relaxed">
+                      {currentQuestion.questionText || currentQuestion.question}
                     </h3>
                     {currentQuestion.imageUrl && (
                       <div className="rounded-xl overflow-hidden border border-slate-800 max-h-48 flex items-center justify-center bg-slate-950">
@@ -719,58 +1060,105 @@ export function StudentJoinContentComponent() {
                     )}
                   </div>
 
-                  {/* OPTIONS RENDERING WITH UNIVERSAL QUIZ SHOWCASE ENGINE */}
-                  <div className="space-y-3 pt-2">
-                    <UniversalQuizShowcaseEngine
-                      question={currentQuestion}
-                      questionIndex={currentQuestionIdx}
-                      totalQuestions={totalQuestions}
-                      selectedAnswer={selectedOption}
-                      onSelectAnswer={(ans) => setSelectedOption(ans)}
-                      isConfirmed={playerAnswered}
-                      isCorrect={playerEvaluation ? playerEvaluation.isCorrect : undefined}
-                      disabled={playerAnswered || isSubmitting}
-                      showProofBadge={true}
-                      autoRandomize={true}
-                    />
-                  </div>
-
-                  {/* SUBMIT BUTTON */}
-                  {!playerAnswered ? (
-                    <button
-                      disabled={selectedOption === "" || isSubmitting}
-                      onClick={handleSubmitAnswer}
-                      className="w-full h-12 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 mt-2"
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                          <span>উত্তর জমা হচ্ছে...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-4 h-4" />
-                          <span>উত্তর লক করুন (Submit Answer)</span>
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-center space-y-1">
-                      <div className="inline-flex items-center gap-1.5 text-emerald-400 font-black text-xs">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>উত্তর সফলভাবে জমা হয়েছে!</span>
+                  {/* STAGE 2: QUESTION PREVIEW ONLY (Options masked with animated progress bar) */}
+                  {isPreview ? (
+                    <div className="space-y-4 py-4">
+                      <div className="p-5 rounded-2xl bg-amber-500/10 border border-dashed border-amber-400/40 text-center space-y-2">
+                        <Lock className="w-7 h-7 text-amber-400 mx-auto animate-pulse" />
+                        <h4 className="text-sm font-black text-white">📖 প্রশ্নটি মনোযোগ দিয়ে পড়ো...</h4>
+                        <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                          ৩.৫ সেকেন্ড পর উত্তর অপশনসমূহ উন্মোচিত হবে এবং মূল টাইমার শুরু হবে।
+                        </p>
+                        <div className="w-full max-w-xs h-2 bg-slate-800 rounded-full mx-auto overflow-hidden mt-3">
+                          <motion.div
+                            className="h-full bg-gradient-to-r from-amber-400 to-orange-500"
+                            initial={{ width: "100%" }}
+                            animate={{ width: "0%" }}
+                            transition={{ duration: 3.5, ease: "linear" }}
+                          />
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-400">
-                        শিক্ষক প্রশ্ন শেষ করা পর্যন্ত অপেক্ষা করুন। পরবর্তী প্রশ্নের জন্য প্রস্তুত থাকুন।
-                      </p>
-                      {playerEvaluation && (
-                        <div className={`mt-2 p-2 rounded-xl text-xs font-bold ${
-                          playerEvaluation.isCorrect ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"
-                        }`}>
-                          {playerEvaluation.isCorrect ? `✨ সঠিক! +${playerEvaluation.pointsEarned} পয়েন্ট` : "❌ ভুল উত্তর!"}
+
+                      {/* Shimmer Placeholder outlines */}
+                      <div className="grid grid-cols-1 gap-2.5 opacity-30 pointer-events-none">
+                        {[1, 2, 3, 4].map((i) => (
+                          <div key={i} className="h-12 rounded-xl bg-slate-800 border border-slate-700 animate-pulse flex items-center px-4 gap-3">
+                            <div className="w-5 h-5 rounded-md bg-slate-700" />
+                            <div className="w-40 h-3 rounded bg-slate-700" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    /* STAGE 3: OPTIONS RENDERING WITH UNIVERSAL QUIZ SHOWCASE ENGINE */
+                    <>
+                      <div className="space-y-3 pt-2">
+                        <UniversalQuizShowcaseEngine
+                          question={currentQuestion}
+                          questionIndex={currentQuestionIdx}
+                          totalQuestions={totalQuestions}
+                          selectedAnswer={selectedOption}
+                          onSelectAnswer={(ans) => setSelectedOption(ans)}
+                          isConfirmed={playerAnswered}
+                          isCorrect={playerEvaluation ? playerEvaluation.isCorrect : undefined}
+                          disabled={playerAnswered || isSubmitting || allVoted}
+                          showProofBadge={true}
+                          autoRandomize={true}
+                        />
+                      </div>
+
+                      {/* SUBMIT BUTTON */}
+                      {!playerAnswered && !allVoted ? (
+                        <button
+                          disabled={selectedOption === "" || isSubmitting}
+                          onClick={handleSubmitAnswer}
+                          className="w-full h-13 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 mt-3"
+                        >
+                          {isSubmitting ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                              <span>উত্তর জমা হচ্ছে...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span>উত্তর নিশ্চিত করুন (Submit Answer)</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl text-center space-y-2 mt-2">
+                          <div className="inline-flex items-center gap-1.5 text-emerald-400 font-black text-xs">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>উত্তর সফলভাবে জমা হয়েছে!</span>
+                          </div>
+
+                          {/* Instant Feedback / Auto-Reveal Banner */}
+                          {playerEvaluation && (
+                            <div className={`p-3 rounded-xl text-xs font-black ${
+                              playerEvaluation.isCorrect
+                                ? "bg-emerald-500/20 border border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/20"
+                                : "bg-rose-500/20 border border-rose-500 text-rose-300 shadow-md shadow-rose-500/20"
+                            }`}>
+                              {playerEvaluation.isCorrect ? (
+                                <div className="space-y-1">
+                                  <div>🎉 অসাধারণ! উত্তরটি সঠিক হয়েছে (+১০০ পয়েন্ট)</div>
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <div>❌ দুঃখিত, উত্তরটি ভুল হয়েছে!</div>
+                                  {playerEvaluation.correctAnswer !== undefined && (
+                                    <div className="text-emerald-300 font-bold">
+                                      সঠিক উত্তর: {String(playerEvaluation.correctAnswer)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
+                    </>
                   )}
 
                   {/* Live Stats Bar */}

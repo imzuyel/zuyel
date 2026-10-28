@@ -33,8 +33,15 @@ export class AnswerEvaluator {
   ): { isCorrect: boolean | null; isManual: boolean } {
     const qType = String(questionType).toLowerCase();
 
-    // 1. Poll type questions have no correct/incorrect answer
-    if (qType === "poll") {
+    // 1. Poll and interactive presentation slides have no correct/incorrect answer
+    if (
+      qType === "poll" ||
+      qType === "word_cloud" ||
+      qType === "open_ended" ||
+      qType === "live_qa" ||
+      qType === "text_slide" ||
+      qType === "image_compare"
+    ) {
       return { isCorrect: null, isManual: false };
     }
 

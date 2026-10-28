@@ -3,6 +3,8 @@ import { institutionalDb, LiveAnswer } from "@/lib/database";
 import { getSessionQuestions } from "@/lib/liveQuizHelper";
 import { ScoringService, LeaderboardService } from "@/lib/scoringService";
 import { SecurityService } from "@/lib/reconnectService";
+import { MOTIVATION_MESSAGES } from "@/lib/motivationMessages";
+import { sendSmsGateway } from "@/lib/smsGatewayEngine";
 
 export async function POST(
   req: NextRequest,
@@ -214,14 +216,148 @@ export async function POST(
       }
     }
 
+    // 11. Milestone SMS Check & Auto-Dispatch (Task 2)
+    let smsDispatched: { sent: boolean; type: "FUNNY_MOTIVATION" | "PRAISE"; studentName: string } | null = null;
+    const autoSmsMilestone = (session as any).autoSmsMilestone || (session as any).settings?.autoSmsMilestone || "off";
+
+    if (autoSmsMilestone !== "off" && autoSmsMilestone !== "end_quiz") {
+      const intervalNum = autoSmsMilestone === "every_3" ? 3 : autoSmsMilestone === "every_5" ? 5 : autoSmsMilestone === "every_10" ? 10 : 0;
+      if (intervalNum > 0) {
+        const studentGradedAnswers = institutionalDb.liveAnswers.filter(
+          a => a.sessionId === id && a.playerId === playerId && a.isCorrect !== null
+        );
+        const answeredGradedCount = studentGradedAnswers.length;
+
+        if (answeredGradedCount > 0 && answeredGradedCount % intervalNum === 0) {
+          if (!(session as any).sentMilestones) {
+            (session as any).sentMilestones = [];
+          }
+          const milestoneKey = `${playerId}_q${answeredGradedCount}`;
+          if (!(session as any).sentMilestones.includes(milestoneKey)) {
+            (session as any).sentMilestones.push(milestoneKey);
+
+            const correctCount = studentGradedAnswers.filter(a => a.isCorrect === true).length;
+            const accuracyPct = Math.round((correctCount / answeredGradedCount) * 100);
+
+            const smsFunnyMode = (session as any).smsFunnyMode ?? true;
+            const smsPraiseMode = (session as any).smsPraiseMode ?? true;
+
+            let msgText = "";
+            let msgType: "FUNNY_MOTIVATION" | "PRAISE" | null = null;
+
+            if (accuracyPct < 50 && smsFunnyMode) {
+              msgType = "FUNNY_MOTIVATION";
+              const customTpl = (session as any).customFunnyTemplate;
+              if (customTpl && customTpl.trim()) {
+                msgText = customTpl.replace("{student_name}", participant.displayName).replace("{accuracy}", `${accuracyPct}%`);
+              } else {
+                const pool = [...MOTIVATION_MESSAGES.LOW, ...MOTIVATION_MESSAGES.FAILED];
+                const randomPick = pool[Math.floor(Math.random() * pool.length)];
+                msgText = `[PTSC কুইজ] ${participant.displayName}, ${randomPick}`;
+              }
+            } else if (accuracyPct >= 80 && smsPraiseMode) {
+              msgType = "PRAISE";
+              const customTpl = (session as any).customPraiseTemplate;
+              if (customTpl && customTpl.trim()) {
+                msgText = customTpl.replace("{student_name}", participant.displayName).replace("{accuracy}", `${accuracyPct}%`);
+              } else {
+                const pool = MOTIVATION_MESSAGES.EXCELLENT;
+                const randomPick = pool[Math.floor(Math.random() * pool.length)];
+                msgText = `[PTSC কুইজ] অসাধারণ ${participant.displayName}! ${randomPick}`;
+              }
+            }
+
+            if (msgText && msgType) {
+              const targetPhone = participant.phone || "01700000000";
+              const recipientType = (session as any).smsRecipient || "both";
+              sendSmsGateway(
+                targetPhone,
+                msgText,
+                "custom",
+                participant.displayName,
+                recipientType === "guardian" ? `${participant.displayName}-এর অভিভাবক` : participant.displayName
+              ).catch(() => {});
+
+              smsDispatched = {
+                sent: true,
+                type: msgType,
+                studentName: participant.displayName
+              };
+              (session as any).lastSmsDispatched = smsDispatched;
+            }
+          }
+        }
+      }
+    }
+
+    // 12. "All Voted!" Check — Stop timer and Auto-Reveal if all active players submitted
+    const activeParticipants = institutionalDb.liveParticipants.filter(
+      p => p.sessionId === id && p.status === "JOINED"
+    );
+    const answersForCurrentQ = institutionalDb.liveAnswers.filter(
+      a => a.sessionId === id && a.questionId === questionId
+    );
+    const allVoted = activeParticipants.length > 0 && answersForCurrentQ.length >= activeParticipants.length;
+
+    if (allVoted) {
+      (session as any).allVoted = true;
+      (session as any).isAnswerRevealed = true;
+      (session as any).questionEndsAt = new Date().toISOString(); // Freeze timer immediately!
+    }
+
     return NextResponse.json({
       success: true,
       message: "উত্তর সফলভাবে সাবমিট করা হয়েছে ও লক করা হয়েছে।",
-      answerId: newAnswer.id
+      answerId: newAnswer.id,
+      isCorrect: evaluation.isCorrect,
+      correctAnswer: activeQuestion.correctAnswer,
+      totalPoints: evaluation.totalPoints,
+      allVoted: Boolean((session as any).allVoted),
+      isAnswerRevealed: Boolean((session as any).isAnswerRevealed),
+      submittedCount: answersForCurrentQ.length,
+      totalPlayers: activeParticipants.length,
+      smsDispatched
     });
   } catch (error: any) {
     return NextResponse.json(
       { success: false, message: error.message || "Failed to submit answer" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: sessionId } = await params;
+    const { searchParams } = new URL(req.url);
+    const questionId = searchParams.get("questionId");
+
+    let answers = institutionalDb.liveAnswers.filter(a => a.sessionId === sessionId);
+    if (questionId) {
+      answers = answers.filter(a => a.questionId === questionId);
+    }
+
+    const enrichedAnswers = answers.map(a => {
+      const p = institutionalDb.liveParticipants.find(part => part.id === a.playerId);
+      return {
+        ...a,
+        studentName: p?.displayName || "শিক্ষার্থী",
+        avatar: (p as any)?.avatar || "🎓",
+        response: typeof a.answerPayload === "string" ? a.answerPayload : JSON.stringify(a.answerPayload),
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      answers: enrichedAnswers,
+      totalCount: enrichedAnswers.length
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, message: err.message || "Failed to fetch answers" },
       { status: 500 }
     );
   }

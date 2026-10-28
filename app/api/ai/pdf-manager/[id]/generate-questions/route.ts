@@ -13,22 +13,32 @@ export async function POST(
 
     const {
       pages: selectedPages, // Array of page numbers, e.g. [1, 2, 3]
+      fromPage,
+      toPage,
       topic,
+      chapter,
       count = 5,
       difficulty = "medium",
       language = "Bangla",
       questionType = "mcq_single",
+      questionTypes,
+      includeWarmup = false,
       additionalInstructions = "",
     } = body;
 
     const result = await PdfDocumentService.generateQuestionsFromDocument({
       documentId: id,
+      fromPage: fromPage !== undefined ? Number(fromPage) : undefined,
+      toPage: toPage !== undefined ? Number(toPage) : undefined,
       selectedPages,
-      topic: topic || "সাধারণ কারিগরি জ্ঞান",
+      topic: topic || chapter || "সাধারণ কারিগরি জ্ঞান",
+      chapter,
       count: Number(count) || 5,
       difficulty,
       language,
       questionType,
+      questionTypes,
+      includeWarmup: !!includeWarmup,
       additionalInstructions,
     });
 

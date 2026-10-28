@@ -23,6 +23,19 @@ export async function GET(
   }
 }
 
+const CONTENT_INTERACTIVE_TYPES = new Set([
+  "TEXT_SLIDE",
+  "IMAGE_COMPARE",
+  "OPEN_ENDED",
+  "WORD_CLOUD",
+  "LIVE_QA",
+]);
+
+const isGradedType = (t: string) => {
+  const norm = (t || "").toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
+  return !CONTENT_INTERACTIVE_TYPES.has(norm);
+};
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -47,19 +60,22 @@ export async function POST(
         (qq) => qq.quizId === quizId
       ).length;
 
+      const qType = (qbQuestion.type || "MCQ").toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
+      const graded = isGradedType(qType);
+
       const newQuizQuestion: QuizQuestion = {
         id: `qq-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         quizId,
         questionBankId: qbQuestion.id,
-        questionType: qbQuestion.type,
+        questionType: qType,
         questionSnapshot: {
           questionText: qbQuestion.questionText,
-          questionData: JSON.parse(JSON.stringify(qbQuestion.questionData)),
+          questionData: JSON.parse(JSON.stringify(qbQuestion.questionData || {})),
           explanation: qbQuestion.explanation || "",
         },
         orderIndex: existingCount,
-        marks: Number(body.marks) || 2,
-        timeLimit: Number(body.timeLimit) || 60,
+        marks: graded ? (Number(body.marks) || 100) : 0,
+        timeLimit: graded ? (Number(body.timeLimit) || 30) : 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -73,24 +89,64 @@ export async function POST(
       });
     }
 
-    // Creating new inline question for quiz
+    // Creating new inline question/slide for quiz
     const existingCount = institutionalDb.quizQuestions.filter(
       (qq) => qq.quizId === quizId
     ).length;
+
+    const rawType = body.questionType || body.type || "MCQ";
+    const qType = rawType.toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
+    const graded = isGradedType(qType);
+
+    const imageLeftUrl = body.imageLeftUrl || body.leftImage || body.questionData?.imageLeftUrl;
+    const imageRightUrl = body.imageRightUrl || body.rightImage || body.questionData?.imageRightUrl;
+    const bulletPoints = Array.isArray(body.bulletPoints) ? body.bulletPoints : body.questionData?.bulletPoints;
+    const maxWordsPerStudent = Number(body.maxWordsPerStudent) || body.questionData?.maxWordsPerStudent;
+
+    const marks = graded ? (Number(body.marks) || 100) : 0;
+    const timeLimit = graded ? (Number(body.timeLimit) || 30) : 0;
+
+    const fullQuestionData = {
+      options: body.options || body.questionData?.options || (graded ? ["অপশন ১", "অপশন ২"] : []),
+      correctIndex: body.correctIndex ?? body.correctAnswer ?? 0,
+      correctAnswer: body.correctAnswer ?? 0,
+      pairs: body.pairs || body.matchingPairs || body.questionData?.pairs,
+      items: body.items || body.reorderSequence || body.questionData?.items,
+      acceptedAnswers: body.acceptedAnswers || (body.blankAnswer ? [body.blankAnswer] : body.questionData?.acceptedAnswers),
+      imageLeftUrl,
+      imageRightUrl,
+      bulletPoints,
+      maxWordsPerStudent,
+      marks,
+      timeLimit,
+      explanation: body.explanation || "",
+      metadata: {
+        imageLeftUrl,
+        imageRightUrl,
+        bulletPoints,
+        maxWordsPerStudent,
+        ...(body.metadata || {}),
+      },
+      ...(body.questionData || {}),
+    };
 
     const newQuizQuestion: QuizQuestion = {
       id: `qq-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       quizId,
       questionBankId: body.saveToQuestionBank ? `qb-${Date.now()}` : "",
-      questionType: body.type || "mcq_single",
+      questionType: qType,
       questionSnapshot: {
-        questionText: body.questionText || "Untitled Question",
-        questionData: body.questionData || { options: ["Option 1", "Option 2"], correctIndex: 0 },
+        questionText: body.questionText || body.title || "Untitled Slide",
+        questionData: fullQuestionData,
         explanation: body.explanation || "",
+        imageLeftUrl,
+        imageRightUrl,
+        bulletPoints,
+        maxWordsPerStudent,
       },
       orderIndex: existingCount,
-      marks: Number(body.marks) || 2,
-      timeLimit: Number(body.timeLimit) || 60,
+      marks,
+      timeLimit,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -152,11 +208,14 @@ export async function PUT(
     // Insert updated questions
     const createdQuestions: QuizQuestion[] = [];
     questions.forEach((q: any, idx: number) => {
-      const qType = q.questionType || q.type || "mcq_single";
-      const questionText = q.questionText || q.question || `প্রশ্ন ${idx + 1}`;
+      const rawType = q.questionType || q.type || "MCQ";
+      const qType = rawType.toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
+      const graded = isGradedType(qType);
+
+      const questionText = q.questionText || q.question || q.title || `স্লাইড ${idx + 1}`;
       const optionsList = Array.isArray(q.options)
         ? q.options
-        : q.questionData?.options || ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"];
+        : q.questionData?.options || (graded ? ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"] : []);
       const correctIndex = typeof q.correctAnswer === "number"
         ? q.correctAnswer
         : typeof q.correctIndex === "number"
@@ -170,18 +229,27 @@ export async function PUT(
         : q.questionData?.correctIndices;
       const pairs = Array.isArray(q.pairs)
         ? q.pairs
-        : q.questionData?.pairs;
+        : q.matchingPairs || q.questionData?.pairs;
       const items = Array.isArray(q.items)
         ? q.items
-        : q.questionData?.items;
+        : q.reorderSequence || q.questionData?.items;
       const acceptedAnswers = Array.isArray(q.acceptedAnswers)
         ? q.acceptedAnswers
+        : q.blankAnswer
+        ? [q.blankAnswer]
         : q.questionData?.acceptedAnswers;
       const expectedAnswerKeyword = q.expectedAnswerKeyword || q.questionData?.expectedAnswerKeyword;
       const caseSensitive = q.caseSensitive ?? q.questionData?.caseSensitive;
       const explanation = q.explanation || q.questionData?.explanation || "";
-      const marks = Number(q.marks) || Number(quiz.defaultMarks) || 2;
-      const timeLimit = Number(q.timeLimit) || Number(quiz.defaultQuestionTime) || 30;
+
+      const imageLeftUrl = q.imageLeftUrl || q.leftImage || q.questionData?.imageLeftUrl || q.questionData?.leftImage;
+      const imageRightUrl = q.imageRightUrl || q.rightImage || q.questionData?.imageRightUrl || q.questionData?.rightImage;
+      const bulletPoints = Array.isArray(q.bulletPoints) ? q.bulletPoints : q.questionData?.bulletPoints;
+      const maxWordsPerStudent = Number(q.maxWordsPerStudent) || q.questionData?.maxWordsPerStudent;
+
+      // Strict Timer & Marks Enforcement: Content/Interactive MUST be 0
+      const marks = graded ? (Number(q.marks) || Number(q.points) || Number(quiz.defaultMarks) || 100) : 0;
+      const timeLimit = graded ? (Number(q.timeLimit) || Number(quiz.defaultQuestionTime) || 30) : 0;
 
       const fullQuestionData = {
         options: optionsList,
@@ -196,7 +264,18 @@ export async function PUT(
         explanation,
         marks,
         timeLimit,
-        ...(q.questionData || {})
+        imageLeftUrl,
+        imageRightUrl,
+        bulletPoints,
+        maxWordsPerStudent,
+        metadata: {
+          imageLeftUrl,
+          imageRightUrl,
+          bulletPoints,
+          maxWordsPerStudent,
+          ...(q.metadata || {}),
+        },
+        ...(q.questionData || {}),
       };
 
       const newQQ: QuizQuestion = {
@@ -217,7 +296,11 @@ export async function PUT(
           expectedAnswerKeyword,
           caseSensitive,
           explanation,
-          questionData: fullQuestionData
+          imageLeftUrl,
+          imageRightUrl,
+          bulletPoints,
+          maxWordsPerStudent,
+          questionData: fullQuestionData,
         },
         orderIndex: idx,
         marks,

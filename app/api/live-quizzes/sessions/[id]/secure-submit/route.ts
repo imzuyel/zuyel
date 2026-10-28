@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, LiveAnswer, LiveParticipant } from "@/lib/database";
 import { QuizSecurityEngine } from "@/lib/quizSecurityEngine";
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
+import { MOTIVATION_MESSAGES } from "@/lib/motivationMessages";
+import { sendSmsGateway } from "@/lib/smsGatewayEngine";
 
 // ==========================================
 // RATE LIMITING & SUBMISSION THROTTLING
@@ -318,9 +320,102 @@ export async function POST(
       }
     }
 
+    // Milestone SMS Check & Auto-Dispatch (Task 2)
+    let smsDispatched: { sent: boolean; type: "FUNNY_MOTIVATION" | "PRAISE"; studentName: string } | null = null;
+    const sessionObj = institutionalDb.liveSessions.find(s => s.id === sessionId);
+    const autoSmsMilestone = (sessionObj as any)?.autoSmsMilestone || (sessionObj as any)?.settings?.autoSmsMilestone || "off";
+
+    if (autoSmsMilestone !== "off" && autoSmsMilestone !== "end_quiz") {
+      const intervalNum = autoSmsMilestone === "every_3" ? 3 : autoSmsMilestone === "every_5" ? 5 : autoSmsMilestone === "every_10" ? 10 : 0;
+      if (intervalNum > 0) {
+        const studentGradedAnswers = institutionalDb.liveAnswers.filter(
+          a => a.sessionId === sessionId && a.playerId === playerId && a.isCorrect !== null
+        );
+        const answeredGradedCount = studentGradedAnswers.length;
+
+        if (answeredGradedCount > 0 && answeredGradedCount % intervalNum === 0) {
+          if (!(sessionObj as any).sentMilestones) {
+            (sessionObj as any).sentMilestones = [];
+          }
+          const milestoneKey = `${playerId}_q${answeredGradedCount}`;
+          if (!(sessionObj as any).sentMilestones.includes(milestoneKey)) {
+            (sessionObj as any).sentMilestones.push(milestoneKey);
+
+            const correctCount = studentGradedAnswers.filter(a => a.isCorrect === true).length;
+            const accuracyPct = Math.round((correctCount / answeredGradedCount) * 100);
+
+            const smsFunnyMode = (sessionObj as any).smsFunnyMode ?? true;
+            const smsPraiseMode = (sessionObj as any).smsPraiseMode ?? true;
+
+            let msgText = "";
+            let msgType: "FUNNY_MOTIVATION" | "PRAISE" | null = null;
+
+            if (accuracyPct < 50 && smsFunnyMode) {
+              msgType = "FUNNY_MOTIVATION";
+              const customTpl = (sessionObj as any).customFunnyTemplate;
+              if (customTpl && customTpl.trim()) {
+                msgText = customTpl.replace("{student_name}", participant.displayName).replace("{accuracy}", `${accuracyPct}%`);
+              } else {
+                const pool = [...MOTIVATION_MESSAGES.LOW, ...MOTIVATION_MESSAGES.FAILED];
+                const randomPick = pool[Math.floor(Math.random() * pool.length)];
+                msgText = `[PTSC কুইজ] ${participant.displayName}, ${randomPick}`;
+              }
+            } else if (accuracyPct >= 80 && smsPraiseMode) {
+              msgType = "PRAISE";
+              const customTpl = (sessionObj as any).customPraiseTemplate;
+              if (customTpl && customTpl.trim()) {
+                msgText = customTpl.replace("{student_name}", participant.displayName).replace("{accuracy}", `${accuracyPct}%`);
+              } else {
+                const pool = MOTIVATION_MESSAGES.EXCELLENT;
+                const randomPick = pool[Math.floor(Math.random() * pool.length)];
+                msgText = `[PTSC কুইজ] অসাধারণ ${participant.displayName}! ${randomPick}`;
+              }
+            }
+
+            if (msgText && msgType) {
+              const targetPhone = participant.phone || "01700000000";
+              const recipientType = (sessionObj as any).smsRecipient || "both";
+              sendSmsGateway(
+                targetPhone,
+                msgText,
+                "custom",
+                participant.displayName,
+                recipientType === "guardian" ? `${participant.displayName}-এর অভিভাবক` : participant.displayName
+              ).catch(() => {});
+
+              smsDispatched = {
+                sent: true,
+                type: msgType,
+                studentName: participant.displayName
+              };
+              if (sessionObj) {
+                (sessionObj as any).lastSmsDispatched = smsDispatched;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // "All Voted!" Check — Stop timer and Auto-Reveal if all active players submitted
+    const activeParticipants = institutionalDb.liveParticipants.filter(
+      p => p.sessionId === sessionId && p.status === "JOINED"
+    );
+    const answersForCurrentQ = institutionalDb.liveAnswers.filter(
+      a => a.sessionId === sessionId && a.questionId === questionId
+    );
+    const allVoted = activeParticipants.length > 0 && answersForCurrentQ.length >= activeParticipants.length;
+
+    if (allVoted && sessionObj) {
+      (sessionObj as any).allVoted = true;
+      (sessionObj as any).isAnswerRevealed = true;
+      (sessionObj as any).questionEndsAt = new Date().toISOString(); // Freeze timer immediately!
+    }
+
     return NextResponse.json({
       success: true,
       isCorrect: evaluation.isCorrect,
+      correctAnswer: activeQuestion.correctAnswer ?? (activeQuestion as any).questionData?.correctAnswer,
       basePoints: evaluation.basePoints,
       speedBonus: evaluation.speedBonus,
       streakBonus: evaluation.streakBonus,
@@ -332,7 +427,12 @@ export async function POST(
       securityNotice: evaluation.securityNotice,
       totalScore: participant.totalScore,
       rank: participant.rank,
+      allVoted: Boolean((sessionObj as any)?.allVoted),
+      isAnswerRevealed: Boolean((sessionObj as any)?.isAnswerRevealed),
+      submittedCount: answersForCurrentQ.length,
+      totalPlayers: activeParticipants.length,
       source: isPrismaAvailable() ? "mysql" : "in-memory",
+      smsDispatched
     });
   } catch (error: any) {
     return NextResponse.json(

@@ -32,6 +32,11 @@ interface QuizSessionState {
   activeMotivation: any | null;
   activePreQuizActivity?: any;
   preQuizResponseSubmitted?: boolean;
+  lastAnswerFeedback?: { isCorrect?: boolean | null; correctAnswer?: any; totalPoints?: number } | null;
+  allVoted?: boolean;
+  isReady?: boolean;
+  readyPlayers?: any[];
+  readyCount?: number;
 }
 
 interface QuizSessionContextType extends QuizSessionState {
@@ -48,6 +53,7 @@ interface QuizSessionContextType extends QuizSessionState {
   setErrorMessage: (msg: string | null) => void;
   setActiveMotivation: (msg: any | null) => void;
   handlePreQuizResponse?: (res: any) => Promise<void>;
+  handleSetReady?: () => Promise<void>;
 }
 
 const QuizSessionContext = createContext<QuizSessionContextType | undefined>(undefined);
@@ -89,6 +95,11 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
   const [isQuizModeStarted, setIsQuizModeStarted] = useState<boolean>(false);
   const [activePreQuizActivity, setActivePreQuizActivity] = useState<any | null>(null);
   const [preQuizResponseSubmitted, setPreQuizResponseSubmitted] = useState<boolean>(false);
+  const [lastAnswerFeedback, setLastAnswerFeedback] = useState<{ isCorrect?: boolean | null; correctAnswer?: any; totalPoints?: number } | null>(null);
+  const [allVoted, setAllVoted] = useState<boolean>(false);
+  const [isReady, setIsReady] = useState<boolean>(false);
+  const [readyPlayers, setReadyPlayers] = useState<any[]>([]);
+  const [readyCount, setReadyCount] = useState<number>(0);
 
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const localTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -281,10 +292,26 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
               if (prev !== nextIdx) {
                 setPlayerAnswered(false);
                 setSelectedOption("");
+                setLastAnswerFeedback(null);
+                setAllVoted(false);
+                setIsReady(false);
                 return nextIdx;
               }
               return prev;
             });
+          }
+
+          if (data.allVoted !== undefined) setAllVoted(Boolean(data.allVoted));
+          if (data.readyPlayers) setReadyPlayers(data.readyPlayers);
+          if (data.readyCount !== undefined) setReadyCount(data.readyCount);
+          if (data.allVoted) {
+            setTimeLeft(0);
+            if (data.correctAnswer !== undefined) {
+              setLastAnswerFeedback((prev) => prev || {
+                correctAnswer: data.correctAnswer,
+                isCorrect: selectedOption !== "" ? String(selectedOption) === String(data.correctAnswer) : false
+              });
+            }
           }
 
           if (data.currentQuestion) setCurrentQuestion(data.currentQuestion);
@@ -433,6 +460,13 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
 
       if (data.success) {
         setPlayerAnswered(true);
+        if (data.isCorrect !== undefined || data.correctAnswer !== undefined) {
+          setLastAnswerFeedback({
+            isCorrect: data.isCorrect,
+            correctAnswer: data.correctAnswer,
+            totalPoints: data.totalPoints
+          });
+        }
       } else {
         setErrorMessage(data.message || data.error || "উত্তর জমা দিতে সমস্যা হয়েছে।");
       }
@@ -450,6 +484,7 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     });
     setPlayerAnswered(false);
     setSelectedOption("");
+    setLastAnswerFeedback(null);
 
     // 2. Server synchronization if active live session is running
     if (activeSession?.id) {
@@ -477,6 +512,7 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     setCurrentQuestionIdx((prev) => Math.max(0, prev - 1));
     setPlayerAnswered(false);
     setSelectedOption("");
+    setLastAnswerFeedback(null);
   }, []);
 
   const handleLeave = () => {
@@ -488,16 +524,35 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     router.push("/quiz/join");
   };
 
+  const handleSetReady = async () => {
+    if (!activeSession || !participantId) return;
+    try {
+      setIsReady(true);
+      await fetch(`/api/live-quizzes/sessions/${activeSession.id}/ready`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerId: participantId,
+          isReady: true,
+          studentName: displayName,
+        })
+      });
+    } catch (e) {
+      console.warn("Failed to set ready state:", e);
+    }
+  };
+
   const value = {
     joined, loading, networkStatus, errorMessage, activeSession, quizDetails,
     playerToken, participantId, sessionStatus, isQuizModeStarted, activePreQuizActivity, preQuizResponseSubmitted,
+    lastAnswerFeedback, allVoted, isReady, readyPlayers, readyCount,
     currentPhase, countdownSeconds, previewSeconds, canSubmitAnswer, currentPlate,
     currentQuestion, currentQuestionIdx,
     totalQuestions, playerAnswered, timeLeft, selectedOption, isSubmitting,
     answeredCount, playerCount, studentStats, registeredStudents, activeMotivation,
     sessionCode, setSessionCode, displayName, setDisplayName,
     handleJoin, handleSubmitAnswer, handleNextQuestion, handlePreviousQuestion, setCurrentQuestionIdx,
-    handlePreQuizResponse, handleLeave, setErrorMessage, setActiveMotivation
+    handlePreQuizResponse, handleSetReady, handleLeave, setErrorMessage, setActiveMotivation
   };
 
   return (

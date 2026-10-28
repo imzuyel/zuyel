@@ -703,16 +703,47 @@ Improvement instruction:
    * Safe server-side validation and healing of question data structure
    */
   static validateQuestion(q: any, expectedType: string = "mcq_single"): any {
-    let type = q.type;
-    if (!type) {
-      const exp = expectedType || "mcq_single";
-      type = exp.includes(",") ? exp.split(",")[0].trim() : exp;
+    let rawType = (q.type || "").toLowerCase().trim();
+    if (!rawType) {
+      const exp = (expectedType || "mcq_single").toLowerCase();
+      rawType = exp.includes(",") ? exp.split(",")[0].trim() : exp;
     }
-    const questionText = q.questionText || "Untitled Question";
+
+    // Normalize type aliases
+    let type = rawType;
+    if (rawType === "mcq" || rawType === "mcq_single") type = "mcq_single";
+    else if (rawType === "fill_blanks" || rawType === "fill_blank" || rawType === "blanks") type = "fill_blank";
+    else if (rawType === "reorder" || rawType === "ordering" || rawType === "sequence") type = "ordering";
+    else if (rawType === "matching" || rawType === "pairs") type = "matching";
+    else if (rawType === "true_false" || rawType === "tf" || rawType === "truefalse") type = "true_false";
+
+    const questionText = q.questionText || q.question || q.title || "Untitled Question";
     const explanation = q.explanation || "No explanation provided.";
     const difficulty = ["easy", "medium", "hard"].includes(q.difficulty) ? q.difficulty : "medium";
     const tags = Array.isArray(q.tags) ? q.tags : [];
-    let questionData = q.questionData || {};
+    let questionData = { ...(q.questionData || {}) };
+
+    // Heal top-level properties if model put them outside questionData
+    if (Array.isArray(q.options) && !questionData.options) {
+      questionData.options = q.options;
+    }
+    if (q.correctIndex !== undefined && questionData.correctIndex === undefined) {
+      questionData.correctIndex = q.correctIndex;
+    }
+    if (q.correctAnswer !== undefined && questionData.correctAnswer === undefined) {
+      questionData.correctAnswer = q.correctAnswer;
+    }
+    if (Array.isArray(q.pairs || q.matchingPairs) && !questionData.pairs) {
+      questionData.pairs = q.pairs || q.matchingPairs;
+    }
+    if (Array.isArray(q.items || q.reorderSequence) && !questionData.items) {
+      questionData.items = q.items || q.reorderSequence;
+    }
+    if (Array.isArray(q.acceptedAnswers) && !questionData.acceptedAnswers) {
+      questionData.acceptedAnswers = q.acceptedAnswers;
+    } else if (q.blankAnswer && !questionData.acceptedAnswers) {
+      questionData.acceptedAnswers = [q.blankAnswer];
+    }
 
     // Validate type specific rules using modular QuestionTypeRegistry
     const registryDef = QuestionTypeRegistry[type];

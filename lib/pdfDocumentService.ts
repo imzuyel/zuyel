@@ -854,12 +854,17 @@ export class PdfDocumentService {
    */
   static async generateQuestionsFromDocument(params: {
     documentId: string;
+    fromPage?: number;
+    toPage?: number;
     selectedPages?: number[];
     topic: string;
+    chapter?: string;
     count?: number;
     difficulty?: "easy" | "medium" | "hard" | "mixed";
     language?: "Bangla" | "English";
     questionType?: string;
+    questionTypes?: string[];
+    includeWarmup?: boolean;
     additionalInstructions?: string;
     userId?: number;
   }): Promise<{
@@ -870,12 +875,17 @@ export class PdfDocumentService {
   }> {
     const {
       documentId,
+      fromPage,
+      toPage,
       selectedPages,
       topic,
+      chapter,
       count = 5,
       difficulty = "medium",
       language = "Bangla",
       questionType = "mcq_single",
+      questionTypes,
+      includeWarmup = false,
       additionalInstructions = "",
       userId = 1,
     } = params;
@@ -885,30 +895,94 @@ export class PdfDocumentService {
       throw new Error("ডকুমেন্টটি পাওয়া যায়নি।");
     }
 
-    if (!topic || !topic.trim()) {
-      throw new Error("প্রশ্ন তৈরির বিষয়বস্তু বা টপিক নির্ধারণ করা আবশ্যক।");
+    const effectiveTopic = topic && topic.trim() ? topic.trim() : (chapter || doc.topic || doc.title);
+
+    // Compute target page numbers from fromPage/toPage or selectedPages
+    let targetPageNumbers: number[] = [];
+    if (fromPage !== undefined && toPage !== undefined) {
+      const start = Math.max(1, Number(fromPage));
+      const end = Math.max(start, Number(toPage));
+      for (let p = start; p <= end; p++) {
+        targetPageNumbers.push(p);
+      }
+    } else if (Array.isArray(selectedPages) && selectedPages.length > 0) {
+      targetPageNumbers = selectedPages;
     }
 
     const allPages = await this.getPages(documentId);
-    if (allPages.length === 0) {
-      throw new Error("এই ডকুমেন্টে কোনো প্রসেস করা পৃষ্ঠা পাওয়া যায়নি।");
+    let validPages = allPages;
+
+    if (targetPageNumbers.length > 0) {
+      validPages = allPages.filter((p) => targetPageNumbers.includes(p.pageNumber));
     }
 
-    let targetPages = allPages;
-    if (Array.isArray(selectedPages) && selectedPages.length > 0) {
-      targetPages = allPages.filter((p) => selectedPages.includes(p.pageNumber));
-    }
-
-    const validPages = targetPages.filter(
-      (p) => p.extractionStatus === "completed" && p.extractedText.trim().length > 0
+    validPages = validPages.filter(
+      (p) => p.extractedText && p.extractedText.trim().length > 0
     );
 
+    // If no valid pages in page table, try chunks for this document
     if (validPages.length === 0) {
-      throw new Error("নির্বাচিত কোনো পৃষ্ঠায় পাঠযোগ্য টেক্সট পাওয়া যায়নি। স্ক্যানড ডকুমেন্টের ক্ষেত্রে OCR প্রয়োজন।");
+      const chunks = await this.getChunks(documentId);
+      if (chunks.length > 0) {
+        let selectedChunks = chunks;
+        if (targetPageNumbers.length > 0) {
+          const filtered = chunks.filter((c) =>
+            targetPageNumbers.some((p) => p >= (c.startPage || 1) && p <= (c.endPage || 999))
+          );
+          if (filtered.length > 0) {
+            selectedChunks = filtered;
+          }
+        }
+
+        validPages = selectedChunks.map((c, idx) => ({
+          id: `chunk-page-${c.id || idx}`,
+          documentId,
+          pageNumber: c.startPage || (idx + 1),
+          extractedText: c.chunkText,
+          isScanned: false,
+          extractionStatus: "completed" as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }));
+      }
+    }
+
+    // Smart Page-Range Fallback: If pages are empty or unreadable (<30 chars, scanned/OCR missing),
+    // automatically fall back to generating using Book Title + Trade + Topic/Chapter without failing!
+    const hasReadableContent = validPages.some(
+      (p) => p.extractedText && p.extractedText.trim().length > 30
+    );
+
+    if (!hasReadableContent || validPages.length === 0) {
+      const fallbackExcerpts = [
+        `পাঠ্যবই: ${doc.title}`,
+        `ট্রেড/বিষয়: ${doc.tradeName || "কারিগরি ও ভোকেশনাল শাখা"}`,
+        `টপিক: ${effectiveTopic}`,
+        `অধ্যায়: ${chapter || doc.chapter || "মূল অধ্যায়"}`,
+        `কারিকুলাম বিবরণ: ${doc.description || "বাংলাদেশ কারিগরি শিক্ষা বোর্ড (BTEB) ভোকেশনাল শিক্ষাক্রম"}`,
+        `নির্দেশনা: এই পাঠ্যবই ও অধ্যায়ের কারিকুলাম মানদণ্ড অনুযায়ী বাস্তবমুখী টেকনিক্যাল প্রশ্নাবলি তৈরি করুন।`
+      ].join("\n");
+
+      validPages = [
+        {
+          id: `doc-meta-${documentId}`,
+          documentId,
+          pageNumber: fromPage || 1,
+          extractedText: fallbackExcerpts,
+          isScanned: false,
+          extractionStatus: "completed" as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
     }
 
     const jobId = `job-${Date.now()}`;
     const nowStr = new Date().toISOString();
+
+    const effectiveQType = questionTypes && questionTypes.length > 0
+      ? questionTypes.join(",")
+      : questionType;
 
     const job: AIGenerationJob & { documentId?: string; groundedPagesJson?: string } = {
       id: jobId,
@@ -916,16 +990,16 @@ export class PdfDocumentService {
       userId,
       subjectId: doc.subjectId || 1,
       classId: doc.classId || 4,
-      topic: topic.trim(),
-      chapter: doc.chapter || "",
+      topic: effectiveTopic,
+      chapter: chapter || doc.chapter || "",
       lesson: "",
-      learningObjective: `Grounded generation from ${doc.title}`,
+      learningObjective: `Grounded generation from ${doc.title} (Pages: ${targetPageNumbers.length > 0 ? targetPageNumbers.join(", ") : "All"})`,
       language,
       difficulty,
-      questionType,
+      questionType: effectiveQType,
       questionCount: count,
       groundedPagesJson: JSON.stringify(validPages.map((p) => p.pageNumber)),
-      provider: "Google Gemini (PTSC Failover)",
+      provider: "Multi-Model AI Failover (Gemini / Groq / OpenRouter)",
       model: process.env.AI_MODEL || "gemini-3.8-flash",
       status: "processing",
       createdAt: nowStr,
@@ -937,14 +1011,23 @@ export class PdfDocumentService {
       text: p.extractedText,
     }));
 
+    // Build comprehensive instructions with Chapter & Warmup instructions
+    let enrichedInstructions = additionalInstructions || "";
+    if (chapter) {
+      enrichedInstructions = `অধ্যায় / নির্দেশনা: "${chapter}". ${enrichedInstructions}`.trim();
+    }
+    if (includeWarmup) {
+      enrichedInstructions = `শুরুতে ১-২টি ইন্টারেক্টিভ ওয়ার্মআপ স্লাইড (Word Cloud বা Open Ended) যুক্ত করুন। ${enrichedInstructions}`.trim();
+    }
+
     const generated = await AIService.generateQuestionsFromPdf({
       pdfPages: pdfPagesInput,
-      topic: topic.trim(),
-      questionType,
-      count,
+      topic: effectiveTopic,
+      questionType: effectiveQType,
+      count: Number(count) || 5,
       difficulty,
       language,
-      additionalInstructions,
+      additionalInstructions: enrichedInstructions,
     });
 
     const questionsToSave: AIGeneratedQuestion[] = generated.map((q, idx) => ({

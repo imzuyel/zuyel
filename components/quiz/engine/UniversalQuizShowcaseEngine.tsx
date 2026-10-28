@@ -472,13 +472,17 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
       resolvedOptions = snap.options.map((o: any) =>
         typeof o === "string" ? o : o.text || String(o)
       );
+    } else if (Array.isArray(question.items) && question.items.length > 0) {
+      resolvedOptions = question.items;
+    } else if (Array.isArray(snap.items) && snap.items.length > 0) {
+      resolvedOptions = snap.items;
     } else if (Array.isArray(snap.steps) && snap.steps.length > 0) {
       resolvedOptions = snap.steps;
     }
 
     // Extract pairs
     let resolvedPairs =
-      question.matchingPairs || question.pairs || snap.pairs || snap.matchingPairs || [];
+      question.pairs || question.matchingPairs || snap.pairs || snap.matchingPairs || [];
     if (
       (!Array.isArray(resolvedPairs) || resolvedPairs.length === 0) &&
       typeof (question.correctAnswer || snap.correctAnswer) === "string"
@@ -527,21 +531,36 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
       }
     }
 
+    // Resolve prompt text (with proper fallbacks for content / title in Fill Blanks, Matching, etc.)
+    const resolvedPrompt =
+      question.questionText ||
+      (resolvedType === "FILL_BLANKS" ? (question.content || question.title) : (question.title || question.content)) ||
+      snap.questionText ||
+      snap.prompt ||
+      snap.content ||
+      snap.title ||
+      "প্রশ্ন প্রস্তুত হচ্ছে...";
+
     return {
       id: question.id || `q-${questionIndex}`,
       questionType: resolvedType,
-      questionText:
-        question.questionText || snap.questionText || snap.prompt || "প্রশ্ন প্রস্তুত হচ্ছে...",
+      questionText: resolvedPrompt,
       options: resolvedOptions,
       correctOptionIndex: resolvedCorrectIndex,
       correctAnswer: rawCorrect,
       correctBoolean:
         typeof question.correctBoolean === "boolean"
           ? question.correctBoolean
-          : snap.correctAnswer === true || snap.correctAnswer === "true",
-      acceptedAnswers: question.acceptedAnswers || snap.acceptedAnswers || [],
+          : typeof question.correctAnswer === "boolean"
+          ? question.correctAnswer
+          : rawCorrect === true || rawCorrect === "true" || snap.correctAnswer === true || snap.correctAnswer === "true",
+      acceptedAnswers:
+        question.acceptedAnswers ||
+        snap.acceptedAnswers ||
+        (rawCorrect && typeof rawCorrect === "string" ? [rawCorrect] : []),
       matchingPairs: resolvedPairs,
-      correctOrder: question.correctOrder || snap.steps || snap.items || resolvedOptions,
+      correctOrder:
+        question.correctOrder || question.items || snap.items || snap.steps || resolvedOptions,
       explanation: question.explanation || snap.explanation,
       marks: question.marks || snap.marks || 1,
       timeLimit: question.timeLimit || snap.timeLimit || 60,

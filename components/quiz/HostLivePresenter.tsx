@@ -29,18 +29,31 @@ import {
   X,
   ZoomIn,
   Smile,
-  Heart
+  Heart,
+  Check,
+  Shuffle,
+  ListOrdered
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import FloatingReactionOverlay, { emitLiveReaction } from "./FloatingReactionOverlay";
+import { RenderStudentAvatar } from "@/components/common/SouthAsianStudentAvatar";
 
 export interface PresenterQuestion {
   id: number | string;
   question: string;
   options: string[];
-  correctAnswer: number; // 0, 1, 2, or 3
+  correctAnswer: number | boolean | any; // 0, 1, 2, or 3, or boolean for TRUE_FALSE
   explanation?: string;
   timeLimit?: number;
+  type?: string;
+  questionType?: string;
+  content?: string;
+  imageUrl?: string;
+  pairs?: { left: string; right: string }[];
+  items?: string[];
+  acceptedAnswers?: string[];
+  expectedAnswerKeyword?: string;
+  correctOptionIndex?: number;
 }
 
 export interface PresenterSlide {
@@ -81,7 +94,17 @@ interface HostLivePresenterProps {
   submittedCount: number;
   totalPlayers: number;
   isAnswerRevealed: boolean;
-  optionStats: number[]; // Count of players who selected [option 0, 1, 2, 3]
+  optionStats?: number[]; // Count of players who selected [option 0, 1, 2, 3]
+  readyPlayers?: Array<{
+    playerId: string;
+    name?: string;
+    roll?: string;
+    avatar?: string;
+    readyAt?: string;
+  }>;
+  readyCount?: number;
+  phase?: "READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED";
+  allVoted?: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
   onShowResults: () => void;
@@ -165,6 +188,10 @@ export default function HostLivePresenter({
   totalPlayers,
   isAnswerRevealed,
   optionStats = [0, 0, 0, 0],
+  readyPlayers = [],
+  readyCount = 0,
+  phase,
+  allVoted = false,
   soundEnabled,
   onToggleSound,
   onShowResults,
@@ -177,16 +204,28 @@ export default function HostLivePresenter({
   onToggleFullscreen,
   isFullscreen = false
 }: HostLivePresenterProps) {
+  // All Voted Detection: instant timer freeze and reveal
+  const isAllVotedActive = Boolean(allVoted || (totalPlayers > 0 && submittedCount >= totalPlayers));
+  const effectiveAnswerRevealed = isAnswerRevealed || isAllVotedActive;
+  const effectiveTimeLeft = isAllVotedActive ? 0 : timeLeft;
+  const effectiveReadyCount = Math.max(readyCount, readyPlayers.length);
+
+  // Local phase fallback if phase prop is not provided
+  const [localPhase, setLocalPhase] = useState<"READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED">("QUESTION_ACTIVE");
+  const [previewRemaining, setPreviewRemaining] = useState<number>(3.5);
+  const activePhase = phase || localPhase;
+
   // Timer bar calculation
   const safeTotalTime = Math.max(totalTime, 1);
-  const timePercent = Math.max(0, Math.min(100, (timeLeft / safeTotalTime) * 100));
+  const timePercent = Math.max(0, Math.min(100, (effectiveTimeLeft / safeTotalTime) * 100));
 
   // Determine timer bar color gradient based on urgency
   const timerGradient = useMemo(() => {
+    if (isAllVotedActive) return "from-emerald-500 via-teal-400 to-emerald-500";
     if (timePercent > 50) return "from-cyan-500 via-blue-500 to-indigo-500";
     if (timePercent > 25) return "from-amber-500 via-orange-500 to-amber-600";
     return "from-red-600 via-rose-500 to-red-600 animate-pulse";
-  }, [timePercent]);
+  }, [timePercent, isAllVotedActive]);
 
   // Submission percentage
   const effectiveTotalPlayers = Math.max(totalPlayers, 1);
@@ -207,24 +246,44 @@ export default function HostLivePresenter({
     color: string;
   } | null>(null);
 
-  // Trigger 3-2-1 Kahoot Fullscreen Countdown
+  // 3-Stage Synchronized Launch: 3s Countdown -> 3.5s Preview -> Answering Active
   const handleLaunchScoredQuiz = () => {
     setIsStartingQuiz(true);
+    setLocalPhase("COUNTDOWN");
     setCountdownValue(3);
     const timer = setInterval(() => {
       setCountdownValue((prev) => {
         if (prev === null || prev <= 1) {
           clearInterval(timer);
-          setTimeout(() => {
-            setCountdownValue(null);
-            setIsStartingQuiz(false);
-            if (onStartQuiz) onStartQuiz();
-          }, 600);
-          return 0; // 🚀 কুইজ শুরু!
+          setCountdownValue(null);
+          setIsStartingQuiz(false);
+          // Stage 2: Question Preview (3.5s)
+          setLocalPhase("QUESTION_PREVIEW");
+          setPreviewRemaining(3.5);
+          if (onStartQuiz) onStartQuiz();
+
+          const prevTimer = setInterval(() => {
+            setPreviewRemaining((p) => {
+              if (p <= 0.5) {
+                clearInterval(prevTimer);
+                // Stage 3: Question Active
+                setLocalPhase("QUESTION_ACTIVE");
+                return 0;
+              }
+              return Number((p - 0.5).toFixed(1));
+            });
+          }, 500);
+
+          return 0;
         }
         return prev - 1;
       });
     }, 1000);
+  };
+
+  // Start question from Ready Cloud
+  const handleStartQuestionFromReady = () => {
+    handleLaunchScoredQuiz();
   };
 
   // Mentimeter slide type checks
@@ -439,30 +498,54 @@ export default function HostLivePresenter({
             )}
           </div>
 
-          {/* Center: Large Countdown Timer Display (Only Quiz) */}
+          {/* Center: Large Countdown Timer Display / All Voted Badge (Only Quiz) */}
           {mode === "quiz" && (
             <div className="flex items-center gap-3">
-              <div className={`px-4 py-1.5 rounded-2xl border flex items-center gap-2 transition-all ${
-                timeLeft <= 5 && !isAnswerRevealed
-                  ? "bg-red-950/80 border-red-500/80 text-red-300 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse"
-                  : "bg-slate-800/80 border-slate-700 text-white"
-              }`}>
-                <Clock className="w-4 h-4 text-cyan-400" />
-                <span className="font-mono text-xl sm:text-2xl font-black tracking-tight">
-                  {isAnswerRevealed ? "সময় সমাপ্ত" : `${timeLeft}s`}
-                </span>
-              </div>
+              {isAllVotedActive ? (
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="px-4 py-1.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black text-xs sm:text-sm flex items-center gap-2 shadow-[0_0_30px_rgba(16,185,129,0.6)] animate-pulse"
+                >
+                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  <span>🎉 সবাই উত্তর দিয়েছে! (All Voted!)</span>
+                </motion.div>
+              ) : activePhase === "QUESTION_PREVIEW" ? (
+                <div className="px-4 py-1.5 rounded-2xl bg-amber-500/20 border border-amber-400 text-amber-300 font-black text-xs sm:text-sm flex items-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.4)]">
+                  <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                  <span>📖 প্রশ্ন প্রিভিউ: {previewRemaining}s</span>
+                </div>
+              ) : (
+                <div className={`px-4 py-1.5 rounded-2xl border flex items-center gap-2 transition-all ${
+                  effectiveTimeLeft <= 5 && !effectiveAnswerRevealed
+                    ? "bg-red-950/80 border-red-500/80 text-red-300 shadow-[0_0_20px_rgba(239,68,68,0.5)] animate-pulse"
+                    : "bg-slate-800/80 border-slate-700 text-white"
+                }`}>
+                  <Clock className="w-4 h-4 text-cyan-400" />
+                  <span className="font-mono text-xl sm:text-2xl font-black tracking-tight">
+                    {effectiveAnswerRevealed ? "সময় সমাপ্ত" : `${effectiveTimeLeft}s`}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
           {/* Right: Live Submission Counter & Host Quick Controls */}
           <div className="flex items-center gap-2.5">
+            {/* Live Ready Indicator */}
+            {mode === "quiz" && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-black shadow-xs">
+                <Flame className="w-3.5 h-3.5 text-amber-400 animate-bounce" />
+                <span>{effectiveReadyCount} / {totalPlayers} রেডি</span>
+              </div>
+            )}
+
             {/* Live Student Submission Progress */}
             <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/70">
               <Users className="w-4 h-4 text-emerald-400" />
               <div className="text-right">
                 <div className="text-xs font-black text-emerald-300">
-                  {totalPlayers} জন যুক্ত আছে
+                  {submittedCount} / {totalPlayers} উত্তর দিয়েছে
                 </div>
               </div>
             </div>
@@ -557,15 +640,22 @@ export default function HostLivePresenter({
                         <motion.div
                           key={wIdx}
                           initial={{ scale: 0, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          transition={{ type: "spring", stiffness: 280, damping: 22, delay: wIdx * 0.05 }}
-                          className={`px-4 sm:px-6 py-2 rounded-2xl bg-slate-950/70 border border-slate-700/60 shadow-lg ${rotateClass} transition-transform hover:scale-110 hover:z-20 cursor-default flex items-center gap-2`}
+                          animate={{ 
+                            scale: 1, 
+                            opacity: 1,
+                            y: [0, (wIdx % 2 === 0 ? -5 : 5), 0]
+                          }}
+                          transition={{ 
+                            y: { duration: 2.4 + (wIdx % 3) * 0.4, repeat: Infinity, ease: "easeInOut" },
+                            type: "spring", stiffness: 280, damping: 22, delay: wIdx * 0.05 
+                          }}
+                          className={`px-4 sm:px-6 py-2.5 rounded-2xl bg-slate-950/80 border border-slate-700/80 shadow-xl ${rotateClass} transition-transform hover:scale-115 hover:z-20 cursor-default flex items-center gap-2`}
                         >
-                          <span className={`bg-clip-text text-transparent bg-gradient-to-r ${gradientClass} ${fontClass}`}>
+                          <span className={`bg-clip-text text-transparent bg-gradient-to-r ${gradientClass} ${fontClass} drop-shadow-md`}>
                             {item.word}
                           </span>
                           {item.count > 1 && (
-                            <span className="px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 text-xs font-black">
+                            <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 text-xs font-black border border-indigo-400/40">
                               x{item.count}
                             </span>
                           )}
@@ -759,6 +849,118 @@ export default function HostLivePresenter({
                 </motion.div>
               )}
             </motion.div>
+          ) : mode === "quiz" && activePhase === "READY" ? (
+            <motion.div
+              key="ready-avatar-cloud"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              className="flex flex-col items-center text-center space-y-6 sm:space-y-8 w-full max-w-5xl mx-auto py-2"
+            >
+              {/* Ready Header */}
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-red-500/20 border border-amber-400/50 shadow-[0_0_25px_rgba(245,158,11,0.3)]">
+                  <Flame className="w-4 h-4 text-amber-400 animate-bounce" />
+                  <span className="text-xs sm:text-sm font-black text-amber-300 uppercase tracking-widest">
+                    ⚡ রেডি চেক স্টেজ • পরবর্তী প্রশ্নের প্রস্তুতি
+                  </span>
+                </div>
+
+                <h1 className="text-3xl sm:text-5xl font-black text-white tracking-wide drop-shadow-lg">
+                  🔥 {effectiveReadyCount} / {totalPlayers} জন স্টুডেন্ট রেডি হয়েছে!
+                </h1>
+
+                <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
+                  শিক্ষার্থীরা তাদের মোবাইলে &ldquo;🙋‍♂️ আমি পরবর্তী প্রশ্নের জন্য রেডি!&rdquo; বাটনে ট্যাপ করলেই তাদের নাম ও অ্যাভাটার এই ক্লাউডে ভাসছে।
+                </p>
+
+                {/* Ready Progress Bar */}
+                <div className="w-full max-w-md mx-auto h-3 bg-slate-900 rounded-full border border-slate-800 overflow-hidden mt-2">
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-400"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.min(100, Math.round((effectiveReadyCount / Math.max(1, totalPlayers)) * 100))}%` }}
+                    transition={{ duration: 0.5 }}
+                  />
+                </div>
+              </div>
+
+              {/* ANIMATED AVATAR WORD-CLOUD STYLE DISPLAY */}
+              <div className="w-full p-6 sm:p-10 rounded-3xl bg-slate-900/90 border-2 border-amber-500/30 backdrop-blur-2xl shadow-2xl min-h-[340px] flex flex-wrap items-center justify-center gap-4 sm:gap-6 relative overflow-hidden bg-[radial-gradient(#f59e0b_0.8px,transparent_0.8px)] [background-size:24px_24px]">
+                {readyPlayers && readyPlayers.length > 0 ? (
+                  readyPlayers.map((player, pIdx) => {
+                    const tilts = ["-rotate-3", "rotate-2", "-rotate-2", "rotate-3", "rotate-0", "-rotate-1", "rotate-1"];
+                    const tilt = tilts[pIdx % tilts.length];
+                    const borderGlows = [
+                      "border-amber-400/60 shadow-amber-500/30 bg-amber-950/40",
+                      "border-emerald-400/60 shadow-emerald-500/30 bg-emerald-950/40",
+                      "border-cyan-400/60 shadow-cyan-500/30 bg-cyan-950/40",
+                      "border-purple-400/60 shadow-purple-500/30 bg-purple-950/40",
+                      "border-pink-400/60 shadow-pink-500/30 bg-pink-950/40",
+                    ];
+                    const glow = borderGlows[pIdx % borderGlows.length];
+
+                    return (
+                      <motion.div
+                        key={player.playerId || pIdx}
+                        initial={{ scale: 0, opacity: 0, y: 30 }}
+                        animate={{
+                          scale: 1,
+                          opacity: 1,
+                          y: [0, (pIdx % 2 === 0 ? -8 : 8), 0],
+                        }}
+                        transition={{
+                          scale: { type: "spring", stiffness: 300, damping: 20, delay: pIdx * 0.05 },
+                          y: { duration: 2.8 + (pIdx % 3) * 0.4, repeat: Infinity, ease: "easeInOut" },
+                        }}
+                        className={`p-3.5 sm:p-4 rounded-2xl border-2 ${glow} backdrop-blur-md shadow-xl ${tilt} hover:scale-110 hover:z-20 transition-transform duration-200 flex items-center gap-3 cursor-default`}
+                      >
+                        <RenderStudentAvatar avatarId={player.avatar} className="w-11 h-11 shrink-0" />
+                        <div className="text-left space-y-0.5">
+                          <div className="text-sm font-black text-white flex items-center gap-1.5">
+                            <span>{player.name || "শিক্ষার্থী"}</span>
+                            <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 text-[9px] font-black border border-emerald-400/40">
+                              ⚡ রেডি
+                            </span>
+                          </div>
+                          {player.roll && (
+                            <p className="text-[11px] font-mono text-slate-400 font-bold">
+                              রোল: {player.roll}
+                            </p>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                ) : (
+                  <div className="flex flex-col items-center justify-center space-y-3 py-10 text-center text-slate-400">
+                    <motion.div
+                      animate={{ scale: [1, 1.15, 1] }}
+                      transition={{ repeat: Infinity, duration: 2 }}
+                      className="w-16 h-16 rounded-3xl bg-amber-500/20 border-2 border-amber-500/40 text-amber-300 flex items-center justify-center text-3xl shadow-[0_0_30px_rgba(245,158,11,0.3)]"
+                    >
+                      🙋‍♂️
+                    </motion.div>
+                    <h3 className="text-lg font-black text-white">স্টুডেন্টদের রেডি হওয়ার অপেক্ষায়...</h3>
+                    <p className="text-xs text-slate-400 max-w-md">
+                      শিক্ষার্থীরা তাদের ফোনে &ldquo;🙋‍♂️ আমি পরবর্তী প্রশ্নের জন্য রেডি!&rdquo; বাটনে ট্যাপ করলেই তাদের নাম ও অ্যাভাটার এই ক্লাউডে একে একে ভেসে উঠবে।
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons in Ready State */}
+              <div className="flex items-center justify-center gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={handleStartQuestionFromReady}
+                  className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-base shadow-xl shadow-emerald-900/40 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  <span>🚀 প্রশ্ন শুরু করুন (Start Question)</span>
+                </button>
+              </div>
+            </motion.div>
           ) : mode === "quiz" && question ? (
             <motion.div
               key={question.id || questionIndex}
@@ -767,6 +969,44 @@ export default function HostLivePresenter({
               exit={{ opacity: 0, x: -20 }}
               className="flex flex-col space-y-6 sm:space-y-8"
             >
+              {/* All Voted Auto-Reveal Banner */}
+              {isAllVotedActive && (
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600/30 via-teal-600/30 to-emerald-600/30 border-2 border-emerald-400 text-emerald-200 flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(16,185,129,0.35)] animate-pulse"
+                >
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
+                  <span className="text-sm sm:text-base font-black text-white">
+                    🎉 সবাই উত্তর দিয়েছে! (All Voted!) — তাৎক্ষণিক ফলাফল প্রকাশিত হলো
+                  </span>
+                </motion.div>
+              )}
+
+              {/* Question Preview Alert Banner */}
+              {activePhase === "QUESTION_PREVIEW" && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 rounded-2xl bg-amber-500/15 border-2 border-amber-500/40 text-amber-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shadow-lg shadow-amber-500/10"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/25 border border-amber-400/50 flex items-center justify-center text-amber-300 font-mono font-black text-base shrink-0">
+                      📖
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-white">প্রশ্নটি মনোযোগ দিয়ে পড়ো... (Question Preview)</h4>
+                      <p className="text-xs text-amber-300/80">৩.৫ সেকেন্ড পর অপশনগুলো উন্মোচিত হবে এবং নির্ধারিত টাইমার শুরু হবে</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xl font-black text-amber-300 px-3 py-1 rounded-xl bg-slate-950/80 border border-amber-500/40">
+                      {previewRemaining}s
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+
               {/* Giant Question Banner */}
               <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/90 border border-slate-700/80 shadow-2xl backdrop-blur-xl text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-60" />
@@ -775,88 +1015,277 @@ export default function HostLivePresenter({
                   {question.question}
                 </h1>
 
-                {/* Mobile Submission Indicator */}
-                <div className="md:hidden mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-xs text-slate-300">
+                {/* Question Image if provided */}
+                {question.imageUrl && (
+                  <div className="mt-4 rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 aspect-video max-h-56 flex items-center justify-center mx-auto">
+                    <img src={question.imageUrl} alt="Quiz diagram" className="object-contain w-full h-full max-h-56" />
+                  </div>
+                )}
+
+                {/* Submission Indicator */}
+                <div className="mt-3 inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-800 text-xs text-slate-300">
                   <Users className="w-3.5 h-3.5 text-emerald-400" />
                   <span>{submittedCount} / {totalPlayers} জন উত্তর দিয়েছে</span>
                 </div>
               </div>
 
-              {/* KAHOOT-STYLE 4 VIBRANT OPTION CARDS */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                {question.options.map((optionText, optIndex) => {
-                  const style = KAHOOT_STYLES[optIndex] || KAHOOT_STYLES[0];
-                  const isCorrect = question.correctAnswer === optIndex;
-                  const voteCount = optionStats[optIndex] || 0;
-                  const votePercent = submittedCount > 0 ? Math.round((voteCount / submittedCount) * 100) : 0;
-
-                  const cardOpacity = isAnswerRevealed ? (isCorrect ? "opacity-100 ring-4 ring-emerald-400 shadow-[0_0_35px_rgba(52,211,153,0.5)]" : "opacity-35 grayscale-[40%]") : "opacity-100 hover:scale-[1.01]";
-
-                  return (
+              {/* QUESTION STAGE: Preview Mask vs Active Options */}
+              {activePhase === "QUESTION_PREVIEW" ? (
+                <div className="p-8 rounded-3xl bg-slate-900/70 border-2 border-dashed border-amber-500/30 text-center space-y-4 shadow-xl backdrop-blur-md">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-300 flex items-center justify-center text-2xl mx-auto animate-pulse">
+                    🔒
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-white">উত্তর অপশনসমূহ গোপন রয়েছে</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    কাউন্টডাউন শেষ হওয়ার সাথে সাথে ৪টি কালারফুল অপশন ভেসে উঠবে এবং মূল টাইমার শুরু হবে।
+                  </p>
+                  <div className="w-48 h-2 bg-slate-800 rounded-full mx-auto overflow-hidden">
                     <motion.div
-                      key={optIndex}
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: optIndex * 0.08 }}
-                      className={`relative rounded-3xl p-5 sm:p-6 bg-gradient-to-br ${style.cardBg} border ${style.borderClass} ${cardOpacity} shadow-xl transition-all duration-300 flex flex-col justify-between min-h-[120px] sm:min-h-[140px] overflow-hidden`}
-                    >
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-8 h-8 rounded-xl bg-black/25 flex items-center justify-center font-black text-lg sm:text-xl drop-shadow text-white">
-                            {style.shape}
-                          </span>
-                          <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white/90">
-                            অপশন {["ক", "খ", "গ", "ঘ"][optIndex]}
-                          </span>
-                        </div>
+                      className="h-full bg-amber-400"
+                      initial={{ width: "100%" }}
+                      animate={{ width: "0%" }}
+                      transition={{ duration: 3.5, ease: "linear" }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                /* ALL 5 QUESTION TYPES RENDERED ON HOST SCREEN */
+                (() => {
+                  const qType = (question.type || question.questionType || "MCQ").toUpperCase();
 
-                        {isAnswerRevealed && (
-                          <div>
-                            {isCorrect ? (
-                              <span className="px-3 py-1 rounded-full bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black uppercase flex items-center gap-1.5 shadow-lg">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                                সঠিক
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-1 rounded-full bg-black/40 text-white/60 text-xs font-semibold flex items-center gap-1">
-                                <XCircle className="w-3.5 h-3.5 text-rose-400" />
-                                ভুল
-                              </span>
-                            )}
+                  if (qType === "TRUE_FALSE") {
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                        {[
+                          { label: "সত্য (True)", val: true, bg: "from-emerald-600/30 to-teal-700/30", border: "border-emerald-500/50" },
+                          { label: "মিথ্যা (False)", val: false, bg: "from-rose-600/30 to-pink-700/30", border: "border-rose-500/50" },
+                        ].map((tf, tfIdx) => {
+                          const isCorrect = effectiveAnswerRevealed && (
+                            typeof question.correctAnswer === "boolean" ? question.correctAnswer === tf.val :
+                            String(question.correctAnswer) === String(tf.val) || question.correctOptionIndex === tfIdx
+                          );
+                          const voteCount = optionStats[tfIdx] || 0;
+                          const votePercent = submittedCount > 0 ? Math.round((voteCount / submittedCount) * 100) : 0;
+                          const cardOpacity = effectiveAnswerRevealed 
+                            ? (isCorrect ? "opacity-100 ring-4 ring-emerald-400 shadow-[0_0_35px_rgba(52,211,153,0.5)]" : "opacity-35 grayscale-[40%]") 
+                            : "opacity-100";
+
+                          return (
+                            <div
+                              key={tfIdx}
+                              className={`relative rounded-3xl p-6 bg-gradient-to-br ${tf.bg} border-2 ${tf.border} ${cardOpacity} shadow-xl flex flex-col justify-between min-h-[140px] text-center`}
+                            >
+                              <h3 className="text-2xl sm:text-3xl font-black text-white">{tf.label}</h3>
+                              {effectiveAnswerRevealed && (
+                                <div className="mt-3 flex items-center justify-center gap-2">
+                                  {isCorrect ? (
+                                    <span className="px-3.5 py-1.5 rounded-full bg-emerald-950 border border-emerald-400 text-emerald-300 text-xs font-black uppercase flex items-center gap-1.5 shadow-lg">
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                      সঠিক উত্তর
+                                    </span>
+                                  ) : (
+                                    <span className="px-3 py-1 rounded-full bg-black/40 text-white/60 text-xs font-semibold flex items-center gap-1">
+                                      <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                                      ভুল
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {effectiveAnswerRevealed && (
+                                <div className="mt-4 pt-3 border-t border-white/20 flex items-center justify-between gap-3">
+                                  <div className="flex-1">
+                                    <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden">
+                                      <div className="h-full bg-white rounded-full" style={{ width: `${votePercent}%` }} />
+                                    </div>
+                                  </div>
+                                  <div className="text-xs font-black text-white">{votePercent}%</div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+
+                  if (qType === "FILL_BLANKS") {
+                    return (
+                      <div className="p-8 rounded-3xl bg-slate-900/90 border-2 border-amber-500/30 text-center space-y-6 shadow-2xl backdrop-blur-xl">
+                        <div className="flex items-center justify-center gap-2 text-xs font-bold text-amber-400">
+                          <span>📝 শূন্যস্থান পূরণ (Fill in the Blanks)</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-white leading-relaxed max-w-2xl mx-auto">
+                          {question.content || question.question}
+                        </div>
+                        {effectiveAnswerRevealed ? (
+                          <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="inline-flex flex-col items-center gap-2 px-6 py-4 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 text-emerald-300 shadow-[0_0_30px_rgba(16,185,129,0.3)]"
+                          >
+                            <div className="flex items-center gap-2 text-sm font-black uppercase tracking-wider">
+                              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                              <span>সঠিক ক্যাপসুল উত্তর:</span>
+                            </div>
+                            <span className="text-2xl font-black text-white tracking-wide">
+                              {(question.acceptedAnswers || [question.expectedAnswerKeyword || "সঠিক উত্তর"]).join(" / ")}
+                            </span>
+                          </motion.div>
+                        ) : (
+                          <div className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-slate-800/80 border border-slate-700 text-slate-400 text-sm font-bold">
+                            <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                            <span>শিক্ষার্থীরা মোবাইলে ক্যাপসুল শব্দ টাইপ করছে...</span>
                           </div>
                         )}
                       </div>
+                    );
+                  }
 
-                      <p className="text-base sm:text-lg md:text-xl font-bold text-white leading-snug drop-shadow-sm flex-1 flex items-center">
-                        {optionText}
-                      </p>
+                  if (qType === "MATCHING") {
+                    return (
+                      <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/90 border-2 border-emerald-500/30 space-y-4 shadow-2xl backdrop-blur-xl">
+                        <div className="flex items-center justify-between text-xs font-bold text-emerald-400 border-b border-slate-800 pb-3">
+                          <span className="flex items-center gap-2">
+                            <Shuffle className="w-4 h-4" />
+                            <span>বাম পাশ ⟷ ডান পাশ সঠিক মিলকরণ</span>
+                          </span>
+                          <span>{effectiveAnswerRevealed ? "✅ সঠিক সমাধান উন্মুক্ত" : "🔗 শিক্ষার্থীরা লাইন মিলিয়ে যুক্ত করছে"}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {(question.pairs || [
+                            { left: "বাম বিষয় ১", right: "ডান বিষয় ১" },
+                            { left: "বাম বিষয় ২", right: "ডান বিষয় ২" },
+                          ]).map((p: any, idx: number) => {
+                            const colors = [
+                              "border-cyan-500/50 text-cyan-300 bg-cyan-950/40",
+                              "border-purple-500/50 text-purple-300 bg-purple-950/40",
+                              "border-amber-500/50 text-amber-300 bg-amber-950/40",
+                              "border-pink-500/50 text-pink-300 bg-pink-950/40",
+                            ];
+                            const style = colors[idx % colors.length];
+                            return (
+                              <div key={idx} className={`p-4 rounded-2xl border ${style} flex items-center justify-between gap-3 text-sm font-bold shadow-md`}>
+                                <span className="text-white font-extrabold">{p.left}</span>
+                                <span className="text-slate-400 text-xs font-mono">⟷</span>
+                                <span className="text-emerald-300 font-extrabold">{p.right}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
 
-                      {isAnswerRevealed && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          className="mt-4 pt-3 border-t border-white/20 flex items-center justify-between gap-3"
-                        >
-                          <div className="flex-1">
-                            <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden">
-                              <motion.div
-                                className="h-full bg-white rounded-full"
-                                initial={{ width: "0%" }}
-                                animate={{ width: `${votePercent}%` }}
-                                transition={{ duration: 0.6 }}
-                              />
+                  if (qType === "REORDER") {
+                    return (
+                      <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/90 border-2 border-rose-500/30 space-y-4 shadow-2xl backdrop-blur-xl">
+                        <div className="flex items-center justify-between text-xs font-bold text-rose-400 border-b border-slate-800 pb-3">
+                          <span className="flex items-center gap-2">
+                            <ListOrdered className="w-4 h-4" />
+                            <span>সঠিক ক্রমানুসারে সাজানো ধাপসমূহ</span>
+                          </span>
+                          <span>{effectiveAnswerRevealed ? "✅ সঠিক ক্রম উন্মুক্ত" : "🔢 শিক্ষার্থীরা ক্রমে সাজাচ্ছে"}</span>
+                        </div>
+                        <div className="space-y-2.5">
+                          {(question.items || [
+                            "১ম প্রাথমিক ধাপ",
+                            "২য় মাধ্যমিক ধাপ",
+                            "৩য় সমাপনী ধাপ",
+                          ]).map((item: string, idx: number) => (
+                            <div key={idx} className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center gap-3.5 text-sm font-bold shadow-md">
+                              <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 text-white font-black flex items-center justify-center shrink-0 shadow-sm">
+                                {idx + 1}
+                              </span>
+                              <span className="text-white text-base">{item}</span>
+                              {effectiveAnswerRevealed && (
+                                <Check className="w-5 h-5 text-emerald-400 ml-auto shrink-0" />
+                              )}
                             </div>
-                          </div>
-                          <div className="text-xs font-black text-white">{votePercent}%</div>
-                        </motion.div>
-                      )}
-                    </motion.div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Default: MCQ KAHOOT 4 VIBRANT CARDS
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                      {(question.options || []).map((optionText: string, optIndex: number) => {
+                        const style = KAHOOT_STYLES[optIndex] || KAHOOT_STYLES[0];
+                        const isCorrect = question.correctAnswer === optIndex;
+                        const voteCount = optionStats[optIndex] || 0;
+                        const votePercent = submittedCount > 0 ? Math.round((voteCount / submittedCount) * 100) : 0;
+
+                        const cardOpacity = effectiveAnswerRevealed ? (isCorrect ? "opacity-100 ring-4 ring-emerald-400 shadow-[0_0_35px_rgba(52,211,153,0.5)]" : "opacity-35 grayscale-[40%]") : "opacity-100 hover:scale-[1.01]";
+
+                        return (
+                          <motion.div
+                            key={optIndex}
+                            initial={{ opacity: 0, y: 15 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: optIndex * 0.08 }}
+                            className={`relative rounded-3xl p-5 sm:p-6 bg-gradient-to-br ${style.cardBg} border ${style.borderClass} ${cardOpacity} shadow-xl transition-all duration-300 flex flex-col justify-between min-h-[120px] sm:min-h-[140px] overflow-hidden`}
+                          >
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <div className="flex items-center gap-2.5">
+                                <span className="w-8 h-8 rounded-xl bg-black/25 flex items-center justify-center font-black text-lg sm:text-xl drop-shadow text-white">
+                                  {style.shape}
+                                </span>
+                                <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white/90">
+                                  অপশন {["ক", "খ", "গ", "ঘ"][optIndex]}
+                                </span>
+                              </div>
+
+                              {effectiveAnswerRevealed && (
+                                <div>
+                                  {isCorrect ? (
+                                    <span className="px-3 py-1 rounded-full bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black uppercase flex items-center gap-1.5 shadow-lg">
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                      সঠিক
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-1 rounded-full bg-black/40 text-white/60 text-xs font-semibold flex items-center gap-1">
+                                      <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                                      ভুল
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            <p className="text-base sm:text-lg md:text-xl font-bold text-white leading-snug drop-shadow-sm flex-1 flex items-center">
+                              {optionText}
+                            </p>
+
+                            {effectiveAnswerRevealed && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                className="mt-4 pt-3 border-t border-white/20 flex items-center justify-between gap-3"
+                              >
+                                <div className="flex-1">
+                                  <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden">
+                                    <motion.div
+                                      className="h-full bg-white rounded-full"
+                                      initial={{ width: "0%" }}
+                                      animate={{ width: `${votePercent}%` }}
+                                      transition={{ duration: 0.6 }}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="text-xs font-black text-white">{votePercent}%</div>
+                              </motion.div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
                   );
-                })}
-              </div>
+                })()
+              )}
 
               {/* EXPLANATION PANEL */}
-              {isAnswerRevealed && question.explanation && (
+              {effectiveAnswerRevealed && question.explanation && (
                 <motion.div
                   initial={{ opacity: 0, y: 15 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -932,7 +1361,30 @@ export default function HostLivePresenter({
               </>
             ) : (
               <>
-                {!isAnswerRevealed ? (
+                <button
+                  type="button"
+                  onClick={() => setLocalPhase(activePhase === "READY" ? "QUESTION_ACTIVE" : "READY")}
+                  className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    activePhase === "READY"
+                      ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow-sm"
+                      : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+                  }`}
+                  title="রেডি চেক ক্লাউড দেখুন"
+                >
+                  <Flame className="w-3.5 h-3.5 text-amber-400" />
+                  <span>রেডি ক্লাউড</span>
+                </button>
+
+                {activePhase === "READY" ? (
+                  <button
+                    type="button"
+                    onClick={handleStartQuestionFromReady}
+                    className="px-6 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs sm:text-sm font-black shadow-lg shadow-emerald-900/40 flex items-center gap-2 transition-all transform active:scale-95 cursor-pointer"
+                  >
+                    <Play className="w-4 h-4 fill-current text-slate-950" />
+                    <span>🚀 প্রশ্ন শুরু করুন (Start)</span>
+                  </button>
+                ) : !effectiveAnswerRevealed ? (
                   <button
                     type="button"
                     onClick={onShowResults}
@@ -947,7 +1399,7 @@ export default function HostLivePresenter({
                     onClick={onNextQuestion}
                     className="px-6 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-black shadow-lg shadow-emerald-900/40 flex items-center gap-2 transition-all transform active:scale-95 cursor-pointer"
                   >
-                    <span>{questionIndex + 1 >= (totalQuestions || 0) ? "🏆 লিডারবোর্ড" : "পরবর্তী প্রশ্ন"}</span>
+                    <span>{questionIndex + 1 >= (totalQuestions || 0) ? "🏆 লিডারবোর্ড" : "পরবর্তী কুইজ →"}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 )}

@@ -50,9 +50,19 @@ export async function GET(req: NextRequest) {
       filteredQuizzes = filteredQuizzes.filter(q => q.creatorId === Number(creatorId));
     }
 
+    const mappedQuizzes = filteredQuizzes.map((q) => {
+      const questions = institutionalDb.quizQuestions
+        .filter((qq) => qq.quizId === q.id)
+        .sort((a, b) => a.orderIndex - b.orderIndex);
+      return {
+        ...q,
+        questions,
+      };
+    });
+
     return NextResponse.json({
       success: true,
-      quizzes: filteredQuizzes.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+      quizzes: mappedQuizzes.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -123,8 +133,59 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const newQuiz: Quiz = {
-      id: uuidv4(),
+    const CONTENT_INTERACTIVE_TYPES = new Set([
+      "TEXT_SLIDE",
+      "IMAGE_COMPARE",
+      "OPEN_ENDED",
+      "WORD_CLOUD",
+      "LIVE_QA",
+    ]);
+
+    const isGradedType = (t: string) => {
+      const norm = (t || "").toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
+      return !CONTENT_INTERACTIVE_TYPES.has(norm);
+    };
+
+    // Cleanly process presentation slides preserving all 10 types and metadata
+    const sanitizedSlides = Array.isArray(presentationSlides)
+      ? presentationSlides.map((s: any, sIdx: number) => {
+          const sType = (s.type || "TEXT_SLIDE").toUpperCase();
+          const graded = isGradedType(sType);
+          return {
+            id: s.id || `slide-${sIdx + 1}`,
+            type: sType,
+            title: s.title ?? s.prompt ?? "",
+            prompt: s.prompt ?? s.title ?? "",
+            content: s.content || "",
+            options: Array.isArray(s.options) ? s.options : [],
+            correctAnswer: s.correctAnswer ?? 0,
+            pairs: s.pairs || s.matchingPairs,
+            items: s.items || s.reorderSequence,
+            acceptedAnswers: s.acceptedAnswers || (s.blankAnswer ? [s.blankAnswer] : undefined),
+            imageLeftUrl: s.imageLeftUrl || s.leftImage,
+            imageRightUrl: s.imageRightUrl || s.rightImage,
+            bulletPoints: s.bulletPoints,
+            maxWordsPerStudent: s.maxWordsPerStudent,
+            timeLimit: graded ? (Number(s.timeLimit) || Number(defaultQuestionTime) || 30) : 0,
+            points: graded ? (Number(s.points) || Number(defaultMarks) || 100) : 0,
+            explanation: s.explanation || "",
+            metadata: {
+              ...(s.metadata || {}),
+              imageLeftUrl: s.imageLeftUrl || s.leftImage,
+              imageRightUrl: s.imageRightUrl || s.rightImage,
+              bulletPoints: s.bulletPoints,
+              maxWordsPerStudent: s.maxWordsPerStudent,
+            },
+            orderIndex: sIdx + 1,
+          };
+        })
+      : [];
+
+    const quizId = body.id || uuidv4();
+    const existingIndex = institutionalDb.quizzes.findIndex((q) => q.id === quizId);
+
+    const quizPayload: Quiz = {
+      id: quizId,
       title,
       description: description || "",
       thumbnail: thumbnail || "https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=500&auto=format&fit=crop&q=60",
@@ -149,24 +210,33 @@ export async function POST(req: NextRequest) {
       showCorrectAnswer: showCorrectAnswer !== false,
       showExplanation: showExplanation !== false,
       showLeaderboard: showLeaderboard !== false,
-      presentationSlides: Array.isArray(presentationSlides) ? presentationSlides : [],
+      presentationSlides: sanitizedSlides,
       scheduledStartTime: scheduledStartTime || scheduledAt || undefined,
       scheduledAt: scheduledAt || scheduledStartTime || undefined,
-      createdAt: new Date().toISOString(),
+      createdAt: existingIndex !== -1 ? institutionalDb.quizzes[existingIndex].createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    institutionalDb.quizzes.unshift(newQuiz);
+    if (existingIndex !== -1) {
+      institutionalDb.quizzes[existingIndex] = quizPayload;
+      // Purge old questions for update
+      institutionalDb.quizQuestions = institutionalDb.quizQuestions.filter((qq) => qq.quizId !== quizId);
+    } else {
+      institutionalDb.quizzes.unshift(quizPayload);
+    }
 
     // Save inline questions if provided
     const createdQuestions: QuizQuestion[] = [];
     if (Array.isArray(questions) && questions.length > 0) {
       questions.forEach((q: any, idx: number) => {
-        const qType = q.questionType || q.type || "mcq_single";
-        const questionText = q.questionText || q.question || `প্রশ্ন ${idx + 1}`;
+        const rawType = q.questionType || q.type || "MCQ";
+        const qType = rawType.toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
+        const graded = isGradedType(qType);
+
+        const questionText = q.questionText || q.question || q.title || `স্লাইড ${idx + 1}`;
         const optionsList = Array.isArray(q.options)
           ? q.options
-          : q.questionData?.options || ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"];
+          : q.questionData?.options || (graded ? ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"] : []);
         const correctIndex = typeof q.correctAnswer === "number"
           ? q.correctAnswer
           : typeof q.correctIndex === "number"
@@ -180,18 +250,26 @@ export async function POST(req: NextRequest) {
           : q.questionData?.correctIndices;
         const pairs = Array.isArray(q.pairs)
           ? q.pairs
-          : q.questionData?.pairs;
+          : q.matchingPairs || q.questionData?.pairs;
         const items = Array.isArray(q.items)
           ? q.items
-          : q.questionData?.items;
+          : q.reorderSequence || q.questionData?.items;
         const acceptedAnswers = Array.isArray(q.acceptedAnswers)
           ? q.acceptedAnswers
+          : q.blankAnswer
+          ? [q.blankAnswer]
           : q.questionData?.acceptedAnswers;
         const expectedAnswerKeyword = q.expectedAnswerKeyword || q.questionData?.expectedAnswerKeyword;
         const caseSensitive = q.caseSensitive ?? q.questionData?.caseSensitive;
         const explanation = q.explanation || q.questionData?.explanation || "";
-        const marks = Number(q.marks) || Number(defaultMarks) || 2;
-        const timeLimit = Number(q.timeLimit) || Number(defaultQuestionTime) || 30;
+        const imageLeftUrl = q.imageLeftUrl || q.leftImage || q.questionData?.imageLeftUrl || q.questionData?.leftImage;
+        const imageRightUrl = q.imageRightUrl || q.rightImage || q.questionData?.imageRightUrl || q.questionData?.rightImage;
+        const bulletPoints = Array.isArray(q.bulletPoints) ? q.bulletPoints : q.questionData?.bulletPoints;
+        const maxWordsPerStudent = Number(q.maxWordsPerStudent) || q.questionData?.maxWordsPerStudent;
+
+        // Strict Timer & Marks Enforcement: Content/Interactive MUST be 0
+        const marks = graded ? (Number(q.marks) || Number(q.points) || Number(defaultMarks) || 100) : 0;
+        const timeLimit = graded ? (Number(q.timeLimit) || Number(defaultQuestionTime) || 30) : 0;
 
         const fullQuestionData = {
           options: optionsList,
@@ -206,12 +284,23 @@ export async function POST(req: NextRequest) {
           explanation,
           marks,
           timeLimit,
-          ...(q.questionData || {})
+          imageLeftUrl,
+          imageRightUrl,
+          bulletPoints,
+          maxWordsPerStudent,
+          metadata: {
+            imageLeftUrl,
+            imageRightUrl,
+            bulletPoints,
+            maxWordsPerStudent,
+            ...(q.metadata || {}),
+          },
+          ...(q.questionData || {}),
         };
 
         const newQQ: QuizQuestion = {
           id: q.id && String(q.id).startsWith("qq-") ? String(q.id) : `qq-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
-          quizId: newQuiz.id,
+          quizId: quizPayload.id,
           questionBankId: q.questionBankId || "",
           questionType: qType,
           questionSnapshot: {
@@ -227,7 +316,11 @@ export async function POST(req: NextRequest) {
             expectedAnswerKeyword,
             caseSensitive,
             explanation,
-            questionData: fullQuestionData
+            imageLeftUrl,
+            imageRightUrl,
+            bulletPoints,
+            maxWordsPerStudent,
+            questionData: fullQuestionData,
           },
           orderIndex: idx,
           marks,
@@ -243,7 +336,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      quiz: newQuiz,
+      quiz: quizPayload,
       questions: createdQuestions,
       message: publish ? "কুইজ সফলভাবে সংরক্ষণ ও প্রকাশ করা হয়েছে" : "কুইজ সফলভাবে তৈরি হয়েছে",
     });

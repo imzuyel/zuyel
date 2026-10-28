@@ -358,21 +358,52 @@ export function getSessionQuestions(quizId: string): LiveQuestionSnapshot[] {
     });
   }
 
-  // 3. Search in institutionalDb.quizzes for embedded questions
+  // 3. Search in institutionalDb.quizzes for embedded presentation slides and questions
   const dbQuiz = institutionalDb.quizzes?.find(q => String(q.id).toLowerCase() === targetId);
-  if (dbQuiz && (dbQuiz as any).questions && Array.isArray((dbQuiz as any).questions) && (dbQuiz as any).questions.length > 0) {
-    return (dbQuiz as any).questions.map((q: any, idx: number) => ({
-      id: String(q.id || `q-${idx}`),
-      questionText: q.question || q.questionText || "টেকনিক্যাল প্রশ্ন",
-      type: q.type || q.questionType || "mcq_single",
-      questionType: q.type || q.questionType || "mcq_single",
-      options: q.options && q.options.length > 0 ? q.options : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
-      matchingPairs: q.matchingPairs || q.pairs || q.questionData?.pairs,
-      correctOrder: q.correctOrder || q.items || q.questionData?.items,
-      questionData: q,
-      timeLimit: q.timeLimit || 30,
-      correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0
-    }));
+  if (dbQuiz) {
+    const rawSlides = (dbQuiz as any).presentationSlides || (dbQuiz as any).slides || [];
+    const rawQuestions = (dbQuiz as any).questions || [];
+
+    const unifiedList = [
+      ...rawSlides.map((s: any, idx: number) => ({
+        id: String(s.id || `slide-${idx}`),
+        questionText: s.title || s.content || "কন্টেন্ট স্লাইড",
+        type: (s.type || "TEXT_SLIDE").toUpperCase(),
+        questionType: (s.type || "TEXT_SLIDE").toUpperCase(),
+        options: s.options || [],
+        matchingPairs: s.pairs,
+        correctOrder: s.items,
+        acceptedAnswers: s.acceptedAnswers,
+        imageLeftUrl: s.imageLeftUrl,
+        imageRightUrl: s.imageRightUrl,
+        bulletPoints: s.bulletPoints,
+        content: s.content,
+        questionData: s,
+        timeLimit: s.timeLimit || 0,
+        correctAnswer: s.correctAnswer ?? 0,
+        explanation: s.explanation || "",
+      })),
+      ...rawQuestions.map((q: any, idx: number) => ({
+        id: String(q.id || `q-${idx}`),
+        questionText: q.question || q.questionText || "টেকনিক্যাল প্রশ্ন",
+        type: (q.type || q.questionType || "MCQ").toUpperCase(),
+        questionType: (q.type || q.questionType || "MCQ").toUpperCase(),
+        options: q.options && q.options.length > 0 ? q.options : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+        matchingPairs: q.matchingPairs || q.pairs || q.questionData?.pairs,
+        correctOrder: q.correctOrder || q.items || q.questionData?.items,
+        acceptedAnswers: q.acceptedAnswers,
+        imageLeftUrl: q.imageLeftUrl,
+        imageRightUrl: q.imageRightUrl,
+        questionData: q,
+        timeLimit: q.timeLimit || 30,
+        correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
+        explanation: q.explanation || "",
+      })),
+    ];
+
+    if (unifiedList.length > 0) {
+      return unifiedList;
+    }
   }
 
   // 4. Fallback: If quizQuestions exists in DB for any quiz

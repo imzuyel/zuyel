@@ -17,8 +17,21 @@ export async function POST(
       );
     }
 
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      // Empty body is okay (defaults to +1)
+    }
+
     const questions = getSessionQuestions(session.quizId);
-    const nextIdx = (session.currentQuestionIndex || 0) + 1;
+    let nextIdx = (session.currentQuestionIndex || 0) + 1;
+
+    if (typeof body.slideIndex === "number") {
+      nextIdx = body.slideIndex;
+    } else if (body.direction === "prev") {
+      nextIdx = Math.max(0, (session.currentQuestionIndex || 0) - 1);
+    }
 
     const now = new Date();
 
@@ -30,33 +43,39 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        message: "Quiz completed! Moving to results.",
+        message: "সেশন সমাপ্ত হয়েছে!",
         session
       });
     }
 
-    // Go to next active question
-    const nextQuestion = questions[nextIdx];
-    const duration = nextQuestion.timeLimit || 30;
-    const countdownDuration = 3; // 3s countdown for EVERY subsequent question
-    const previewDuration = 3;   // 3s preview for EVERY subsequent question
+    // Go to next active slide / question
+    const nextItem = questions[nextIdx];
+    const isGraded = Number(nextItem.timeLimit || 0) > 0;
+    const duration = isGraded ? (nextItem.timeLimit || 30) : 0;
+    const countdownDuration = isGraded ? 3 : 0; // Stage 1: Exactly 3 seconds (3-2-1)
+    const previewDuration = isGraded ? 3.5 : 0; // Stage 2: Exactly 3.5 seconds (Question only)
 
     const countdownEndsAt = new Date(now.getTime() + countdownDuration * 1000);
     const previewEndsAt = new Date(countdownEndsAt.getTime() + previewDuration * 1000);
-    const questionEndsAt = new Date(previewEndsAt.getTime() + duration * 1000);
+    const questionEndsAt = duration > 0 ? new Date(previewEndsAt.getTime() + duration * 1000) : null;
 
     session.status = "QUESTION_ACTIVE";
     session.currentQuestionIndex = nextIdx;
+    (session as any).allVoted = false;
+    (session as any).isAnswerRevealed = false;
+    (session as any).readyPlayers = []; // Reset ready players for the new question cycle
     (session as any).sequenceStartedAt = now.toISOString();
-    (session as any).countdownEndsAt = countdownEndsAt.toISOString();
-    (session as any).previewEndsAt = previewEndsAt.toISOString();
-    session.questionStartedAt = previewEndsAt.toISOString();
-    session.questionEndsAt = questionEndsAt.toISOString();
+    (session as any).countdownEndsAt = countdownDuration > 0 ? countdownEndsAt.toISOString() : undefined;
+    (session as any).previewEndsAt = previewDuration > 0 ? previewEndsAt.toISOString() : undefined;
+    session.questionStartedAt = now.toISOString();
+    session.questionEndsAt = questionEndsAt ? questionEndsAt.toISOString() : undefined;
     session.updatedAt = now.toISOString();
 
     return NextResponse.json({
       success: true,
-      message: `Moving to Question ${nextIdx + 1}`,
+      message: `Moving to Slide ${nextIdx + 1}`,
+      currentQuestionIndex: nextIdx,
+      activeItem: nextItem,
       session
     });
   } catch (error: any) {

@@ -27,6 +27,7 @@ import { motion, AnimatePresence } from "motion/react";
 export default function LobbyPage() {
   const { 
     displayName, 
+    activeSession,
     quizDetails, 
     sessionCode, 
     handleLeave, 
@@ -41,6 +42,25 @@ export default function LobbyPage() {
   const [selectedPollOption, setSelectedPollOption] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Scheduled Start Countdown Timer
+  const scheduledTimeStr = activeSession?.scheduledStartTime || quizDetails?.scheduledStartTime;
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
+    if (!scheduledTimeStr) return null;
+    const diff = Math.floor((new Date(scheduledTimeStr).getTime() - Date.now()) / 1000);
+    return diff > 0 ? diff : null;
+  });
+
+  React.useEffect(() => {
+    if (!scheduledTimeStr) return;
+    const tick = () => {
+      const diff = Math.floor((new Date(scheduledTimeStr).getTime() - Date.now()) / 1000);
+      setSecondsLeft(diff > 0 ? diff : null);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [scheduledTimeStr]);
+
   const onSubmitPreQuiz = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const finalAnswer = selectedPollOption || customResponse.trim();
@@ -54,6 +74,40 @@ export default function LobbyPage() {
 
   return (
     <div className="space-y-6 pt-6 max-w-lg mx-auto px-3">
+      {/* SCHEDULED START COUNTDOWN CARD (TASK 3) */}
+      {secondsLeft !== null && secondsLeft > 0 && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="p-5 rounded-3xl bg-linear-to-br from-indigo-950 via-slate-900 to-purple-950 border border-indigo-500/50 shadow-[0_0_30px_rgba(99,102,241,0.25)] text-center space-y-3"
+        >
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black uppercase tracking-wider">
+            <Clock className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+            <span>নির্ধারিত সময়সূচি (Scheduled Start)</span>
+          </div>
+          <h3 className="text-sm font-black text-white">কুইজ শুরু হতে বাকি</h3>
+          
+          <div className="flex items-center justify-center gap-3 font-mono font-black">
+            <div className="p-3 rounded-2xl bg-slate-950/80 border border-indigo-800/60 min-w-[70px]">
+              <span className="text-3xl text-cyan-400 block">
+                {Math.floor(secondsLeft / 60).toString().padStart(2, "0")}
+              </span>
+              <span className="text-[9px] text-slate-400 block uppercase font-sans mt-0.5">মিনিট</span>
+            </div>
+            <span className="text-2xl text-indigo-400 animate-pulse">:</span>
+            <div className="p-3 rounded-2xl bg-slate-950/80 border border-indigo-800/60 min-w-[70px]">
+              <span className="text-3xl text-amber-400 block">
+                {(secondsLeft % 60).toString().padStart(2, "0")}
+              </span>
+              <span className="text-[9px] text-slate-400 block uppercase font-sans mt-0.5">সেকেন্ড</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            কাউন্টডাউন শূন্যে পৌঁছালে স্বয়ংক্রিয়ভাবে প্রথম স্লাইড ওপেন হবে!
+          </p>
+        </motion.div>
+      )}
+
       {/* Header with Live Status & Student Name */}
       <div className="text-center space-y-2">
         <motion.div 

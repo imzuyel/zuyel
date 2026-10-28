@@ -53,11 +53,19 @@ enum QuizStatus {
 }
 
 enum QuestionType {
+  // Graded Quiz Types
   MCQ         // বহুনির্বাচনী প্রশ্ন
   TRUE_FALSE  // সত্য / মিথ্যা
   FILL_BLANKS // শূন্যস্থান পূরণ
   MATCHING    // বাম-ডান মিলকরণ
   REORDER     // সঠিক ক্রমে সাজানো
+  // Content Slide Types
+  TEXT_SLIDE  // টেক্সট ও হেডিং স্লাইড
+  IMAGE_COMPARE // চিত্র / ডায়াগ্রাম তুলনা
+  // Interactive Open Slide Types
+  OPEN_ENDED  // মুক্ত মতামত
+  WORD_CLOUD  // লাইভ ওয়ার্ড ক্লাউড
+  LIVE_QA     // প্রশ্নোত্তর বোর্ড
 }
 
 enum SessionStatus {

@@ -87,8 +87,15 @@ export async function POST(req: NextRequest) {
       hostLastSeenAt: new Date().toISOString(),
       motivationEnabled: motivationEnabled !== undefined ? Boolean(motivationEnabled) : true,
       motivationInterval: motivationInterval !== undefined ? Number(motivationInterval) : 3,
-      scheduledStartTime: scheduledStartTime || scheduledAt || (quiz as any)?.scheduledStartTime || undefined,
-      scheduledAt: scheduledAt || scheduledStartTime || (quiz as any)?.scheduledAt || undefined,
+      scheduledStartTime: scheduledStartTime || scheduledAt || body.settings?.scheduledStartTime || (quiz as any)?.scheduledStartTime || undefined,
+      scheduledAt: scheduledAt || scheduledStartTime || body.settings?.scheduledStartTime || (quiz as any)?.scheduledAt || undefined,
+      autoSmsMilestone: body.settings?.autoSmsMilestone || body.autoSmsMilestone || "off",
+      smsRecipient: body.settings?.smsRecipient || body.smsRecipient || "both",
+      smsFunnyMode: body.settings?.smsFunnyMode ?? true,
+      smsPraiseMode: body.settings?.smsPraiseMode ?? true,
+      customFunnyTemplate: body.settings?.customFunnyTemplate || "",
+      customPraiseTemplate: body.settings?.customPraiseTemplate || "",
+      sentMilestones: [],
     };
 
     institutionalDb.liveSessions.unshift(newSession);

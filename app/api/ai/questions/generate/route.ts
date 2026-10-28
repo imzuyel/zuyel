@@ -114,9 +114,22 @@ export async function POST(req: NextRequest) {
   if (referencePdfId) {
     const doc = institutionalDb.pdfDocuments.find((d) => d.id === referencePdfId);
     if (doc) {
-      const chunks = institutionalDb.pdfChunks.filter((c) => c.documentId === referencePdfId);
-      const excerpt = chunks.slice(0, 3).map((c) => c.chunkText).join("\n\n");
-      finalInstructions = `${additionalInstructions ? additionalInstructions + "\n\n" : ""}【রেফারেন্স কারিকুলাম পাঠ্যবই / সিলেবাস: ${doc.title} (${doc.topic || doc.chapter || "PTSC BTEB"})】\n${excerpt ? "পাঠ্যবইয়ের সংশ্লিষ্ট মূল অংশ:\n" + excerpt.slice(0, 1800) : ""}`.trim();
+      const fromP = body.fromPage !== undefined ? Number(body.fromPage) : undefined;
+      const toP = body.toPage !== undefined ? Number(body.toPage) : undefined;
+      let excerpt = "";
+      if (fromP !== undefined && toP !== undefined) {
+        const pages = institutionalDb.pdfPages.filter(
+          (p) => p.documentId === referencePdfId && p.pageNumber >= fromP && p.pageNumber <= toP
+        );
+        if (pages.length > 0) {
+          excerpt = pages.map((p) => `[পৃষ্ঠা ${p.pageNumber}]: ${p.extractedText}`).join("\n\n");
+        }
+      }
+      if (!excerpt) {
+        const chunks = institutionalDb.pdfChunks.filter((c) => c.documentId === referencePdfId);
+        excerpt = chunks.slice(0, 4).map((c) => c.chunkText).join("\n\n");
+      }
+      finalInstructions = `${additionalInstructions ? additionalInstructions + "\n\n" : ""}【রেফারেন্স কারিকুলাম পাঠ্যবই / সিলেবাস: ${doc.title} (${fromP && toP ? `পৃষ্ঠা ${fromP}-${toP}, ` : ""}${doc.topic || doc.chapter || "PTSC BTEB"})】\n${excerpt ? "পাঠ্যবইয়ের সংশ্লিষ্ট মূল অংশ:\n" + excerpt.slice(0, 2400) : ""}`.trim();
     }
   }
 
