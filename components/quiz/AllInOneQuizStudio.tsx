@@ -152,13 +152,13 @@ function AllInOneQuizStudioInner({
   // Sync with global academic filter
   useEffect(() => {
     if (globalClass) {
-      setSelectedClass(globalClass);
+      setSelectedClass(String(globalClass));
     }
   }, [globalClass]);
 
   useEffect(() => {
     if (globalTrade && globalTrade !== "all") {
-      setSelectedTrade(globalTrade);
+      setSelectedTrade(String(globalTrade));
     }
   }, [globalTrade]);
 

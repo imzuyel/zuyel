@@ -212,7 +212,9 @@ export interface ExamMark {
   examName?: string;
   examId?: number;
   classId?: number;
+  className?: string;
   tradeId?: number;
+  tradeName?: string;
   tradeCode?: string;
   section?: string;
   subjectCode: string;
@@ -705,6 +707,10 @@ export interface Quiz {
   showCorrectAnswer: boolean;
   showExplanation: boolean;
   showLeaderboard: boolean;
+  className?: string;
+  tradeName?: string;
+  subjectName?: string;
+  subjectCode?: string;
   presentationSlides?: any[];
   scheduledStartTime?: string;
   scheduledAt?: string;
@@ -818,7 +824,9 @@ export interface PdfDocument {
   description?: string;
   subjectId?: number;
   classId?: number;
+  className?: string;
   tradeId?: number;
+  tradeName?: string;
   sectionId?: number;
   academicYearId?: number;
   chapter?: string;
@@ -925,6 +933,21 @@ export interface LiveSession {
   activePreQuizActivity?: PreQuizActivity | null;
   scheduledStartTime?: string;
   scheduledAt?: string;
+  academicYearId?: number | string;
+  classId?: number | string;
+  className?: string;
+  tradeId?: number | string;
+  tradeName?: string;
+  subjectId?: number | string;
+  subjectName?: string;
+  subjectCode?: string;
+  autoSmsMilestone?: string;
+  smsRecipient?: string;
+  smsFunnyMode?: boolean;
+  smsPraiseMode?: boolean;
+  customFunnyTemplate?: string;
+  customPraiseTemplate?: string;
+  sentMilestones?: any[];
 }
 
 export type PreQuizSlideType =
@@ -974,6 +997,7 @@ export interface LiveParticipant {
   studentId?: number;
   userId?: number;
   displayName: string;
+  phone?: string;
   avatar?: string;
   playerToken: string;
   status: "JOINED" | "LEFT";
@@ -1893,6 +1917,9 @@ class InstitutionalDatabase {
       description: "Official guide on workshop hazard mitigation, personal protective equipment (PPE), and current calculation formulas.",
       subjectId: 2,
       classId: 4,
+      tradeId: 102,
+      tradeName: "IT Support & IoT Basics",
+      className: "Class 9 (SSC Vocational)",
       sectionId: 1,
       academicYearId: 2026,
       chapter: "Chapter 1",
@@ -1917,6 +1944,9 @@ class InstitutionalDatabase {
       description: "BTEB SSC Vocational Class 9 Computer & IT Support module covering CPU architecture, IPv4 addressing, and IoT sensors.",
       subjectId: 2,
       classId: 4,
+      tradeId: 102,
+      tradeName: "IT Support & IoT Basics",
+      className: "Class 9 (SSC Vocational)",
       sectionId: 1,
       academicYearId: 2026,
       chapter: "Chapter 4",

@@ -287,7 +287,9 @@ export interface SecurityAuditLog {
     | "SECURITY_POLICY_OVERRIDE"
     | "BACKEND_ACCESS_INTERCEPTED"
     | "PASSWORD_RESET_REQUESTED"
-    | "PASSWORD_RESET_SUCCESS";
+    | "PASSWORD_RESET_SUCCESS"
+    | "DESTRUCTIVE_SQL_BLOCKED"
+    | "SUPER_ADMIN_REQUIRED_BLOCKED";
   actorRole: string;
   actorName: string;
   actorEmail?: string;

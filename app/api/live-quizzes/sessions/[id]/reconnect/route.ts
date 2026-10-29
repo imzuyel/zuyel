@@ -96,7 +96,7 @@ export async function POST(
       if (!isValid) {
         SecurityService.logAudit(
           sessionId,
-          "PLAYER_RECONNECT_WARNING",
+          "INVALID_RECONNECT_TOKEN",
           `Reconnect token expired/mismatched for player ID ${playerId}, but session restored via participant ID.`,
           playerId,
           ipAddress,

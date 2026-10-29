@@ -418,7 +418,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       isCorrect: evaluation.isCorrect,
-      correctAnswer: activeQuestion.correctAnswer ?? (activeQuestion as any).questionData?.correctAnswer,
+      correctAnswer: questionItem?.correctAnswer ?? (questionItem as any)?.questionData?.correctAnswer ?? correctAnswer,
       basePoints: evaluation.basePoints,
       speedBonus: evaluation.speedBonus,
       streakBonus: evaluation.streakBonus,

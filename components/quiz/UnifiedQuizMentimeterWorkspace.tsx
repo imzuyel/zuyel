@@ -47,12 +47,25 @@ import {
   Smartphone,
   ExternalLink,
   BookOpen,
+  GraduationCap,
+  Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
 import { institutionalDb, Quiz } from "@/lib/database";
-import { ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicStructure";
+import {
+  ACADEMIC_CLASSES,
+  ALL_TRADES,
+  doesClassHaveTrade,
+  getApplicableTradesForClass,
+  parseClassNumeric,
+} from "@/lib/academicStructure";
 import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import {
+  getSingleSourceSubjects,
+  fetchSubjectsByClassTrade,
+  DynamicSubjectItem,
+} from "@/lib/globalSubjectMappingHub";
 import SmartAiSlideGeneratorModal from "./SmartAiSlideGeneratorModal";
 import DualDeviceInteractivePreviewModal from "./DualDeviceInteractivePreviewModal";
 import HostLiveFullscreenStage from "./HostLiveFullscreenStage";
@@ -216,7 +229,14 @@ export interface DeckItem {
   title: string;
   description?: string;
   trade: string;
+  tradeId?: number | string;
+  tradeName?: string;
   classId?: number | string;
+  className?: string;
+  subjectId?: number | string;
+  subjectName?: string;
+  subjectCode?: string;
+  academicYearId?: number | string;
   slides: PresentationSlide[];
   status: "published" | "draft";
   scheduledStartTime?: string;
@@ -230,8 +250,14 @@ const DEFAULT_STARTER_DECKS: DeckItem[] = [
     id: "deck-iot-master",
     title: "আইওটি ও স্মার্ট সেন্সর নেটওয়ার্কিং",
     description: "কম্পিউটার ও আইটি সাপোর্ট — এসএসসি ও এইচএসসি ভোকেশনাল",
-    trade: "IT Support & IoT",
+    trade: "IT Support & IoT Basics",
+    tradeId: "102",
     classId: "4",
+    className: "৯ম শ্রেণি (এসএসসি ভোকেশনাল)",
+    subjectId: 2,
+    subjectName: "তথ্য ও যোগাযোগ প্রযুক্তি",
+    subjectCode: "150",
+    academicYearId: "2026",
     status: "published",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -291,8 +317,14 @@ const DEFAULT_STARTER_DECKS: DeckItem[] = [
     id: "deck-elec-circuits",
     title: "ইলেকট্রিক্যাল সার্কিট ও রেজিস্ট্যান্স পরিমাপ",
     description: "ইলেকট্রিক্যাল ইনস্টলেশন ও মেইনটেন্যান্স ট্রেড",
-    trade: "Electrical Installation",
+    trade: "General Electrical Workshop",
+    tradeId: "103",
     classId: "5",
+    className: "১০ম শ্রেণি (এসএসসি ভোকেশনাল)",
+    subjectId: 3,
+    subjectName: "জেনারেল ইলেকট্রিক্যাল ওয়ার্কশপ",
+    subjectCode: "1923",
+    academicYearId: "2026",
     status: "published",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -355,7 +387,18 @@ export default function UnifiedQuizMentimeterWorkspace({
   const [gallerySearch, setGallerySearch] = useState("");
   const [filterTrade, setFilterTrade] = useState<string>("all");
   const [filterClass, setFilterClass] = useState<string>("all");
+  const [filterSubject, setFilterSubject] = useState<string>("all");
+  const [availableFilterSubjects, setAvailableFilterSubjects] = useState<DynamicSubjectItem[]>([]);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
+
+  // New Presentation Creation Modal State
+  const [isCreateDeckModalOpen, setIsCreateDeckModalOpen] = useState(false);
+  const [newDeckTitle, setNewDeckTitle] = useState("নতুন প্রেজেন্টেশন ও কুইজ");
+  const [newDeckClassId, setNewDeckClassId] = useState<string>("4");
+  const [newDeckTradeId, setNewDeckTradeId] = useState<string>("102");
+  const [newDeckSubjectId, setNewDeckSubjectId] = useState<string>("");
+  const [createModalSubjects, setCreateModalSubjects] = useState<DynamicSubjectItem[]>([]);
+  const [studioSubjects, setStudioSubjects] = useState<DynamicSubjectItem[]>([]);
 
   // ACTIVE STUDIO DECK STATE (View 2)
   const [currentDeck, setCurrentDeck] = useState<DeckItem>(DEFAULT_STARTER_DECKS[0]);
@@ -385,6 +428,11 @@ export default function UnifiedQuizMentimeterWorkspace({
   const [showExplanationPopover, setShowExplanationPopover] = useState(false);
   const [showNewSlidePopover, setShowNewSlidePopover] = useState(false);
 
+  // ON-CANVAS AI SLIDE IMPROVE MAGIC POPOVER STATE (TASK 3)
+  const [showAiImprovePopover, setShowAiImprovePopover] = useState(false);
+  const [isAiImprovingSlide, setIsAiImprovingSlide] = useState(false);
+  const [customAiSlidePrompt, setCustomAiSlidePrompt] = useState("");
+
   // DRAG-AND-DROP REORDERING STATE (TASK 1)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
@@ -395,6 +443,7 @@ export default function UnifiedQuizMentimeterWorkspace({
     id: string;
     pin: string;
     deck: DeckItem;
+    scheduledStartTime?: string;
   } | null>(null);
 
   // AI GENERATOR MODAL STATE
@@ -510,8 +559,14 @@ export default function UnifiedQuizMentimeterWorkspace({
               id: q.id,
               title: q.title || "নামবিহীন প্রেজেন্টেশন",
               description: q.description || "",
-              trade: q.category || "IT Support & IoT",
+              trade: q.tradeName || q.trade || q.category || "IT Support & IoT",
+              tradeId: q.tradeId,
               classId: q.classId,
+              className: q.className || (q.classId ? ACADEMIC_CLASSES.find((c) => String(c.id) === String(q.classId) || c.numericValue === Number(q.classId))?.nameBangla : undefined),
+              subjectId: q.subjectId,
+              subjectName: q.subjectName,
+              subjectCode: q.subjectCode,
+              academicYearId: q.academicYearId || "2026",
               status: q.status || "published",
               scheduledStartTime: q.scheduledStartTime || q.scheduledAt || "",
               slides: combinedSlides,
@@ -535,15 +590,83 @@ export default function UnifiedQuizMentimeterWorkspace({
     fetchDecks();
   }, []);
 
-  // Sync global class/trade filter when available
+  // Bi-directional sync: React to external GlobalAcademicContext changes
   useEffect(() => {
     if (globalCtx?.selectedClassId) {
-      setFilterClass(String(globalCtx.selectedClassId));
+      setFilterClass((prev) => (String(prev) === String(globalCtx.selectedClassId) ? prev : String(globalCtx.selectedClassId)));
     }
-    if (globalCtx?.activeTradeName) {
-      setFilterTrade(globalCtx.activeTradeName);
+    if (globalCtx?.selectedTradeId && globalCtx.selectedTradeId !== "all") {
+      setFilterTrade((prev) => (String(prev) === String(globalCtx.selectedTradeId) ? prev : String(globalCtx.selectedTradeId)));
+    } else if (globalCtx?.activeTradeName) {
+      setFilterTrade((prev) => (String(prev) === String(globalCtx.activeTradeName) ? prev : String(globalCtx.activeTradeName)));
     }
-  }, [globalCtx?.selectedClassId, globalCtx?.activeTradeName]);
+  }, [globalCtx?.selectedClassId, globalCtx?.selectedTradeId, globalCtx?.activeTradeName]);
+
+  // Window event listeners for immediate updates across components
+  useEffect(() => {
+    const handleContextEvent = (e: any) => {
+      if (e?.detail) {
+        setTimeout(() => {
+          if (e.detail.selectedClassId) {
+            setFilterClass((prev) => (String(prev) === String(e.detail.selectedClassId) ? prev : String(e.detail.selectedClassId)));
+          }
+          if (e.detail.selectedTradeId) {
+            setFilterTrade((prev) => (String(prev) === String(e.detail.selectedTradeId) ? prev : String(e.detail.selectedTradeId)));
+          }
+        }, 0);
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("ptsc_academic_context_changed", handleContextEvent);
+      window.addEventListener("pts-academic-mapping-updated", handleContextEvent);
+      return () => {
+        window.removeEventListener("ptsc_academic_context_changed", handleContextEvent);
+        window.removeEventListener("pts-academic-mapping-updated", handleContextEvent);
+      };
+    }
+  }, []);
+
+  // Update mapped filter subjects whenever filterClass or filterTrade changes
+  useEffect(() => {
+    if (filterClass === "all") {
+      setAvailableFilterSubjects([]);
+      return;
+    }
+    const loadSubjects = async () => {
+      const subs = await fetchSubjectsByClassTrade(filterClass, filterTrade, "2026");
+      setAvailableFilterSubjects(subs);
+    };
+    loadSubjects();
+  }, [filterClass, filterTrade]);
+
+  // Filter change handlers that sync strictly with GlobalAcademicContext
+  const handleFilterClassChange = (newClassId: string) => {
+    setFilterClass(newClassId);
+    setFilterSubject("all");
+    const hasTrade = newClassId !== "all" ? doesClassHaveTrade(newClassId) : true;
+    if (!hasTrade) {
+      setFilterTrade("all");
+    } else if (newClassId !== "all") {
+      const trades = getApplicableTradesForClass(newClassId);
+      const stillValid = trades.some(
+        (t) => String(t.id) === filterTrade || t.name === filterTrade || t.nameBangla === filterTrade
+      );
+      if (!stillValid) {
+        setFilterTrade("all");
+      }
+    }
+    if (globalCtx?.setSelectedClassId && newClassId !== "all") {
+      globalCtx.setSelectedClassId(newClassId);
+    }
+  };
+
+  const handleFilterTradeChange = (newTrade: string) => {
+    setFilterTrade(newTrade);
+    setFilterSubject("all");
+    if (globalCtx?.setSelectedTradeId && newTrade !== "all") {
+      globalCtx.setSelectedTradeId(newTrade);
+    }
+  };
 
   // Current selected slide in Studio
   const currentSlide = useMemo(() => {
@@ -570,24 +693,162 @@ export default function UnifiedQuizMentimeterWorkspace({
   };
 
   // ---------------------------------------------------------------------------
-  // STUDIO ACTION HANDLERS
+  // STUDIO ACTION HANDLERS & ACADEMIC CASCADE MAPPING
   // ---------------------------------------------------------------------------
-  // Create New Deck and switch to Studio
-  const handleCreateNewDeck = () => {
+  // Load mapped subjects for current studio deck
+  useEffect(() => {
+    if (activeView !== "studio" || !currentDeck.classId) return;
+    const loadStudioSubjects = async () => {
+      const subs = await fetchSubjectsByClassTrade(currentDeck.classId!, currentDeck.tradeId, "2026");
+      setStudioSubjects(subs);
+    };
+    loadStudioSubjects();
+  }, [activeView, currentDeck.classId, currentDeck.tradeId]);
+
+  const handleStudioClassChange = async (newClassId: string) => {
+    const clsObj = ACADEMIC_CLASSES.find(
+      (c) => String(c.id) === String(newClassId) || c.numericValue === Number(newClassId)
+    );
+    const hasTrade = doesClassHaveTrade(newClassId);
+    let nextTradeId = currentDeck.tradeId;
+    let nextTradeName = currentDeck.trade;
+
+    if (!hasTrade) {
+      nextTradeId = undefined;
+      nextTradeName = "সাধারণ বিভাগ";
+    } else {
+      const trades = getApplicableTradesForClass(newClassId);
+      const isStillValid = trades.some((t) => String(t.id) === String(nextTradeId));
+      if (!isStillValid && trades.length > 0) {
+        nextTradeId = trades[0].id;
+        nextTradeName = trades[0].nameBangla;
+      }
+    }
+
+    const subs = await fetchSubjectsByClassTrade(newClassId, nextTradeId, "2026");
+    setStudioSubjects(subs);
+    const firstSub = subs[0];
+
+    const updated: DeckItem = {
+      ...currentDeck,
+      classId: newClassId,
+      className: clsObj?.nameBangla || `Class ${newClassId}`,
+      tradeId: nextTradeId,
+      trade: nextTradeName,
+      subjectId: firstSub?.id,
+      subjectName: firstSub?.nameBangla || firstSub?.name,
+      subjectCode: firstSub?.code,
+    };
+    setCurrentDeck(updated);
+    if (globalCtx?.setSelectedClassId) globalCtx.setSelectedClassId(newClassId);
+  };
+
+  const handleStudioTradeChange = async (newTradeId: string) => {
+    const trdObj = ALL_TRADES.find((t) => String(t.id) === String(newTradeId));
+    const subs = await fetchSubjectsByClassTrade(currentDeck.classId!, newTradeId, "2026");
+    setStudioSubjects(subs);
+    const firstSub = subs[0];
+
+    const updated: DeckItem = {
+      ...currentDeck,
+      tradeId: newTradeId,
+      trade: trdObj?.nameBangla || currentDeck.trade,
+      subjectId: firstSub?.id,
+      subjectName: firstSub?.nameBangla || firstSub?.name,
+      subjectCode: firstSub?.code,
+    };
+    setCurrentDeck(updated);
+    if (globalCtx?.setSelectedTradeId) globalCtx.setSelectedTradeId(newTradeId);
+  };
+
+  const handleStudioSubjectChange = (subjectIdStr: string) => {
+    const sub = studioSubjects.find((s) => String(s.id) === String(subjectIdStr));
+    if (!sub) return;
+    const updated: DeckItem = {
+      ...currentDeck,
+      subjectId: sub.id,
+      subjectName: sub.nameBangla || sub.name,
+      subjectCode: sub.code,
+    };
+    setCurrentDeck(updated);
+  };
+
+  // Open New Presentation Creation Modal with Global Context sync
+  const handleOpenCreateDeckModal = () => {
+    const defaultCls = String(globalCtx?.selectedClassId || "4");
+    const defaultTrd = String(globalCtx?.selectedTradeId || "102");
+    setNewDeckClassId(defaultCls);
+    setNewDeckTradeId(defaultTrd);
+    setNewDeckTitle("নতুন প্রেজেন্টেশন ও কুইজ");
+    const subs = getSingleSourceSubjects({ classVal: defaultCls, tradeVal: defaultTrd, academicYear: "2026" });
+    setCreateModalSubjects(subs);
+    if (subs.length > 0) {
+      setNewDeckSubjectId(String(subs[0].id));
+    }
+    setIsCreateDeckModalOpen(true);
+  };
+
+  const handleCreateModalClassChange = async (newClassId: string) => {
+    setNewDeckClassId(newClassId);
+    const hasTrade = doesClassHaveTrade(newClassId);
+    let nextTrade = newDeckTradeId;
+    if (!hasTrade) {
+      nextTrade = "all";
+      setNewDeckTradeId("all");
+    } else {
+      const trades = getApplicableTradesForClass(newClassId);
+      const isStillValid = trades.some((t) => String(t.id) === newDeckTradeId || t.code === newDeckTradeId);
+      if (!isStillValid && trades.length > 0) {
+        nextTrade = String(trades[0].id);
+        setNewDeckTradeId(nextTrade);
+      }
+    }
+    const subs = await fetchSubjectsByClassTrade(newClassId, nextTrade, "2026");
+    setCreateModalSubjects(subs);
+    if (subs.length > 0) {
+      setNewDeckSubjectId(String(subs[0].id));
+    } else {
+      setNewDeckSubjectId("");
+    }
+  };
+
+  const handleCreateModalTradeChange = async (newTradeId: string) => {
+    setNewDeckTradeId(newTradeId);
+    const subs = await fetchSubjectsByClassTrade(newDeckClassId, newTradeId, "2026");
+    setCreateModalSubjects(subs);
+    if (subs.length > 0) {
+      setNewDeckSubjectId(String(subs[0].id));
+    }
+  };
+
+  const handleConfirmCreateDeck = async () => {
     const newId = `deck-${Date.now()}`;
     const newSlideId = `slide-${Date.now()}-1`;
+    const clsObj = ACADEMIC_CLASSES.find(
+      (c) => String(c.id) === String(newDeckClassId) || c.numericValue === Number(newDeckClassId)
+    );
+    const trdObj = ALL_TRADES.find((t) => String(t.id) === String(newDeckTradeId) || t.code === newDeckTradeId);
+    const subObj = createModalSubjects.find((s) => String(s.id) === String(newDeckSubjectId));
+    const hasTrade = doesClassHaveTrade(newDeckClassId);
+
     const newDeck: DeckItem = {
       id: newId,
-      title: "নতুন প্রেজেন্টেশন ও কুইজ",
+      title: newDeckTitle.trim() || "নতুন প্রেজেন্টেশন ও কুইজ",
       description: "ইন্টারেক্টিভ স্লাইডস ও লাইভ কুইজ সেশন",
-      trade: globalCtx?.activeTradeName || "IT Support & IoT",
-      classId: globalCtx?.selectedClassId || "4",
+      trade: hasTrade ? (trdObj ? trdObj.nameBangla : "ভোকেশনাল ট্রেড") : "সাধারণ বিভাগ",
+      tradeId: hasTrade && trdObj ? trdObj.id : undefined,
+      classId: newDeckClassId,
+      className: clsObj ? clsObj.nameBangla : `Class ${newDeckClassId}`,
+      subjectId: subObj ? subObj.id : undefined,
+      subjectName: subObj ? subObj.nameBangla || subObj.name : undefined,
+      subjectCode: subObj ? subObj.code : undefined,
+      academicYearId: "2026",
       status: "draft",
       slides: [
         {
           id: newSlideId,
           type: "MCQ",
-          title: "", // Blank Custom Prompt Rule!
+          title: "",
           options: ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
           correctAnswer: 0,
           timeLimit: 30,
@@ -602,8 +863,16 @@ export default function UnifiedQuizMentimeterWorkspace({
     setDecks((prev) => [newDeck, ...prev]);
     setCurrentDeck(newDeck);
     setCurrentSlideId(newSlideId);
+    setIsCreateDeckModalOpen(false);
     setActiveView("studio");
     showToast("✨ নতুন প্রেজেন্টেশন স্টুডিও ওপেন হয়েছে!", "success");
+
+    await saveDeckToServer(newDeck, false);
+  };
+
+  // Fallback direct creation
+  const handleCreateNewDeck = () => {
+    handleOpenCreateDeckModal();
   };
 
   // Open existing deck in Studio
@@ -679,6 +948,15 @@ export default function UnifiedQuizMentimeterWorkspace({
         description: deckToSave.description || "স্মার্ট প্রেজেন্টেশন ও কুইজ সেশন",
         mode: "general",
         category: deckToSave.trade,
+        classId: deckToSave.classId ? Number(deckToSave.classId) : undefined,
+        className: deckToSave.className,
+        tradeId: deckToSave.tradeId ? Number(deckToSave.tradeId) : undefined,
+        tradeName: deckToSave.trade,
+        trade: deckToSave.trade,
+        subjectId: deckToSave.subjectId ? Number(deckToSave.subjectId) : undefined,
+        subjectName: deckToSave.subjectName,
+        subjectCode: deckToSave.subjectCode,
+        academicYearId: deckToSave.academicYearId ? Number(deckToSave.academicYearId) : 2026,
         scheduledStartTime: deckSettings.scheduledStartTime || undefined,
         scheduledAt: deckSettings.scheduledStartTime || undefined,
         publish: true,
@@ -744,18 +1022,33 @@ export default function UnifiedQuizMentimeterWorkspace({
     }
   };
 
-  // Insert slides generated by Smart AI Modal (Task 1)
-  const handleInsertAiSlides = async (newSlides: PresentationSlide[]) => {
+  // Insert slides generated by Smart AI Modal / Copy-Paste / Co-Pilot (Task 2: Strict Non-Destructive Additive Slide Management)
+  const handleInsertAiSlides = async (
+    newSlides: PresentationSlide[],
+    mode: "append" | "insert_after_active" | "update_in_place" | "replace_all" = "append"
+  ) => {
     if (!newSlides || newSlides.length === 0) return;
 
-    // Smart Slide Ordering: Preserve warmup slides at beginning, append graded slides, and auto-save!
-    const existingWarmup = currentDeck.slides.filter((s) => !isGradedQuiz(s.type));
-    const existingGraded = currentDeck.slides.filter((s) => isGradedQuiz(s.type));
+    let unifiedSlides: PresentationSlide[] = [];
 
-    const newWarmup = newSlides.filter((s) => !isGradedQuiz(s.type));
-    const newGraded = newSlides.filter((s) => isGradedQuiz(s.type));
+    if (mode === "update_in_place") {
+      const updateMap = new Map(newSlides.map((s) => [s.id, s]));
+      unifiedSlides = currentDeck.slides.map((s) => updateMap.get(s.id) || s);
+    } else if (mode === "replace_all") {
+      unifiedSlides = newSlides;
+    } else if (mode === "insert_after_active") {
+      const activeIdx = currentDeck.slides.findIndex((s) => s.id === currentSlideId);
+      const insertAt = activeIdx >= 0 ? activeIdx + 1 : currentDeck.slides.length;
+      unifiedSlides = [
+        ...currentDeck.slides.slice(0, insertAt),
+        ...newSlides,
+        ...currentDeck.slides.slice(insertAt),
+      ];
+    } else {
+      // Default: Strict Non-Destructive Appending! Never overwrite existing manual/AI slides!
+      unifiedSlides = [...currentDeck.slides, ...newSlides];
+    }
 
-    const unifiedSlides = [...existingWarmup, ...newWarmup, ...existingGraded, ...newGraded];
     const updatedDeck: DeckItem = {
       ...currentDeck,
       slides: unifiedSlides,
@@ -763,11 +1056,53 @@ export default function UnifiedQuizMentimeterWorkspace({
     };
 
     setCurrentDeck(updatedDeck);
-    setCurrentSlideId(newSlides[0].id);
-    showToast(`✨ ${newSlides.length}টি এআই স্লাইড প্রেজেন্টেশনে যুক্ত হয়েছে এবং অটো-সেভ হচ্ছে...`, "success");
+    if (newSlides[0]) {
+      setCurrentSlideId(newSlides[0].id);
+    }
+    showToast(
+      mode === "update_in_place"
+        ? `✨ স্লাইডগুলো সফলভাবে আপডেট করা হয়েছে!`
+        : `✨ ${newSlides.length}টি স্লাইড প্রেজেন্টেশনে যুক্ত হয়েছে এবং অটো-সেভ হচ্ছে...`,
+      "success"
+    );
 
     // Immediately auto-save so reloading never loses AI slides!
     await saveDeckToServer(updatedDeck, false);
+  };
+
+  // On-Canvas AI Slide Improvement Handler (Task 3)
+  const handleAiImproveCurrentSlide = async (
+    action: "beautify" | "harder" | "convert" | "explain" | "custom",
+    targetType?: SlideType,
+    customInstruction?: string
+  ) => {
+    setIsAiImprovingSlide(true);
+    try {
+      const res = await fetch(`/api/ai/questions/${currentSlide.id}/improve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slide: currentSlide,
+          action,
+          targetType,
+          instruction: customInstruction,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.slide) {
+        updateCurrentSlide(data.slide);
+        setShowAiImprovePopover(false);
+        setCustomAiSlidePrompt("");
+        showToast("✨ স্লাইডটি AI দ্বারা সফলভাবে আপডেট করা হয়েছে!", "success");
+      } else {
+        showToast(data.message || "স্লাইড আপডেট করতে সমস্যা হয়েছে", "error");
+      }
+    } catch {
+      showToast("AI সংযোগে সমস্যা দেখা দিয়েছে", "error");
+    } finally {
+      setIsAiImprovingSlide(false);
+    }
   };
 
   // Delete slide from current deck
@@ -890,6 +1225,14 @@ export default function UnifiedQuizMentimeterWorkspace({
           competitionMode: "individual",
           settings: deckSettings,
           scheduledStartTime: deckSettings.scheduledStartTime || undefined,
+          academicYearId: deckToLaunch.academicYearId || "2026",
+          classId: deckToLaunch.classId,
+          className: deckToLaunch.className,
+          tradeId: deckToLaunch.tradeId,
+          tradeName: deckToLaunch.trade || deckToLaunch.tradeName,
+          subjectId: deckToLaunch.subjectId,
+          subjectName: deckToLaunch.subjectName,
+          subjectCode: deckToLaunch.subjectCode,
         }),
       });
 
@@ -933,22 +1276,56 @@ export default function UnifiedQuizMentimeterWorkspace({
     if (onLiveStateChange) onLiveStateChange(false);
   };
 
-  // Filtered decks for Gallery (View 1)
+  // Filtered decks for Gallery (View 1) with Class, Trade, and Subject cascade matching
   const filteredDecks = useMemo(() => {
     return decks.filter((d) => {
-      if (filterTrade !== "all" && d.trade !== filterTrade) return false;
-      if (filterClass !== "all" && String(d.classId) !== String(filterClass)) return false;
+      // 1. Class filter
+      if (filterClass !== "all") {
+        const dNum = parseClassNumeric(d.classId);
+        const fNum = parseClassNumeric(filterClass);
+        if (dNum > 0 && fNum > 0) {
+          if (dNum !== fNum) return false;
+        } else if (String(d.classId) !== String(filterClass)) {
+          return false;
+        }
+      }
+
+      // 2. Trade filter
+      if (filterTrade !== "all") {
+        const trdObj = ALL_TRADES.find((t) => String(t.id) === filterTrade || t.code === filterTrade);
+        const tradeFilterName = trdObj ? trdObj.name.toLowerCase() : filterTrade.toLowerCase();
+        const deckTradeName = (d.trade || "").toLowerCase();
+        const tradeMatch =
+          String(d.tradeId) === String(filterTrade) ||
+          deckTradeName === tradeFilterName ||
+          (trdObj && deckTradeName === trdObj.nameBangla.toLowerCase());
+        if (!tradeMatch) return false;
+      }
+
+      // 3. Subject filter
+      if (filterSubject !== "all") {
+        const subjectMatch =
+          String(d.subjectId) === String(filterSubject) ||
+          d.subjectCode === filterSubject ||
+          (d.subjectName && d.subjectName.toLowerCase() === filterSubject.toLowerCase());
+        if (!subjectMatch) return false;
+      }
+
+      // 4. Search query
       if (gallerySearch.trim()) {
         const s = gallerySearch.toLowerCase();
         return (
           d.title.toLowerCase().includes(s) ||
           (d.description || "").toLowerCase().includes(s) ||
-          d.trade.toLowerCase().includes(s)
+          d.trade.toLowerCase().includes(s) ||
+          (d.className && d.className.toLowerCase().includes(s)) ||
+          (d.subjectName && d.subjectName.toLowerCase().includes(s)) ||
+          (d.subjectCode && d.subjectCode.toLowerCase().includes(s))
         );
       }
       return true;
     });
-  }, [decks, filterTrade, filterClass, gallerySearch]);
+  }, [decks, filterTrade, filterClass, filterSubject, gallerySearch]);
 
   return (
     <div className="w-full h-full font-sans select-none text-slate-800 dark:text-slate-100">
@@ -1012,7 +1389,7 @@ export default function UnifiedQuizMentimeterWorkspace({
 
               <button
                 type="button"
-                onClick={handleCreateNewDeck}
+                onClick={handleOpenCreateDeckModal}
                 className="px-5 py-2.5 rounded-2xl bg-white text-indigo-700 hover:bg-indigo-50 font-black text-xs transition flex items-center gap-2 shadow-xl shadow-black/20 cursor-pointer active:scale-95"
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
@@ -1035,39 +1412,71 @@ export default function UnifiedQuizMentimeterWorkspace({
               />
             </div>
 
-            {/* Dropdowns */}
-            <div className="flex items-center gap-2.5 w-full sm:w-auto">
-              <select
-                value={filterTrade}
-                onChange={(e) => setFilterTrade(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
-              >
-                <option value="all">সকল ট্রেড (All Trades)</option>
-                {ALL_TRADES.map((t) => (
-                  <option key={t.id} value={t.name}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+            {/* 3-Step Academic Cascading Filter Bar (Task 1) */}
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              {/* Step 1: Class Selector */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-bold text-slate-400">শ্রেণি:</span>
+                <select
+                  value={filterClass}
+                  onChange={(e) => handleFilterClassChange(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+                >
+                  <option value="all">সকল শ্রেণি (All)</option>
+                  {ACADEMIC_CLASSES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nameBangla}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-              <select
-                value={filterClass}
-                onChange={(e) => setFilterClass(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
-              >
-                <option value="all">সকল শ্রেণি (All Classes)</option>
-                {ACADEMIC_CLASSES.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.displayName}
-                  </option>
-                ))}
-              </select>
+              {/* Step 2: Class-Wise Trade Selector */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-bold text-slate-400">ট্রেড:</span>
+                <select
+                  value={filterTrade}
+                  onChange={(e) => handleFilterTradeChange(e.target.value)}
+                  disabled={filterClass !== "all" && !doesClassHaveTrade(filterClass)}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer disabled:opacity-50"
+                >
+                  {filterClass !== "all" && !doesClassHaveTrade(filterClass) ? (
+                    <option value="all">সাধারণ পাঠ্যক্রম (ট্রেড নেই)</option>
+                  ) : (
+                    <>
+                      <option value="all">সকল ট্রেড (All)</option>
+                      {getApplicableTradesForClass(filterClass).map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.nameBangla || t.name}
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </select>
+              </div>
+
+              {/* Step 3: Mapped Subject Selector */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-bold text-slate-400">বিষয়:</span>
+                <select
+                  value={filterSubject}
+                  onChange={(e) => setFilterSubject(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer max-w-[170px] truncate"
+                >
+                  <option value="all">সকল বিষয় (All)</option>
+                  {availableFilterSubjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <button
                 type="button"
                 onClick={fetchDecks}
                 disabled={isLoadingDecks}
-                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 title="রিফ্রেশ করুন"
               >
                 <RefreshCw
@@ -1091,7 +1500,7 @@ export default function UnifiedQuizMentimeterWorkspace({
               </div>
               <button
                 type="button"
-                onClick={handleCreateNewDeck}
+                onClick={handleOpenCreateDeckModal}
                 className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-500 transition cursor-pointer"
               >
                 + নতুন প্রেজেন্টেশন তৈরি করুন
@@ -1107,19 +1516,33 @@ export default function UnifiedQuizMentimeterWorkspace({
                 >
                   {/* Top Deck Card Banner */}
                   <div className="p-5 bg-gradient-to-br from-indigo-50 to-slate-50 dark:from-indigo-950/40 dark:to-slate-900 border-b border-slate-100 dark:border-slate-800 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider border border-indigo-500/30">
-                        {deck.trade}
-                      </span>
-                      <span className="text-[11px] font-black text-slate-400 font-mono flex items-center gap-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] border border-indigo-500/30">
+                          {deck.className || `Class ${deck.classId || "9"}`}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] border border-emerald-500/30">
+                          {deck.trade}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-black text-slate-400 font-mono flex items-center gap-1 shrink-0">
                         <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                        <span>{deck.slides.length}টি স্লাইড</span>
+                        <span>{deck.slides.length} স্লাইড</span>
                       </span>
                     </div>
 
                     <h3 className="text-base font-black text-slate-900 dark:text-white leading-snug line-clamp-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
                       {deck.title}
                     </h3>
+
+                    {deck.subjectName && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        <BookOpen className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span className="truncate">
+                          {deck.subjectName} {deck.subjectCode ? `(${deck.subjectCode})` : ""}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Body Slide Types Snippets */}
@@ -1224,6 +1647,27 @@ export default function UnifiedQuizMentimeterWorkspace({
                 placeholder="প্রেজেন্টেশন শিরোনাম লিখুন..."
                 className="bg-transparent text-sm sm:text-base font-black text-slate-900 dark:text-white focus:outline-none focus:bg-slate-100 dark:focus:bg-slate-800 px-2 py-1 rounded-lg border border-transparent focus:border-indigo-400 transition truncate max-w-xs sm:max-w-md"
               />
+
+              {/* Active Global Academic Mapping Context Pill (Task 1) */}
+              <div
+                onClick={() => setIsSettingsDrawerOpen(true)}
+                className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition shrink-0"
+                title="একাডেমিক ম্যাপিং পরিবর্তন করতে সেটিংস ওপেন করুন"
+              >
+                <GraduationCap className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span>{currentDeck.className || `Class ${currentDeck.classId || "9"}`}</span>
+                <span className="opacity-40">•</span>
+                <span>{currentDeck.trade || "সাধারণ বিভাগ"}</span>
+                {currentDeck.subjectName && (
+                  <>
+                    <span className="opacity-40">•</span>
+                    <span className="truncate max-w-[130px] text-indigo-900 dark:text-indigo-200">
+                      {currentDeck.subjectName}
+                    </span>
+                  </>
+                )}
+                <span className="ml-1 text-[10px] text-indigo-500 underline font-semibold">ম্যাপিং বদল</span>
+              </div>
 
               {/* Fullscreen Focus Toggle Button (Fixes ERP Sidebar Cramp!) */}
               <button
@@ -1878,6 +2322,27 @@ export default function UnifiedQuizMentimeterWorkspace({
                   <Info className="w-3.5 h-3.5" />
                   <span>💡 ব্যাখ্যা {currentSlide.explanation ? "(যুক্ত)" : ""}</span>
                 </button>
+
+                {/* TASK 3: On-Canvas "🪄 AI দিয়ে এই স্লাইডটি আপডেট করুন" Magic Button */}
+                <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+                <button
+                  type="button"
+                  onClick={() => setShowAiImprovePopover(!showAiImprovePopover)}
+                  className={`px-3 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                    showAiImprovePopover
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-indigo-600 shadow-indigo-500/20"
+                      : "bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                  }`}
+                  title="AI দিয়ে বর্তমান স্লাইডটি পরিমার্জন, রূপান্তর বা উন্নত করুন"
+                >
+                  {isAiImprovingSlide ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                  ) : (
+                    <Wand2 className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>🪄 AI আপডেট</span>
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showAiImprovePopover ? "rotate-180" : ""}`} />
+                </button>
               </div>
 
               {/* Floating Explanation Popover Card */}
@@ -1906,6 +2371,132 @@ export default function UnifiedQuizMentimeterWorkspace({
                       placeholder="শিক্ষার্থীরা উত্তর দেওয়ার পর এই ব্যাখ্যা প্রদর্শিত হবে..."
                       className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none focus:border-amber-400"
                     />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Floating AI Slide Improve Popover Card (TASK 3) */}
+              <AnimatePresence>
+                {showAiImprovePopover && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="w-full max-w-2xl mb-4 p-5 rounded-3xl bg-white dark:bg-slate-900 border-2 border-indigo-500/40 shadow-2xl space-y-4 z-20"
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2 text-xs font-black text-indigo-600 dark:text-indigo-400">
+                        <Wand2 className="w-4 h-4 text-amber-400" />
+                        <span>🪄 এই স্লাইডটি AI দিয়ে পরিমার্জন ও রূপান্তর করুন</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAiImprovePopover(false)}
+                        className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* 4 Quick 1-Click Action Buttons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={isAiImprovingSlide}
+                        onClick={() => handleAiImproveCurrentSlide("beautify")}
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                        <div>
+                          <div className="text-xs font-black text-slate-800 dark:text-slate-200">✨ ভাষা ও বিকল্প সুন্দর করো</div>
+                          <div className="text-[10px] text-slate-400">বানান ও ব্যাকরণ নির্ভুল ও বাস্তবসম্মত করা</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isAiImprovingSlide}
+                        onClick={() => handleAiImproveCurrentSlide("harder")}
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
+                        <div>
+                          <div className="text-xs font-black text-slate-800 dark:text-slate-200">🧠 আরেকটু মানসম্মত ও কঠিন করো</div>
+                          <div className="text-[10px] text-slate-400">মুখস্থের বদলে ধারণাগত গভীর প্রশ্ন তৈরি</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isAiImprovingSlide}
+                        onClick={() => handleAiImproveCurrentSlide("explain")}
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div>
+                          <div className="text-xs font-black text-slate-800 dark:text-slate-200">💡 সঠিক উত্তরের ব্যাখ্যা তৈরি করো</div>
+                          <div className="text-[10px] text-slate-400">শিক্ষার্থীদের জন্য সহজবোধ্য বিস্তারিত ব্যাখ্যা</div>
+                        </div>
+                      </button>
+
+                      {/* Convert to another type dropdown */}
+                      <div className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-1.5 bg-slate-50 dark:bg-slate-950">
+                        <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          🔀 অন্য ধরনে রূপান্তর:
+                        </div>
+                        <select
+                          disabled={isAiImprovingSlide}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleAiImproveCurrentSlide("convert", e.target.value as SlideType);
+                              e.target.value = "";
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] font-black text-indigo-600 dark:text-indigo-400 cursor-pointer"
+                        >
+                          <option value="">নির্বাচন করুন</option>
+                          <option value="MATCHING">🔗 MATCHING (মিলকরণ)</option>
+                          <option value="FILL_BLANKS">📝 FILL_BLANKS (শূন্যস্থান)</option>
+                          <option value="REORDER">🔢 REORDER (ধারাবাহিক ক্রম)</option>
+                          <option value="TRUE_FALSE">⚖️ TRUE_FALSE (সত্য/মিথ্যা)</option>
+                          <option value="MCQ">🔘 MCQ (বহুনির্বাচনী)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Custom prompt input */}
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                        <span>✍️ AI-কে বলুন এই স্লাইডে কী পরিবর্তন চান:</span>
+                        {isAiImprovingSlide && (
+                          <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> স্লাইড পরিমার্জন হচ্ছে...
+                          </span>
+                        )}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={customAiSlidePrompt}
+                          onChange={(e) => setCustomAiSlidePrompt(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && customAiSlidePrompt.trim()) {
+                              handleAiImproveCurrentSlide("custom", undefined, customAiSlidePrompt.trim());
+                            }
+                          }}
+                          placeholder="যেমন: অপশনগুলো আরও সংক্ষিপ্ত করো অথবা বাস্তব জীবনের উদাহরণ দাও..."
+                          className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          disabled={isAiImprovingSlide || !customAiSlidePrompt.trim()}
+                          onClick={() => handleAiImproveCurrentSlide("custom", undefined, customAiSlidePrompt.trim())}
+                          className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs transition cursor-pointer disabled:opacity-50 shrink-0"
+                        >
+                          প্রয়োগ করুন
+                        </button>
+                      </div>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -2494,6 +3085,82 @@ export default function UnifiedQuizMentimeterWorkspace({
                       </button>
                     </div>
 
+                    {/* Section 0: Central Academic Mapping (Task 1) */}
+                    <div className="space-y-3.5 p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <GraduationCap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <span>সেন্ট্রাল একাডেমিক ম্যাপিং</span>
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-500/20">
+                          BTEB Global
+                        </span>
+                      </div>
+
+                      {/* 1. Class */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          শ্রেণি নির্বাচন (Class):
+                        </label>
+                        <select
+                          value={String(currentDeck.classId || "4")}
+                          onChange={(e) => handleStudioClassChange(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        >
+                          {ACADEMIC_CLASSES.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.nameBangla}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 2. Class-Wise Trade */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          ট্রেড / বিভাগ (Trade):
+                        </label>
+                        <select
+                          value={String(currentDeck.tradeId || "")}
+                          onChange={(e) => handleStudioTradeChange(e.target.value)}
+                          disabled={!doesClassHaveTrade(currentDeck.classId || "4")}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
+                        >
+                          {!doesClassHaveTrade(currentDeck.classId || "4") ? (
+                            <option value="">সাধারণ পাঠ্যক্রম (ট্রেড নেই)</option>
+                          ) : (
+                            getApplicableTradesForClass(currentDeck.classId || "4").map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.nameBangla} ({t.code})
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      {/* 3. Mapped Subject */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          ম্যাপড বিষয় (Mapped Subject):
+                        </label>
+                        <select
+                          value={String(currentDeck.subjectId || "")}
+                          onChange={(e) => handleStudioSubjectChange(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        >
+                          {studioSubjects.length === 0 ? (
+                            <option value="">কোনো বিষয় ম্যাপিং পাওয়া যায়নি</option>
+                          ) : (
+                            studioSubjects.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name} ({s.code})
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    </div>
+
                     {/* Section 1: Participation & Engagement Toggles */}
                     <div className="space-y-3.5">
                       <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">
@@ -2845,7 +3512,7 @@ export default function UnifiedQuizMentimeterWorkspace({
       )}
 
       {/* =======================================================================
-          SMART CENTRAL BOOK & PDF AI STUDIO MODAL (PHASE 2)
+          SMART CENTRAL BOOK & PDF AI STUDIO MODAL (PHASE 2 & MAPPING CASCADE)
           ======================================================================= */}
       {showAiModal && (
         <SmartAiSlideGeneratorModal
@@ -2854,6 +3521,13 @@ export default function UnifiedQuizMentimeterWorkspace({
           onInsertSlides={handleInsertAiSlides}
           activeTrade={currentDeck.trade}
           activeClass={String(currentDeck.classId || "")}
+          activeClassId={String(currentDeck.classId || "")}
+          activeTradeId={currentDeck.tradeId}
+          activeSubject={currentDeck.subjectName}
+          activeSubjectId={currentDeck.subjectId}
+          activeSubjectCode={currentDeck.subjectCode}
+          existingSlides={currentDeck.slides}
+          activeSlideId={currentSlideId}
         />
       )}
 
@@ -2868,6 +3542,8 @@ export default function UnifiedQuizMentimeterWorkspace({
           initialSlideIndex={currentDeck.slides.findIndex((s) => s.id === currentSlideId)}
           deckTitle={currentDeck.title}
           tradeName={currentDeck.trade}
+          classId={currentDeck.classId}
+          tradeId={currentDeck.tradeId}
         />
       )}
 
@@ -2882,8 +3558,159 @@ export default function UnifiedQuizMentimeterWorkspace({
           slides={activeLivePresenterSession.deck.slides}
           scheduledStartTime={activeLivePresenterSession.scheduledStartTime || deckSettings.scheduledStartTime}
           onClose={handleCloseLivePresenter}
+          className={activeLivePresenterSession.deck.className}
+          tradeName={activeLivePresenterSession.deck.trade}
+          subjectName={activeLivePresenterSession.deck.subjectName}
+          subjectCode={activeLivePresenterSession.deck.subjectCode}
         />
       )}
+
+      {/* =======================================================================
+          NEW PRESENTATION CREATION MODAL WITH GLOBAL ACADEMIC MAPPING CASCADE
+          ======================================================================= */}
+      <AnimatePresence>
+        {isCreateDeckModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCreateDeckModalOpen(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs cursor-pointer"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              className="relative z-10 w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 sm:p-7 space-y-5"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                    <GraduationCap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                      নতুন প্রেজেন্টেশন ও কুইজ তৈরি করুন
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      সেন্ট্রাল একাডেমিক ম্যাপিং অনুসারে শ্রেণি, ট্রেড ও বিষয় নির্বাচন করুন
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateDeckModalOpen(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Title input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  প্রেজেন্টেশন শিরোনাম (Presentation Title):
+                </label>
+                <input
+                  type="text"
+                  value={newDeckTitle}
+                  onChange={(e) => setNewDeckTitle(e.target.value)}
+                  placeholder="যেমন: ৯ম শ্রেণি - ডাটাবেজ মডেল ও নরম্যালাইজেশন..."
+                  className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition"
+                />
+              </div>
+
+              {/* 3-Step Academic Cascade */}
+              <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 space-y-3.5">
+                {/* Step 1: Class */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span>১. শ্রেণি নির্বাচন (Class):</span>
+                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono">BTEB Central</span>
+                  </label>
+                  <select
+                    value={newDeckClassId}
+                    onChange={(e) => handleCreateModalClassChange(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    {ACADEMIC_CLASSES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nameBangla}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Step 2: Trade */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    ২. ট্রেড / বিভাগ (Trade):
+                  </label>
+                  <select
+                    value={newDeckTradeId}
+                    onChange={(e) => handleCreateModalTradeChange(e.target.value)}
+                    disabled={!doesClassHaveTrade(newDeckClassId)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-60"
+                  >
+                    {!doesClassHaveTrade(newDeckClassId) ? (
+                      <option value="all">সাধারণ পাঠ্যক্রম (ট্রেড নেই)</option>
+                    ) : (
+                      getApplicableTradesForClass(newDeckClassId).map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.nameBangla} ({t.code})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {/* Step 3: Subject */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    ৩. সেন্ট্রাল ম্যাপড বিষয় (Subject):
+                  </label>
+                  <select
+                    value={newDeckSubjectId}
+                    onChange={(e) => setNewDeckSubjectId(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    {createModalSubjects.length === 0 ? (
+                      <option value="">কোনো বিষয় ম্যাপিং পাওয়া যায়নি</option>
+                    ) : (
+                      createModalSubjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.code})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateDeckModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCreateDeck}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-black text-xs transition shadow-md shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>স্টুডিও ওপেন করুন</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -993,7 +993,13 @@ export default function LiveQuizArena({
 
   // Step resolution & dynamic counts
   const isStep1 = activeTab === "create_quiz" || activeTab === "ai_generator" || activeTab === "question_bank";
-  const isStep2 = activeTab === "my_quizzes" || activeTab === "dashboard" || activeTab === "builder" || activeTab === "preview" || activeTab === "settings";
+  const isStep2 =
+    activeTab === "my_quizzes" ||
+    activeTab === "dashboard" ||
+    activeTab === "builder" ||
+    activeTab === "preview" ||
+    activeTab === "settings" ||
+    activeTab === "tournaments";
 
   let localStudioDraftCount = 0;
   if (typeof window !== "undefined") {

@@ -33,26 +33,35 @@ export async function POST(
     }
 
     const firstQuestion = questions[0];
-    const duration = firstQuestion.timeLimit || 30;
-    const countdownDuration = 3; // 3s synchronized countdown: 3 -> 2 -> 1 -> GO!
-    const previewDuration = 3;   // 3s question preview with masked options
-    
+    const isGraded = Number(firstQuestion?.timeLimit || 0) > 0 || ["MCQ", "MATCHING", "FILL_BLANKS", "REORDER", "TRUE_FALSE"].includes((firstQuestion?.type || "").toUpperCase());
     const now = new Date();
-    const countdownEndsAt = new Date(now.getTime() + countdownDuration * 1000);
-    const previewEndsAt = new Date(countdownEndsAt.getTime() + previewDuration * 1000);
-    const questionEndsAt = new Date(previewEndsAt.getTime() + duration * 1000);
 
-    session.status = "QUESTION_ACTIVE";
     session.currentQuestionIndex = 0;
     (session as any).sequenceStartedAt = now.toISOString();
-    (session as any).countdownEndsAt = countdownEndsAt.toISOString();
-    (session as any).previewEndsAt = previewEndsAt.toISOString();
-    session.questionStartedAt = previewEndsAt.toISOString();
-    session.questionEndsAt = questionEndsAt.toISOString();
-    session.updatedAt = now.toISOString();
+    (session as any).readyPlayers = [];
+    (session as any).allVoted = false;
+    (session as any).isAnswerRevealed = false;
     (session as any).eligibilityFrozen = true;
     session.isQuizModeStarted = true;
     session.activePreQuizActivity = null;
+
+    if (isGraded) {
+      // Mandatory FIX 4: Enter READY_CHECK State First! DO NOT start countdown/timer until teacher clicks Start!
+      session.status = "READY" as any;
+      (session as any).countdownEndsAt = undefined;
+      (session as any).previewEndsAt = undefined;
+      session.questionStartedAt = undefined;
+      session.questionEndsAt = undefined;
+    } else {
+      // Content / Warmup slide
+      session.status = "QUESTION_ACTIVE";
+      (session as any).countdownEndsAt = undefined;
+      (session as any).previewEndsAt = undefined;
+      session.questionStartedAt = now.toISOString();
+      session.questionEndsAt = undefined;
+    }
+
+    session.updatedAt = now.toISOString();
 
     // Log Eligibility Freeze in Security Audit Logs (Phase 14 Requirement 25 & 46)
     if (institutionalDb.eligibilityAuditLogs) {

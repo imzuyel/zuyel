@@ -19,6 +19,8 @@ export interface GlobalAcademicState {
 }
 
 export interface GlobalAcademicContextType extends GlobalAcademicState {
+  selectedClass?: string | number;
+  selectedTrade?: string | number;
   activeClass: AcademicClass;
   activeTrade: AcademicTrade | null;
   isTradeApplicable: boolean;
@@ -73,19 +75,22 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
     }
   }, []);
 
-  // Save to localStorage and notify listeners whenever state changes
-  const persistState = useCallback((newState: GlobalAcademicState) => {
+  // Save to localStorage and notify listeners whenever state changes (only after hydration)
+  useEffect(() => {
+    if (!isHydrated) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("ptsc_academic_context_changed", { detail: newState })
-        );
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("ptsc_academic_context_changed", { detail: state })
+          );
+        }, 0);
       }
     } catch (e) {
       console.warn("Failed to save global academic settings to localStorage", e);
     }
-  }, []);
+  }, [state, isHydrated]);
 
   // Active Class Object
   const activeClass = useMemo(() => {
@@ -123,92 +128,60 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
   }, [activeClass]);
 
   // Mutator: Set Academic Year
-  const setAcademicYear = useCallback(
-    (year: string) => {
-      setState((prev) => {
-        const next = { ...prev, academicYear: String(year) };
-        persistState(next);
-        return next;
-      });
-    },
-    [persistState]
-  );
+  const setAcademicYear = useCallback((year: string) => {
+    setState((prev) => ({ ...prev, academicYear: String(year) }));
+  }, []);
 
   // Mutator: Set Active Class (automatically revalidates trade applicability)
-  const setSelectedClassId = useCallback(
-    (classId: string | number) => {
-      const clsStr = String(classId);
-      setState((prev) => {
-        const hasTrade = doesClassHaveTrade(clsStr);
-        let nextTradeId = prev.selectedTradeId;
+  const setSelectedClassId = useCallback((classId: string | number) => {
+    const clsStr = String(classId);
+    setState((prev) => {
+      const hasTrade = doesClassHaveTrade(clsStr);
+      let nextTradeId = prev.selectedTradeId;
 
-        if (hasTrade) {
-          const trades = getApplicableTradesForClass(clsStr);
-          const stillValid = trades.some((t) => String(t.id) === prev.selectedTradeId);
-          if (!stillValid && trades.length > 0) {
-            nextTradeId = String(trades[0].id);
-          }
-        } else {
-          nextTradeId = "all";
+      if (hasTrade) {
+        const trades = getApplicableTradesForClass(clsStr);
+        const stillValid = trades.some((t) => String(t.id) === prev.selectedTradeId);
+        if (!stillValid && trades.length > 0) {
+          nextTradeId = String(trades[0].id);
         }
+      } else {
+        nextTradeId = "all";
+      }
 
-        const next = {
-          ...prev,
-          selectedClassId: clsStr,
-          selectedTradeId: nextTradeId,
-        };
-        persistState(next);
-        return next;
-      });
-    },
-    [persistState]
-  );
+      return {
+        ...prev,
+        selectedClassId: clsStr,
+        selectedTradeId: nextTradeId,
+      };
+    });
+  }, []);
 
   // Mutator: Set Active Section
-  const setSelectedSection = useCallback(
-    (section: string) => {
-      setState((prev) => {
-        const next = { ...prev, selectedSection: section };
-        persistState(next);
-        return next;
-      });
-    },
-    [persistState]
-  );
+  const setSelectedSection = useCallback((section: string) => {
+    setState((prev) => ({ ...prev, selectedSection: section }));
+  }, []);
 
   // Mutator: Set Active Trade
-  const setSelectedTradeId = useCallback(
-    (tradeId: string | number) => {
-      setState((prev) => {
-        const next = { ...prev, selectedTradeId: String(tradeId) };
-        persistState(next);
-        return next;
-      });
-    },
-    [persistState]
-  );
+  const setSelectedTradeId = useCallback((tradeId: string | number) => {
+    setState((prev) => ({ ...prev, selectedTradeId: String(tradeId) }));
+  }, []);
 
   // Mutator: Bulk parameter update
-  const setGlobalAcademicMapping = useCallback(
-    (params: Partial<GlobalAcademicState>) => {
-      setState((prev) => {
-        const next = { ...prev, ...params };
-        persistState(next);
-        return next;
-      });
-    },
-    [persistState]
-  );
+  const setGlobalAcademicMapping = useCallback((params: Partial<GlobalAcademicState>) => {
+    setState((prev) => ({ ...prev, ...params }));
+  }, []);
 
   // Reset to default institutional configuration
   const resetToDefaults = useCallback(() => {
     setState(DEFAULT_STATE);
-    persistState(DEFAULT_STATE);
-  }, [persistState]);
+  }, []);
 
   const value: GlobalAcademicContextType = useMemo(
     () => ({
       ...state,
+      selectedClass: state.selectedClassId,
+      selectedTrade: state.selectedTradeId,
       activeClass,
       activeTrade,
       isTradeApplicable,

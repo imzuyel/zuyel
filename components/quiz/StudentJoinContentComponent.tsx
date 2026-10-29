@@ -30,9 +30,11 @@ import {
   Radio,
   Lock,
   ShieldCheck,
-  Zap
+  Zap,
+  Send
 } from "lucide-react";
 import SouthAsianStudentAvatar, { STUDENT_AVATAR_PRESETS, RenderStudentAvatar } from "@/components/common/SouthAsianStudentAvatar";
+import { COLORFUL_STUDENT_AVATARS, RenderColorfulAvatar, getAvatarById } from "@/components/quiz/avatarData";
 import { motion, AnimatePresence } from "motion/react";
 import confetti from "canvas-confetti";
 import UniversalQuestionRenderer from "@/components/quiz/shared/UniversalQuestionRenderer";
@@ -106,12 +108,15 @@ export function StudentJoinContentComponent() {
   } | null>(null);
 
   // Attendance-Linked States & Avatar Picker (Task 1)
+  const [nameTab, setNameTab] = useState<"attendance" | "manual">("attendance");
   const [attendanceEligibleStudents, setAttendanceEligibleStudents] = useState<any[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string | number | undefined>(undefined);
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
   const [isAttendanceDropdownOpen, setIsAttendanceDropdownOpen] = useState(false);
   const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
-  const [selectedAvatar, setSelectedAvatar] = useState<string>("sa_male_cyan");
+  const [selectedAvatar, setSelectedAvatar] = useState<string>("av_cyber_tiger");
+  const [submissionSpeed, setSubmissionSpeed] = useState<{ seconds: string; ms: number } | null>(null);
+  const questionStartTimeRef = useRef<number>(Date.now());
 
   // 3-Stage Flow & All-Voted Auto-Reveal States (Task 2, 3, 4)
   const [currentPhase, setCurrentPhase] = useState<"LOBBY" | "READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED" | "COMPLETED">("LOBBY");
@@ -738,133 +743,149 @@ export function StudentJoinContentComponent() {
                   </div>
                 </div>
 
-                {/* 2. Attendance-Linked Student Dropdown & Manual Input (Task 1) */}
+                {/* 2. Two Name Options: Tab 1 Attendance vs Tab 2 Manual Name (Fix 2 Requirement) */}
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between px-1">
-                    <label className="text-xs sm:text-sm font-black text-purple-300 uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
-                      <Users className="w-4 h-4 text-purple-400" />
-                      <span>📋 আজকের উপস্থিত তালিকা থেকে নাম নির্বাচন</span>
-                    </label>
-                    <span className="text-[11px] text-emerald-300 font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      <span>{attendanceEligibleStudents.length > 0 ? `${attendanceEligibleStudents.length} জন উপস্থিত` : "হাজিরা তালিকা"}</span>
-                    </span>
+                  <div className="flex items-center gap-2 p-1 bg-slate-950/90 rounded-2xl border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setNameTab("attendance")}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        nameTab === "attendance"
+                          ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>📋 আজকের উপস্থিত তালিকা</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNameTab("manual")}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        nameTab === "manual"
+                          ? "bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-600/30"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      <span>✍️ নিজের নাম লিখুন</span>
+                    </button>
                   </div>
 
-                  {/* Smart Searchable Attendance Dropdown */}
-                  <div className="space-y-1.5">
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setIsAttendanceDropdownOpen(!isAttendanceDropdownOpen)}
-                        className="w-full min-h-[48px] bg-slate-950 border-2 border-indigo-500/50 hover:border-indigo-400 rounded-2xl px-4 py-2.5 text-left text-xs sm:text-sm text-cyan-200 font-bold flex items-center justify-between gap-2 shadow-inner transition-all cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          {selectedStudentId ? (
-                            <span className="text-emerald-300 font-black flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                              <span>{displayName}</span>
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">
-                              -- আজকের উপস্থিত তালিকা থেকে তোমার নাম সিলেক্ট করো --
-                            </span>
-                          )}
-                        </div>
-                        <ChevronDown className={`w-4 h-4 text-cyan-400 shrink-0 transition-transform ${isAttendanceDropdownOpen ? "rotate-180" : ""}`} />
-                      </button>
-
-                      {/* Dropdown Options Popup */}
-                      {isAttendanceDropdownOpen && (
-                        <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-slate-900 border-2 border-indigo-500/60 rounded-2xl shadow-2xl p-2.5 space-y-2 backdrop-blur-2xl max-h-72 flex flex-col">
-                          {/* Search Filter Input */}
-                          <div className="relative shrink-0">
-                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                            <input
-                              type="text"
-                              value={attendanceSearchQuery}
-                              onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-                              placeholder="নাম বা রোল নম্বর দিয়ে ফিল্টার করো..."
-                              className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 font-medium"
-                            />
+                  {nameTab === "attendance" ? (
+                    /* Tab 1: Smart Searchable Attendance Dropdown */
+                    <div className="space-y-1.5">
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setIsAttendanceDropdownOpen(!isAttendanceDropdownOpen)}
+                          className="w-full min-h-[48px] bg-slate-950 border-2 border-indigo-500/50 hover:border-indigo-400 rounded-2xl px-4 py-2.5 text-left text-xs sm:text-sm text-cyan-200 font-bold flex items-center justify-between gap-2 shadow-inner transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            {selectedStudentId ? (
+                              <span className="text-emerald-300 font-black flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <span>{displayName}</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">
+                                -- আজকের উপস্থিত তালিকা থেকে তোমার নাম সিলেক্ট করো --
+                              </span>
+                            )}
                           </div>
+                          <ChevronDown className={`w-4 h-4 text-cyan-400 shrink-0 transition-transform ${isAttendanceDropdownOpen ? "rotate-180" : ""}`} />
+                        </button>
 
-                          {/* Student List */}
-                          <div className="overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-slate-700">
-                            {(() => {
-                              const sourceList = attendanceEligibleStudents.length > 0 ? attendanceEligibleStudents : registeredStudents;
-                              const filtered = sourceList.filter((s: any) => {
-                                const q = attendanceSearchQuery.trim().toLowerCase();
-                                if (!q) return true;
-                                const n = (s.name || s.nameBangla || "").toLowerCase();
-                                const r = String(s.roll || s.studentId || "").toLowerCase();
-                                return n.includes(q) || r.includes(q);
-                              });
+                        {/* Dropdown Options Popup */}
+                        {isAttendanceDropdownOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-slate-900 border-2 border-indigo-500/60 rounded-2xl shadow-2xl p-2.5 space-y-2 backdrop-blur-2xl max-h-72 flex flex-col">
+                            {/* Search Filter Input */}
+                            <div className="relative shrink-0">
+                              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                value={attendanceSearchQuery}
+                                onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                                placeholder="নাম বা রোল নম্বর দিয়ে ফিল্টার করো..."
+                                className="w-full h-10 pl-9 pr-3 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 font-medium"
+                              />
+                            </div>
 
-                              if (filtered.length === 0) {
-                                return (
-                                  <div className="p-3 text-center text-xs text-slate-400">
-                                    কোনো শিক্ষার্থী পাওয়া যায়নি। নিচে ম্যানুয়ালি নাম লিখুন।
-                                  </div>
-                                );
-                              }
+                            {/* Student List */}
+                            <div className="overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-slate-700">
+                              {(() => {
+                                const sourceList = attendanceEligibleStudents.length > 0 ? attendanceEligibleStudents : registeredStudents;
+                                const filtered = sourceList.filter((s: any) => {
+                                  const q = attendanceSearchQuery.trim().toLowerCase();
+                                  if (!q) return true;
+                                  const n = (s.name || s.nameBangla || "").toLowerCase();
+                                  const r = String(s.roll || s.studentId || "").toLowerCase();
+                                  return n.includes(q) || r.includes(q);
+                                });
 
-                              return filtered.map((st: any) => {
-                                const isPresent = st.statusCode === "P" || st.attendanceStatus?.includes("Present") || st.attendanceStatus?.includes("উপস্থিত");
-                                const isLate = st.statusCode === "L" || st.attendanceStatus?.includes("Late") || st.attendanceStatus?.includes("বিলম্বে");
-                                const isSelected = String(selectedStudentId) === String(st.id);
-
-                                return (
-                                  <button
-                                    key={st.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedStudentId(st.id);
-                                      setDisplayName(`${st.name || st.nameBangla} (রোল: ${st.roll})`);
-                                      setIsAttendanceDropdownOpen(false);
-                                    }}
-                                    className={`w-full text-left p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all cursor-pointer ${
-                                      isSelected
-                                        ? "bg-cyan-500/20 border-cyan-400 text-white shadow-md shadow-cyan-500/20"
-                                        : "bg-slate-950/70 hover:bg-slate-800 border-slate-800 text-slate-200"
-                                    }`}
-                                  >
-                                    <div className="min-w-0">
-                                      <div className="font-bold text-xs sm:text-sm text-white truncate">
-                                        {st.name || st.nameBangla}
-                                      </div>
-                                      <div className="text-[11px] text-slate-400 font-mono">
-                                        রোল: <strong className="text-cyan-300">{st.roll}</strong> {st.trade ? `• ${st.trade}` : ""}
-                                      </div>
+                                if (filtered.length === 0) {
+                                  return (
+                                    <div className="p-3 text-center text-xs text-slate-400">
+                                      কোনো শিক্ষার্থী পাওয়া যায়নি। অন্য ট্যাবে ম্যানুয়ালি নাম লিখুন।
                                     </div>
-                                    <div className="shrink-0 flex items-center gap-1.5">
-                                      {isPresent ? (
-                                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[10px] font-black flex items-center gap-1">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                                          <span>🟢 আজ উপস্থিত</span>
-                                        </span>
-                                      ) : isLate ? (
-                                        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-[10px] font-black flex items-center gap-1">
-                                          <span>🟡 বিলম্বে উপস্থিত</span>
-                                        </span>
-                                      ) : (
-                                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-semibold">
-                                          📋 ক্লাসের শিক্ষার্থী
-                                        </span>
-                                      )}
-                                    </div>
-                                  </button>
-                                );
-                              });
-                            })()}
+                                  );
+                                }
+
+                                return filtered.map((st: any) => {
+                                  const isPresent = st.statusCode === "P" || st.attendanceStatus?.includes("Present") || st.attendanceStatus?.includes("উপস্থিত");
+                                  const isLate = st.statusCode === "L" || st.attendanceStatus?.includes("Late") || st.attendanceStatus?.includes("বিলম্বে");
+                                  const isSelected = String(selectedStudentId) === String(st.id);
+
+                                  return (
+                                    <button
+                                      key={st.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedStudentId(st.id);
+                                        setDisplayName(`${st.name || st.nameBangla} (রোল: ${st.roll})`);
+                                        setIsAttendanceDropdownOpen(false);
+                                      }}
+                                      className={`w-full text-left p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                                        isSelected
+                                          ? "bg-cyan-500/20 border-cyan-400 text-white shadow-md shadow-cyan-500/20"
+                                          : "bg-slate-950/70 hover:bg-slate-800 border-slate-800 text-slate-200"
+                                      }`}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-bold text-xs sm:text-sm text-white truncate">
+                                          {st.name || st.nameBangla}
+                                        </div>
+                                        <div className="text-[11px] text-slate-400 font-mono">
+                                          রোল: <strong className="text-cyan-300">{st.roll}</strong> {st.trade ? `• ${st.trade}` : ""}
+                                        </div>
+                                      </div>
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        {isPresent ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[10px] font-black flex items-center gap-1">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                            <span>🟢 আজ উপস্থিত</span>
+                                          </span>
+                                        ) : isLate ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-[10px] font-black flex items-center gap-1">
+                                            <span>🟡 বিলম্বে উপস্থিত</span>
+                                          </span>
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-semibold">
+                                            📋 ক্লাসের শিক্ষার্থী
+                                          </span>
+                                        )}
+                                      </div>
+                                    </button>
+                                  );
+                                });
+                              })()}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
-
-                    {/* Manual Override Text Input */}
-                    <div className="relative group/name focus-within:shadow-[0_0_25px_rgba(168,85,247,0.4)] rounded-2xl transition-all">
+                  ) : (
+                    /* Tab 2: Manual Override Text Input */
+                    <div className="relative group/name focus-within:shadow-[0_0_25px_rgba(6,182,212,0.4)] rounded-2xl transition-all">
                       <input
                         type="text"
                         value={displayName}
@@ -872,52 +893,52 @@ export function StudentJoinContentComponent() {
                           setDisplayName(e.target.value);
                           setSelectedStudentId(undefined);
                         }}
-                        placeholder="অথবা সরাসরি নাম ও রোল লিখুন (যেমন: আরিয়ান খান, রোল ১০)"
-                        className="w-full h-13 sm:h-14 bg-slate-950 border-2 border-slate-700/80 rounded-2xl px-5 text-sm sm:text-base text-white placeholder:text-slate-500 dark:text-slate-400 placeholder:font-medium focus:outline-none focus:border-purple-400 transition-all font-bold"
+                        placeholder="আপনার পূর্ণ নাম ও রোল লিখুন (যেমন: আরিয়ান খান, রোল ১০)"
+                        className="w-full h-13 sm:h-14 bg-slate-950 border-2 border-slate-700/80 rounded-2xl px-5 text-sm sm:text-base text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 transition-all font-bold"
                         required
                       />
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 text-purple-400/70 pointer-events-none">
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 text-cyan-400/70 pointer-events-none">
                         <Users className="w-5 h-5" />
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
-                {/* 3. Avatar & Icon Grid Picker (Task 1.2) */}
+                {/* 3. 40+ Colorful Avatars Grid Picker (Fix 2 Requirement) */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between px-1">
                     <label className="text-xs sm:text-sm font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-amber-400" />
-                      <span>🎨 তোমার অ্যাভাটার পছন্দ করো (Avatar & Icon Grid)</span>
+                      <span>🎨 তোমার কালারফুল অ্যাভাটার বেছে নাও (৪০+ ইউনিক অ্যাভাটার)</span>
                     </label>
                     <span className="text-[11px] font-bold text-amber-300 font-mono bg-amber-400/10 px-2.5 py-0.5 rounded-full border border-amber-400/30 flex items-center gap-1.5">
                       <span>নির্বাচিত:</span>
-                      <strong className="text-white">{STUDENT_AVATAR_PRESETS.find(p => p.id === selectedAvatar)?.name || selectedAvatar}</strong>
+                      <strong className="text-white">{getAvatarById(selectedAvatar)?.name || selectedAvatar}</strong>
                     </span>
                   </div>
 
                   {/* Multi-Row Avatar Selection Grid */}
                   <div className="p-3 bg-slate-950/80 border-2 border-slate-800 rounded-2xl">
-                    <div className="grid grid-cols-5 sm:grid-cols-7 gap-2 max-h-48 overflow-y-auto pr-1 select-none scrollbar-thin scrollbar-thumb-slate-700">
-                      {STUDENT_AVATAR_PRESETS.map((preset) => {
-                        const isSel = selectedAvatar === preset.id;
+                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-7 gap-2.5 max-h-56 overflow-y-auto pr-1 select-none scrollbar-thin scrollbar-thumb-slate-700">
+                      {COLORFUL_STUDENT_AVATARS.map((av) => {
+                        const isSel = selectedAvatar === av.id;
                         return (
                           <motion.button
-                            key={preset.id}
+                            key={av.id}
                             type="button"
-                            onClick={() => setSelectedAvatar(preset.id)}
-                            whileHover={{ scale: 1.12 }}
-                            whileTap={{ scale: 0.92 }}
-                            className={`relative p-2 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                            onClick={() => setSelectedAvatar(av.id)}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.94 }}
+                            className={`relative p-2 rounded-2xl border flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
                               isSel
-                                ? "bg-amber-400/20 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)] ring-2 ring-amber-300/60 scale-105"
+                                ? "bg-amber-400/20 border-amber-400 shadow-[0_0_18px_rgba(251,191,36,0.5)] ring-2 ring-amber-300/70 scale-105"
                                 : "bg-slate-900 border-slate-800 hover:border-slate-700 hover:bg-slate-800/80 text-white"
                             }`}
-                            title={preset.name}
+                            title={av.name}
                           >
-                            <RenderStudentAvatar avatar={preset.id} size="sm" animate={false} />
-                            <span className="text-[9px] font-bold text-slate-300 truncate max-w-full block">
-                              {preset.name}
+                            <RenderColorfulAvatar avatarId={av.id} size="sm" showGlow={isSel} />
+                            <span className="text-[9px] font-bold text-slate-300 truncate max-w-full block leading-none">
+                              {av.name}
                             </span>
                             {isSel && (
                               <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-400 rounded-full flex items-center justify-center shadow-md">

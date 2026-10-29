@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, Quiz, QuizQuestion } from "@/lib/database";
+import { ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicStructure";
 import { validateSubjectEligibility, getTeacherSubjectAssignments } from "@/lib/subjectEngine";
 import { v4 as uuidv4 } from "uuid";
 import { extractRequestIdentity, verifyBackendAuthorization } from "@/lib/serverAuthGuard";
@@ -87,6 +88,7 @@ export async function POST(req: NextRequest) {
     const { 
       title, description, thumbnail, mode, 
       subjectId, classId, sectionId, tradeId, academicYearId, 
+      className, tradeName, subjectName, subjectCode,
       chapterId, topicId, creatorId = 1, category,
       defaultMarks, negativeMarking, randomizeQuestions, randomizeOptions,
       defaultQuestionTime, totalDuration, showScore, showCorrectAnswer,
@@ -192,8 +194,12 @@ export async function POST(req: NextRequest) {
       mode: mode as "academic" | "general",
       subjectId: subjectId ? Number(subjectId) : undefined,
       classId: classId ? Number(classId) : undefined,
+      className: className || (classId ? ACADEMIC_CLASSES.find((c) => String(c.id) === String(classId))?.nameBangla : undefined),
       sectionId: sectionId ? Number(sectionId) : undefined,
       tradeId: tradeId ? Number(tradeId) : undefined,
+      tradeName: tradeName || body.trade || (tradeId ? ALL_TRADES.find((t) => String(t.id) === String(tradeId))?.nameBangla : undefined),
+      subjectName: subjectName || body.subject || undefined,
+      subjectCode: subjectCode || undefined,
       academicYearId: academicYearId ? Number(academicYearId) : undefined,
       chapterId,
       topicId,

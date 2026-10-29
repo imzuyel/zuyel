@@ -106,13 +106,23 @@ export async function POST(
     const marks = graded ? (Number(body.marks) || 100) : 0;
     const timeLimit = graded ? (Number(body.timeLimit) || 30) : 0;
 
+    const pairs = body.pairs || body.matchingPairs || body.questionData?.pairs || body.questionData?.matchingPairs;
+    const items = body.items || body.reorderItems || body.reorderSequence || body.questionData?.items || body.questionData?.reorderItems;
+    const sentenceWithBlank = body.sentenceWithBlank || body.questionData?.sentenceWithBlank || (qType === "FILL_BLANKS" ? (body.questionText || body.title) : undefined);
+    const blankAnswer = body.blankAnswer || body.questionData?.blankAnswer;
+    const acceptedAnswers = body.acceptedAnswers || (blankAnswer ? [blankAnswer] : body.questionData?.acceptedAnswers);
+
     const fullQuestionData = {
-      options: body.options || body.questionData?.options || (graded ? ["অপশন ১", "অপশন ২"] : []),
+      options: body.options || body.questionData?.options || (graded && qType === "MCQ" ? ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"] : []),
       correctIndex: body.correctIndex ?? body.correctAnswer ?? 0,
       correctAnswer: body.correctAnswer ?? 0,
-      pairs: body.pairs || body.matchingPairs || body.questionData?.pairs,
-      items: body.items || body.reorderSequence || body.questionData?.items,
-      acceptedAnswers: body.acceptedAnswers || (body.blankAnswer ? [body.blankAnswer] : body.questionData?.acceptedAnswers),
+      pairs,
+      matchingPairs: pairs,
+      items,
+      reorderItems: items,
+      sentenceWithBlank,
+      blankAnswer,
+      acceptedAnswers,
       imageLeftUrl,
       imageRightUrl,
       bulletPoints,
@@ -137,6 +147,18 @@ export async function POST(
       questionType: qType,
       questionSnapshot: {
         questionText: body.questionText || body.title || "Untitled Slide",
+        type: qType,
+        questionType: qType,
+        options: fullQuestionData.options,
+        pairs,
+        matchingPairs: pairs,
+        items,
+        reorderItems: items,
+        sentenceWithBlank,
+        blankAnswer,
+        acceptedAnswers,
+        correctIndex: fullQuestionData.correctIndex,
+        correctAnswer: fullQuestionData.correctAnswer,
         questionData: fullQuestionData,
         explanation: body.explanation || "",
         imageLeftUrl,
@@ -215,7 +237,7 @@ export async function PUT(
       const questionText = q.questionText || q.question || q.title || `স্লাইড ${idx + 1}`;
       const optionsList = Array.isArray(q.options)
         ? q.options
-        : q.questionData?.options || (graded ? ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"] : []);
+        : q.questionData?.options || (graded && qType === "MCQ" ? ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"] : []);
       const correctIndex = typeof q.correctAnswer === "number"
         ? q.correctAnswer
         : typeof q.correctIndex === "number"
@@ -223,20 +245,22 @@ export async function PUT(
         : q.questionData?.correctIndex ?? 0;
       const correctAnswer = typeof q.correctAnswer === "boolean"
         ? q.correctAnswer
-        : q.questionData?.correctAnswer;
+        : q.questionData?.correctAnswer ?? (typeof q.correctAnswer !== "undefined" ? q.correctAnswer : correctIndex);
       const correctIndices = Array.isArray(q.correctIndices)
         ? q.correctIndices
         : q.questionData?.correctIndices;
       const pairs = Array.isArray(q.pairs)
         ? q.pairs
-        : q.matchingPairs || q.questionData?.pairs;
+        : q.matchingPairs || q.questionData?.pairs || q.questionData?.matchingPairs;
       const items = Array.isArray(q.items)
         ? q.items
-        : q.reorderSequence || q.questionData?.items;
+        : q.reorderItems || q.reorderSequence || q.questionData?.items || q.questionData?.reorderItems;
+      const sentenceWithBlank = q.sentenceWithBlank || q.questionData?.sentenceWithBlank || (qType === "FILL_BLANKS" ? (questionText || q.title) : undefined);
+      const blankAnswer = q.blankAnswer || q.questionData?.blankAnswer || (q.acceptedAnswers && q.acceptedAnswers[0]);
       const acceptedAnswers = Array.isArray(q.acceptedAnswers)
         ? q.acceptedAnswers
-        : q.blankAnswer
-        ? [q.blankAnswer]
+        : blankAnswer
+        ? [blankAnswer]
         : q.questionData?.acceptedAnswers;
       const expectedAnswerKeyword = q.expectedAnswerKeyword || q.questionData?.expectedAnswerKeyword;
       const caseSensitive = q.caseSensitive ?? q.questionData?.caseSensitive;
@@ -257,7 +281,11 @@ export async function PUT(
         correctAnswer,
         correctIndices,
         pairs,
+        matchingPairs: pairs,
         items,
+        reorderItems: items,
+        sentenceWithBlank,
+        blankAnswer,
         acceptedAnswers,
         expectedAnswerKeyword,
         caseSensitive,
@@ -286,18 +314,24 @@ export async function PUT(
         questionSnapshot: {
           questionText,
           type: qType,
+          questionType: qType,
           options: optionsList,
           correctIndex,
           correctAnswer,
           correctIndices,
           pairs,
+          matchingPairs: pairs,
           items,
+          reorderItems: items,
+          sentenceWithBlank,
+          blankAnswer,
           acceptedAnswers,
           expectedAnswerKeyword,
           caseSensitive,
           explanation,
           imageLeftUrl,
           imageRightUrl,
+
           bulletPoints,
           maxWordsPerStudent,
           questionData: fullQuestionData,

@@ -315,6 +315,7 @@ export async function POST(
       isCorrect: evaluation.isCorrect,
       correctAnswer: activeQuestion.correctAnswer,
       totalPoints: evaluation.totalPoints,
+      responseTimeMs: newAnswer.responseTimeMs,
       allVoted: Boolean((session as any).allVoted),
       isAnswerRevealed: Boolean((session as any).isAnswerRevealed),
       submittedCount: answersForCurrentQ.length,

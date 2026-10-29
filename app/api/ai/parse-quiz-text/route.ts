@@ -3,17 +3,72 @@ import { generateJsonWithFailover } from "@/lib/aiFailoverPipeline";
 
 export interface ParsedImportedQuestion {
   id: string;
-  type: "mcq_single" | "mcq_multiple" | "fill_blank" | "matching" | "true_false";
+  type: "mcq_single" | "mcq_multiple" | "fill_blank" | "matching" | "true_false" | "reorder" | "word_cloud" | "open_ended" | "text_slide";
   questionText: string;
   options?: string[];
-  correctAnswer?: number | boolean; // index for MCQ single, or boolean for True/False
+  correctAnswer?: number | boolean | string; // index for MCQ single, or boolean for True/False
   correctIndices?: number[]; // for MCQ multiple
   acceptedAnswers?: string[]; // for fill in blank
   pairs?: { left: string; right: string }[]; // for matching
+  items?: string[]; // for reorder
+  content?: string;
   explanation: string;
   conceptTopic: string;
   marks: number;
   timeLimit: number;
+}
+
+export interface ParsedPresentationSlide {
+  id: string;
+  type: "MCQ" | "MATCHING" | "FILL_BLANKS" | "REORDER" | "TRUE_FALSE" | "WORD_CLOUD" | "OPEN_ENDED" | "TEXT_SLIDE" | "IMAGE_COMPARE" | "LIVE_QA";
+  title: string;
+  content?: string;
+  options?: string[];
+  correctAnswer?: number | boolean | string;
+  pairs?: { left: string; right: string }[];
+  items?: string[];
+  acceptedAnswers?: string[];
+  explanation: string;
+  points: number;
+  timeLimit: number;
+}
+
+// Convert any question format to unified presentation slide
+function convertToPresentationSlide(q: any, idx: number): ParsedPresentationSlide {
+  let sType: ParsedPresentationSlide["type"] = "MCQ";
+  const rawType = (q.type || "").toUpperCase().replace(/-/g, "_");
+
+  if (rawType.includes("MATCH")) sType = "MATCHING";
+  else if (rawType.includes("BLANK") || rawType.includes("FILL")) sType = "FILL_BLANKS";
+  else if (rawType.includes("REORDER") || rawType.includes("ORDER") || rawType.includes("SEQUENCE")) sType = "REORDER";
+  else if (rawType.includes("TRUE") || rawType.includes("FALSE") || rawType.includes("TF")) sType = "TRUE_FALSE";
+  else if (rawType.includes("CLOUD")) sType = "WORD_CLOUD";
+  else if (rawType.includes("OPEN")) sType = "OPEN_ENDED";
+  else if (rawType.includes("TEXT") || rawType.includes("HEADING")) sType = "TEXT_SLIDE";
+  else sType = "MCQ";
+
+  const isGraded = !["TEXT_SLIDE", "IMAGE_COMPARE", "WORD_CLOUD", "OPEN_ENDED", "LIVE_QA"].includes(sType);
+
+  return {
+    id: q.id || `slide-${Date.now()}-${idx + 1}`,
+    type: sType,
+    title: q.questionText || q.title || q.prompt || `প্রশ্ন ${idx + 1}`,
+    content: q.content || "",
+    options: Array.isArray(q.options) && q.options.length > 0
+      ? q.options
+      : sType === "TRUE_FALSE"
+        ? ["সত্য (True)", "মিথ্যা (False)"]
+        : sType === "MCQ"
+          ? ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"]
+          : [],
+    correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
+    pairs: Array.isArray(q.pairs) ? q.pairs : undefined,
+    items: Array.isArray(q.items) ? q.items : undefined,
+    acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers : undefined,
+    explanation: q.explanation || "সঠিক উত্তরটি যাচাই করা হয়েছে।",
+    points: isGraded ? (Number(q.marks) || Number(q.points) || 100) : 0,
+    timeLimit: isGraded ? (Number(q.timeLimit) || 30) : 0,
+  };
 }
 
 // Robust Algorithmic Parser as instant fail-safe or offline parser
@@ -42,16 +97,27 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
       cleanBlock.includes("col a") ||
       cleanBlock.includes("column");
 
+    const isReorder =
+      (cleanBlock.toLowerCase().includes("reorder") ||
+        cleanBlock.toLowerCase().includes("sequence") ||
+        cleanBlock.toLowerCase().includes("arrange") ||
+        cleanBlock.includes("ক্রম") ||
+        cleanBlock.includes("সাজাও") ||
+        cleanBlock.includes("ধারাবাহিক")) &&
+      !isMatching;
+
     const isFillBlank =
       (cleanBlock.includes("___") || cleanBlock.includes(".....") || cleanBlock.includes("শূন্যস্থান")) &&
-      !isMatching;
+      !isMatching &&
+      !isReorder;
 
     const isTrueFalse =
       (cleanBlock.toLowerCase().includes("true/false") ||
         cleanBlock.toLowerCase().includes("true or false") ||
         cleanBlock.includes("সত্য/মিথ্যা") ||
         cleanBlock.includes("সত্য নাকি মিথ্যা")) &&
-      !isMatching;
+      !isMatching &&
+      !isReorder;
 
     let questionText = lines[0].replace(/^(?:[0-9]{1,3}[.)]|[Qq]uestion\s*[0-9]{1,3}[:.]|প্রশ্ন\s*[০-৯0-9]{1,3}[:.]|#+\s*[0-9]{1,3}[.)])\s*/, "").trim();
     if (!questionText) questionText = lines[0];
@@ -75,7 +141,6 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
     }
 
     if (isMatching) {
-      // Process Matching pairs
       const pairs: { left: string; right: string }[] = [];
       for (const line of lines) {
         if (line.includes("->") || line.includes(" - ") || line.includes(" : ") || line.includes("—")) {
@@ -98,15 +163,40 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
           pairs,
           explanation: explanation || "সঠিক জোড়াগুলোর পারস্পরিক সম্পর্ক মিলিয়ে নিন।",
           conceptTopic,
-          marks: pairs.length,
+          marks: 100,
           timeLimit: 40,
         });
         continue;
       }
     }
 
+    if (isReorder) {
+      const items: string[] = [];
+      for (const line of lines.slice(1)) {
+        const itemMatch = line.match(/^(?:ধাপ\s*[০-৯0-9]+|[0-9A-Za-z১-৯ক-ঘ])[.)\-:]\s*(.+)$/);
+        if (itemMatch) {
+          items.push(itemMatch[1].trim());
+        } else if (line.length > 2 && !line.toLowerCase().includes("answer") && !line.includes("ব্যাখ্যা")) {
+          items.push(line);
+        }
+      }
+
+      if (items.length >= 2) {
+        questions.push({
+          id: `imp-${Date.now()}-${qIndex++}`,
+          type: "reorder",
+          questionText: questionText || "নিচের ধাপগুলোকে সঠিক ক্রমানুসারে সাজান",
+          items,
+          explanation: explanation || "ধারাবাহিক ধাপগুলো সঠিকভাবে ক্রমানুসারে সাজানো হয়েছে।",
+          conceptTopic,
+          marks: 100,
+          timeLimit: 35,
+        });
+        continue;
+      }
+    }
+
     if (isFillBlank) {
-      // Extract accepted answers
       let answerText = "";
       const ansLine = lines.find((l) =>
         /^(?:Answer|উত্তর|Correct|সঠিক উত্তর|Ans)[\s*:]+/i.test(l)
@@ -126,7 +216,7 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
         acceptedAnswers,
         explanation: explanation || `সঠিক উত্তর হলো: ${acceptedAnswers.join(", ")}`,
         conceptTopic,
-        marks: 2,
+        marks: 100,
         timeLimit: 25,
       });
       continue;
@@ -151,7 +241,7 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
         correctAnswer: isTrue,
         explanation: explanation || (isTrue ? "প্রদত্ত বিবৃতিটি সম্পূর্ণ সত্য।" : "প্রদত্ত বিবৃতিটি সঠিক নয়।"),
         conceptTopic,
-        marks: 1,
+        marks: 100,
         timeLimit: 20,
       });
       continue;
@@ -162,14 +252,12 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
     let correctIndex = 0;
 
     for (const line of lines) {
-      // Option line detection: A) ..., B) ..., ক) ..., খ) ..., 1) ...
       const optMatch = line.match(/^([A-Da-dক-ঘ]|[1-4])[.)\-:]\s*(.+)$/);
       if (optMatch) {
         options.push(optMatch[2].trim());
       }
     }
 
-    // Find correct answer indicator
     const ansLine = lines.find((l) =>
       /^(?:Answer|উত্তর|Correct|সঠিক উত্তর|Ans)[\s*:]+/i.test(l)
     );
@@ -184,12 +272,10 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
       }
     }
 
-    // If no options were found, create clean default options
     if (options.length < 2) {
       options.push("অপশন ক (বিকল্প ১)", "অপশন খ (বিকল্প ২)", "অপশন গ (বিকল্প ৩)", "অপশন ঘ (বিকল্প ৪)");
     }
 
-    // Ensure correctIndex is within range
     if (correctIndex >= options.length) correctIndex = 0;
 
     questions.push({
@@ -200,7 +286,7 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
       correctAnswer: correctIndex,
       explanation: explanation || `সঠিক উত্তর হলো: ${options[correctIndex] || "বিকল্প ১"}`,
       conceptTopic,
-      marks: 2,
+      marks: 100,
       timeLimit: 30,
     });
   }
@@ -211,49 +297,92 @@ function parseRawQuizTextAlgorithmically(rawText: string): ParsedImportedQuestio
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { rawText, trade = "General", classLevel = "class-9" } = body;
+    const { rawText, trade = "General", classLevel = "class-9", format = "both" } = body;
 
     if (!rawText || !rawText.trim()) {
       return NextResponse.json(
-        { success: false, message: "কোনো টেক্সট পাওয়া যায়নি। দয়া করে প্রশ্ন পেস্ট করুন।" },
+        { success: false, message: "কোনো টেক্সট পাওয়া যায়নি। দয়া করে প্রশ্ন বা নোট পেস্ট করুন।" },
         { status: 400 }
       );
     }
 
-    // Execute multi-key AI failover parsing
-    try {
-      const prompt = `You are an expert educational assessment parser for technical/vocational and academic schools in Bangladesh.
-A teacher has copied raw quiz questions from an external AI tool (ChatGPT, Gemini, Claude, etc.) and pasted it below.
-Parse this raw text into a clean JSON array of structured questions.
+    const cleanRaw = rawText.trim();
 
-Supported question types:
-1. "mcq_single" (Single choice MCQ with options array and 0-based correctAnswer index)
-2. "mcq_multiple" (Multiple choice MCQ with options array and correctIndices array)
-3. "fill_blank" (Fill in the blanks with acceptedAnswers string array)
-4. "matching" (Left-to-right matching with pairs array: [{ left: "...", right: "..." }])
-5. "true_false" (True/False with boolean correctAnswer: true or false)
+    // 1. FAST-PATH JSON PARSER: Instant 0ms execution if user pasted JSON array or object
+    if (cleanRaw.startsWith("[") || cleanRaw.startsWith("{")) {
+      try {
+        let parsedJson = JSON.parse(cleanRaw);
+        if (!Array.isArray(parsedJson) && parsedJson?.slides && Array.isArray(parsedJson.slides)) {
+          parsedJson = parsedJson.slides;
+        } else if (!Array.isArray(parsedJson) && parsedJson?.questions && Array.isArray(parsedJson.questions)) {
+          parsedJson = parsedJson.questions;
+        }
+
+        if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+          const slides = parsedJson.map((item, idx) => convertToPresentationSlide(item, idx));
+          return NextResponse.json({
+            success: true,
+            source: "fast_json_parser",
+            count: slides.length,
+            slides,
+            questions: parsedJson,
+          });
+        }
+      } catch (jsonErr) {
+        // Not clean JSON, proceed to algorithmic / AI
+      }
+    }
+
+    // 2. High-performance Instant Algorithmic Parsing
+    const algorithmicQuestions = parseRawQuizTextAlgorithmically(cleanRaw);
+    if (algorithmicQuestions.length >= 2 && !body.forceAi) {
+      const slides = algorithmicQuestions.map((q, idx) => convertToPresentationSlide(q, idx));
+      return NextResponse.json({
+        success: true,
+        source: "instant_algorithmic_parser",
+        count: slides.length,
+        slides,
+        questions: algorithmicQuestions,
+      });
+    }
+
+    // 3. Multi-Key AI Failover Pipeline for complex, unstructured, or raw paragraphs
+    try {
+      const prompt = `You are an expert educational assessment parser for technical/vocational and academic schools under BTEB, Bangladesh.
+A teacher has copied raw notes, questions, or text from an external AI (ChatGPT, Claude, Gemini, Google Docs, etc.) and pasted it below.
+Convert this raw text into a clean JSON array of structured presentation slides and quiz questions.
+
+Supported slide types:
+1. "MCQ": Single choice with 4 options and 0-based correctAnswer index (0 to 3).
+2. "MATCHING": Left-to-right matching with pairs array: [{ "left": "...", "right": "..." }].
+3. "FILL_BLANKS": Sentence with blank, acceptedAnswers string array, and explanation.
+4. "REORDER": Sequence ordering with items string array in the correct chronological order.
+5. "TRUE_FALSE": Verification with boolean correctAnswer (true/false) and options ["সত্য (True)", "মিথ্যা (False)"].
+6. "WORD_CLOUD": Interactive prompt with options array representing popular keywords.
+7. "OPEN_ENDED": Discussion/reflection prompt.
+8. "TEXT_SLIDE": Informational slide with title and content summary.
 
 Return ONLY a pure JSON array of objects adhering strictly to this schema:
 [
   {
-    "id": "q-1",
-    "type": "mcq_single" | "mcq_multiple" | "fill_blank" | "matching" | "true_false",
-    "questionText": "Question string in original language (Bangla or English)",
-    "options": ["Option A", "Option B", "Option C", "Option D"], // Required for mcq_single and mcq_multiple
-    "correctAnswer": 0, // 0-based integer for mcq_single, boolean for true_false
-    "correctIndices": [0, 2], // Only if mcq_multiple
-    "acceptedAnswers": ["Answer string"], // Only if fill_blank
-    "pairs": [{ "left": "...", "right": "..." }], // Only if matching
-    "explanation": "Explanation in original language",
-    "conceptTopic": "Core topic name",
-    "marks": 2,
+    "id": "slide-1",
+    "type": "MCQ" | "MATCHING" | "FILL_BLANKS" | "REORDER" | "TRUE_FALSE" | "WORD_CLOUD" | "OPEN_ENDED" | "TEXT_SLIDE",
+    "title": "Clean question or slide title in Bangla/English",
+    "content": "Detailed text content if TEXT_SLIDE",
+    "options": ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
+    "correctAnswer": 0,
+    "pairs": [{ "left": "বাম পাশ", "right": "ডান পাশ" }],
+    "items": ["ধাপ ১", "ধাপ ২", "ধাপ ৩"],
+    "acceptedAnswers": ["সঠিক উত্তর"],
+    "explanation": "Clear explanation in original language",
+    "points": 100,
     "timeLimit": 30
   }
 ]
 
 RAW TEXT TO PARSE:
 """
-${rawText}
+${cleanRaw}
 """`;
 
       const { data: parsedData, result } = await generateJsonWithFailover<any>({
@@ -262,46 +391,36 @@ ${rawText}
       });
 
       let parsed = parsedData;
-      if (!Array.isArray(parsed) && parsed?.questions && Array.isArray(parsed.questions)) {
+      if (!Array.isArray(parsed) && parsed?.slides && Array.isArray(parsed.slides)) {
+        parsed = parsed.slides;
+      } else if (!Array.isArray(parsed) && parsed?.questions && Array.isArray(parsed.questions)) {
         parsed = parsed.questions;
       }
 
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const sanitizedQuestions: ParsedImportedQuestion[] = parsed.map((q, idx) => ({
-          id: `imp-${Date.now()}-${idx + 1}`,
-          type: q.type || "mcq_single",
-          questionText: q.questionText || `প্রশ্ন ${idx + 1}`,
-          options: Array.isArray(q.options) && q.options.length > 0 ? q.options : ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
-          correctAnswer: typeof q.correctAnswer === "number" || typeof q.correctAnswer === "boolean" ? q.correctAnswer : 0,
-          correctIndices: Array.isArray(q.correctIndices) ? q.correctIndices : undefined,
-          acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers : undefined,
-          pairs: Array.isArray(q.pairs) ? q.pairs : undefined,
-          explanation: q.explanation || "সঠিক উত্তরটি যাচাই করা হয়েছে।",
-          conceptTopic: q.conceptTopic || trade || "কারিগরি বিষয়",
-          marks: Number(q.marks) || 2,
-          timeLimit: Number(q.timeLimit) || 30,
-        }));
-
+        const slides = parsed.map((item, idx) => convertToPresentationSlide(item, idx));
         return NextResponse.json({
           success: true,
           source: "ai_multi_key_pipeline",
           providerUsed: `${result.keyAlias} (${result.modelName})`,
-          count: sanitizedQuestions.length,
-          questions: sanitizedQuestions,
+          count: slides.length,
+          slides,
+          questions: parsed,
         });
       }
     } catch (aiError: any) {
       console.warn("AI parsing failed on all keys, falling back to algorithmic parser:", aiError?.message);
     }
 
-    // High performance Algorithmic Fallback
-    const fallbackQuestions = parseRawQuizTextAlgorithmically(rawText);
+    // Final Fallback: Return whatever algorithmic parser found
+    const finalSlides = algorithmicQuestions.map((q, idx) => convertToPresentationSlide(q, idx));
 
     return NextResponse.json({
       success: true,
-      source: "algorithmic_parser",
-      count: fallbackQuestions.length,
-      questions: fallbackQuestions,
+      source: "algorithmic_fallback",
+      count: finalSlides.length,
+      slides: finalSlides,
+      questions: algorithmicQuestions,
     });
   } catch (error: any) {
     console.error("Error in parse-quiz-text route:", error);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,13 +13,14 @@ import { ArchetypeSkeleton } from "./archetypes/ArchetypeSkeleton";
 import { isOptionMatch } from "./archetypes/shared";
 
 /* =========================================================================
-   PERFORMANCE & SPEED OPTIMIZATION (ZERO LAG):
-   Code-split all question-type renderers and 10 archetypes using next/dynamic
-   so ONLY the active template and active question-type renderer are in memory.
-   Heavy @dnd-kit libraries and SVG line math are NOT bundled synchronously.
+   LIGHT & FAST ARCHITECTURE (ZERO BLOAT, 1 SIGNATURE TEMPLATE PER TYPE):
+   - MATCHING: Dedicated 2-Column SVG Cross-Line Matching Board
+   - FILL_BLANKS: Dedicated Inline Capsule Input & Word-Bank Chips
+   - REORDER: Dedicated Draggable / Arrow Sequence Reordering Cards
+   - TRUE_FALSE: Dedicated Symmetrical True / False Cards
+   - MCQ: 1 Ultra-Fast Responsive Light/Dark Mode 2x2 Interactive Cards (A, B, C, D)
 ========================================================================= */
 
-// Lazy Question Type Renderers
 const DynamicMatchingBoard = dynamic(() => import("./MatchingBoardTemplates"), {
   ssr: false,
   loading: () => <ArchetypeSkeleton title="ম্যাচিং বোর্ড লোড হচ্ছে..." />,
@@ -32,7 +33,7 @@ const DynamicFillBlanks = dynamic(() => import("./FillBlanksTemplates"), {
 
 const DynamicReorderSequence = dynamic(() => import("./ReorderSequenceTemplates"), {
   ssr: false,
-  loading: () => <ArchetypeSkeleton title="ক্রমবিন্যাস বোর্ড লোড হচ্ছে..." />,
+  loading: () => <ArchetypeSkeleton title="ক্রম সাজানো বোর্ড লোড হচ্ছে..." />,
 });
 
 const DynamicTrueFalse = dynamic(() => import("./TrueFalseTemplates"), {
@@ -40,360 +41,147 @@ const DynamicTrueFalse = dynamic(() => import("./TrueFalseTemplates"), {
   loading: () => <ArchetypeSkeleton title="সত্য / মিথ্যা লোড হচ্ছে..." />,
 });
 
-// Lazy 10 Distinct Structural Archetypes
-const DynamicArchetype01 = dynamic(() => import("./archetypes/Archetype01"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype02 = dynamic(() => import("./archetypes/Archetype02"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype03 = dynamic(() => import("./archetypes/Archetype03"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype04 = dynamic(() => import("./archetypes/Archetype04"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype05 = dynamic(() => import("./archetypes/Archetype05"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype06 = dynamic(() => import("./archetypes/Archetype06"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype07 = dynamic(() => import("./archetypes/Archetype07"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype08 = dynamic(() => import("./archetypes/Archetype08"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype09 = dynamic(() => import("./archetypes/Archetype09"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
-const DynamicArchetype10 = dynamic(() => import("./archetypes/Archetype10"), {
-  ssr: false,
-  loading: () => <ArchetypeSkeleton />,
-});
+// A, B, C, D Badges & Color Accents
+const OPTION_BADGES = [
+  { label: "A", shape: "▲", color: "from-cyan-500 to-blue-600", border: "border-cyan-500/50", text: "text-cyan-400", lightBg: "bg-cyan-50", darkBg: "bg-cyan-950/30" },
+  { label: "B", shape: "◆", color: "from-purple-500 to-indigo-600", border: "border-purple-500/50", text: "text-purple-400", lightBg: "bg-purple-50", darkBg: "bg-purple-950/30" },
+  { label: "C", shape: "●", color: "from-amber-500 to-orange-600", border: "border-amber-500/50", text: "text-amber-400", lightBg: "bg-amber-50", darkBg: "bg-amber-950/30" },
+  { label: "D", shape: "■", color: "from-emerald-500 to-teal-600", border: "border-emerald-500/50", text: "text-emerald-400", lightBg: "bg-emerald-50", darkBg: "bg-emerald-950/30" },
+];
 
-/* =========================================================================
-   20 DISTINCT TEMPLATES REGISTRY (10 Archetypes x 2 Variants Each)
-========================================================================= */
+/**
+ * 1 SIGNATURE ULTRA-CLEAN FAST MCQ TEMPLATE (LIGHT & DARK MODE READY)
+ */
+function SignatureFastMCQ({
+  question,
+  questionIndex = 0,
+  totalQuestions = 1,
+  selectedAnswer,
+  onSelectAnswer,
+  isConfirmed = false,
+  isCorrect,
+  disabled = false,
+}: {
+  question: NormalizedQuizQuestion;
+  questionIndex?: number;
+  totalQuestions?: number;
+  selectedAnswer: any;
+  onSelectAnswer?: (ans: any) => void;
+  isConfirmed?: boolean;
+  isCorrect?: boolean;
+  disabled?: boolean;
+}) {
+  const options = question.options || [];
+
+  return (
+    <div className="w-full max-w-4xl mx-auto space-y-5">
+      {/* Question Header Card */}
+      <div className="relative p-5 sm:p-7 rounded-3xl bg-slate-900/90 dark:bg-slate-900/90 light:bg-white border-2 border-slate-800 dark:border-slate-800 shadow-xl backdrop-blur-md transition-all">
+        <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-black tracking-wider uppercase">
+            <span>বহুনির্বাচনী প্রশ্ন (MCQ)</span>
+          </div>
+          <span className="text-xs font-mono font-bold text-slate-400">
+            প্রশ্ন {questionIndex + 1} / {totalQuestions}
+          </span>
+        </div>
+
+        <h3 className="text-lg sm:text-2xl font-black text-white dark:text-white light:text-slate-900 leading-snug pt-3">
+          {question.questionText}
+        </h3>
+      </div>
+
+      {/* 2x2 Interactive Options Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        {options.map((optText, idx) => {
+          const badge = OPTION_BADGES[idx % OPTION_BADGES.length];
+          const isSelected = selectedAnswer !== null && selectedAnswer !== undefined && (
+            selectedAnswer === idx ||
+            String(selectedAnswer) === String(idx) ||
+            String(selectedAnswer) === String(optText)
+          );
+
+          // Feedback Styling when answer is confirmed & revealed
+          let stateStyle = "bg-slate-900/70 dark:bg-slate-900/70 light:bg-slate-50 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60 text-slate-200";
+
+          if (isConfirmed && isCorrect !== undefined) {
+            const isTrueCorrect = question.correctOptionIndex === idx || isOptionMatch(optText, idx, question.correctAnswer);
+            if (isTrueCorrect) {
+              stateStyle = "bg-emerald-500/20 border-2 border-emerald-400 text-emerald-200 ring-2 ring-emerald-400/40 shadow-[0_0_20px_rgba(16,185,129,0.3)]";
+            } else if (isSelected && !isTrueCorrect) {
+              stateStyle = "bg-rose-500/20 border-2 border-rose-400 text-rose-200 ring-2 ring-rose-400/40";
+            } else {
+              stateStyle = "bg-slate-950/40 border-slate-900 text-slate-600 opacity-35";
+            }
+          } else if (isSelected) {
+            stateStyle = `bg-gradient-to-r ${badge.color} text-white border-white/60 shadow-lg scale-[1.01] ring-2 ring-cyan-400/50`;
+          }
+
+          return (
+            <motion.button
+              key={idx}
+              type="button"
+              whileHover={!disabled ? { scale: 1.015 } : {}}
+              whileTap={!disabled ? { scale: 0.985 } : {}}
+              disabled={disabled}
+              onClick={() => onSelectAnswer && onSelectAnswer(idx)}
+              className={`p-4 sm:p-5 rounded-2xl border-2 transition-all flex items-center gap-3.5 text-left cursor-pointer disabled:cursor-not-allowed ${stateStyle}`}
+            >
+              {/* Badge Icon */}
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs font-mono shrink-0 shadow-md transition-all ${
+                  isSelected
+                    ? "bg-white text-slate-950"
+                    : `bg-gradient-to-br ${badge.color} text-white`
+                }`}
+              >
+                <span>{badge.label}</span>
+              </div>
+
+              {/* Option Text */}
+              <span className="flex-1 font-bold text-sm sm:text-base leading-snug">
+                {optText}
+              </span>
+
+              {/* Selection Check Indicator */}
+              {isSelected && (
+                <div className="w-5 h-5 rounded-full bg-white text-slate-950 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-black">✓</span>
+                </div>
+              )}
+            </motion.button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export const SHOWCASE_TEMPLATES: MCQArchetypeTemplate[] = [
-  // 1. Archetype 1, Variant 1
   {
     id: 1,
     archetypeId: 1,
-    archetypeName: "Open Cut-Frame & Corner Question Mark",
-    archetypeNameBangla: "ওপেন কাট-ফ্রেম ও কর্নার প্রশ্নচিহ্ন",
-    variantName: "Neon Cyan & Obsidian",
+    archetypeName: "Signature Light & Dark Fast Engine",
+    archetypeNameBangla: "সিগনেচার ফাস্ট লাইট/ডার্ক ইঞ্জিন",
+    variantName: "Dark High-Contrast",
     accentColor: "#06B6D4",
     glowColor: "rgba(6,182,212,0.3)",
-    component: (props) => (
-      <DynamicArchetype01
-        {...props}
-        accentColor="#06B6D4"
-        borderColor="border-cyan-500"
-        bgGradient="bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/60"
-      />
-    ),
+    component: (props: any) => <SignatureFastMCQ {...props} />,
   },
-  // 2. Archetype 1, Variant 2
   {
     id: 2,
     archetypeId: 1,
-    archetypeName: "Open Cut-Frame & Corner Question Mark",
-    archetypeNameBangla: "ওপেন কাট-ফ্রেম ও কর্নার প্রশ্নচিহ্ন",
-    variantName: "Solar Gold & Ember",
-    accentColor: "#F59E0B",
-    glowColor: "rgba(245,158,11,0.3)",
-    component: (props) => (
-      <DynamicArchetype01
-        {...props}
-        accentColor="#F59E0B"
-        borderColor="border-amber-500"
-        bgGradient="bg-gradient-to-br from-slate-950 via-amber-950/40 to-slate-950"
-      />
-    ),
-  },
-  // 3. Archetype 2, Variant 1
-  {
-    id: 3,
-    archetypeId: 2,
-    archetypeName: "Hexagonal Connected Nodes",
-    archetypeNameBangla: "হেক্সাগনাল কানেক্টেড নোডস",
-    variantName: "Cyber Jade Matrix",
-    accentColor: "#10B981",
-    glowColor: "rgba(16,185,129,0.3)",
-    component: (props) => (
-      <DynamicArchetype02
-        {...props}
-        accentColor="#10B981"
-        bgClass="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950"
-      />
-    ),
-  },
-  // 4. Archetype 2, Variant 2
-  {
-    id: 4,
-    archetypeId: 2,
-    archetypeName: "Hexagonal Connected Nodes",
-    archetypeNameBangla: "হেক্সাগনাল কানেক্টেড নোডস",
-    variantName: "Deep Violet Quantum",
-    accentColor: "#8B5CF6",
-    glowColor: "rgba(139,92,246,0.3)",
-    component: (props) => (
-      <DynamicArchetype02
-        {...props}
-        accentColor="#8B5CF6"
-        bgClass="bg-gradient-to-r from-purple-950 via-slate-900 to-purple-950"
-      />
-    ),
-  },
-  // 5. Archetype 3, Variant 1
-  {
-    id: 5,
-    archetypeId: 3,
-    archetypeName: "Keyhole Notch Neon Outline",
-    archetypeNameBangla: "কিহোল নচ নিয়ন আউটলাইন",
-    variantName: "Hot Pink Synthwave",
-    accentColor: "#EC4899",
-    glowColor: "rgba(236,72,153,0.3)",
-    component: (props) => (
-      <DynamicArchetype03
-        {...props}
-        accentColor="#EC4899"
-        glowColor="rgba(236,72,153,0.3)"
-      />
-    ),
-  },
-  // 6. Archetype 3, Variant 2
-  {
-    id: 6,
-    archetypeId: 3,
-    archetypeName: "Keyhole Notch Neon Outline",
-    archetypeNameBangla: "কিহোল নচ নিয়ন আউটলাইন",
-    variantName: "Electric Aqua Tron",
-    accentColor: "#06B6D4",
-    glowColor: "rgba(6,182,212,0.3)",
-    component: (props) => (
-      <DynamicArchetype03
-        {...props}
-        accentColor="#06B6D4"
-        glowColor="rgba(6,182,212,0.3)"
-      />
-    ),
-  },
-  // 7. Archetype 4, Variant 1
-  {
-    id: 7,
-    archetypeId: 4,
-    archetypeName: "3D Claymorphism Puffy Pillow",
-    archetypeNameBangla: "থ্রিডি ক্লেমর্ফিজম পাফি পিলো",
-    variantName: "Cotton Candy Lilac",
-    accentColor: "#A855F7",
-    glowColor: "rgba(168,85,247,0.3)",
-    component: (props) => (
-      <DynamicArchetype04
-        {...props}
-        pillowBg="bg-gradient-to-b from-purple-100 to-pink-100 dark:from-purple-950/60 dark:to-pink-950/60"
-        accentBubble="bg-gradient-to-r from-purple-500 to-pink-500"
-      />
-    ),
-  },
-  // 8. Archetype 4, Variant 2
-  {
-    id: 8,
-    archetypeId: 4,
-    archetypeName: "3D Claymorphism Puffy Pillow",
-    archetypeNameBangla: "থ্রিডি ক্লেমর্ফিজম পাফি পিলো",
-    variantName: "Mint Pistachio Soft-Clay",
-    accentColor: "#14B8A6",
-    glowColor: "rgba(20,184,166,0.3)",
-    component: (props) => (
-      <DynamicArchetype04
-        {...props}
-        pillowBg="bg-gradient-to-b from-teal-100 to-emerald-100 dark:from-teal-950/60 dark:to-emerald-950/60"
-        accentBubble="bg-gradient-to-r from-teal-500 to-emerald-500"
-      />
-    ),
-  },
-  // 9. Archetype 5, Variant 1
-  {
-    id: 9,
-    archetypeId: 5,
-    archetypeName: "3D Folded Ribbon Header",
-    archetypeNameBangla: "থ্রিডি ফোল্ডেড রিবন হেডার",
-    variantName: "Golden Amber Badge",
-    accentColor: "#F59E0B",
-    glowColor: "rgba(245,158,11,0.3)",
-    component: (props) => (
-      <DynamicArchetype05 {...props} ribbonColor="bg-amber-500" />
-    ),
-  },
-  // 10. Archetype 5, Variant 2
-  {
-    id: 10,
-    archetypeId: 5,
-    archetypeName: "3D Folded Ribbon Header",
-    archetypeNameBangla: "থ্রিডি ফোল্ডেড রিবন হেডার",
-    variantName: "Crimson Ruby Badge",
-    accentColor: "#EF4444",
-    glowColor: "rgba(239,68,68,0.3)",
-    component: (props) => (
-      <DynamicArchetype05 {...props} ribbonColor="bg-rose-500" />
-    ),
-  },
-  // 11. Archetype 6, Variant 1
-  {
-    id: 11,
-    archetypeId: 6,
-    archetypeName: "Giant Floating 3D '?' & Leaf Pills",
-    archetypeNameBangla: "জায়ান্ট ফ্লোটিং প্রশ্নচিহ্ন ও লিফ পিল",
-    variantName: "Cyan Monolith",
-    accentColor: "#06B6D4",
-    glowColor: "rgba(6,182,212,0.3)",
-    component: (props) => (
-      <DynamicArchetype06 {...props} accentColor="#06B6D4" />
-    ),
-  },
-  // 12. Archetype 6, Variant 2
-  {
-    id: 12,
-    archetypeId: 6,
-    archetypeName: "Giant Floating 3D '?' & Leaf Pills",
-    archetypeNameBangla: "জায়ান্ট ফ্লোটিং প্রশ্নচিহ্ন ও লিফ পিল",
-    variantName: "Lime Volt Surge",
-    accentColor: "#84CC16",
-    glowColor: "rgba(132,204,22,0.3)",
-    component: (props) => (
-      <DynamicArchetype06 {...props} accentColor="#84CC16" />
-    ),
-  },
-  // 13. Archetype 7, Variant 1
-  {
-    id: 13,
-    archetypeId: 7,
-    archetypeName: "3D Tilted Isometric Tray Card",
-    archetypeNameBangla: "থ্রিডি টিল্টেড আইসোমেট্রিক ট্রে",
-    variantName: "Construction Amber Heavy-Duty",
-    accentColor: "#F59E0B",
-    glowColor: "rgba(245,158,11,0.3)",
-    component: (props) => (
-      <DynamicArchetype07
-        {...props}
-        trayBorder="border-amber-500"
-        headerBar="bg-amber-500"
-      />
-    ),
-  },
-  // 14. Archetype 7, Variant 2
-  {
-    id: 14,
-    archetypeId: 7,
-    archetypeName: "3D Tilted Isometric Tray Card",
-    archetypeNameBangla: "থ্রিডি টিল্টেড আইসোমেট্রিক ট্রে",
-    variantName: "Deep Slate Arcade Console",
+    archetypeName: "Signature Light & Dark Fast Engine",
+    archetypeNameBangla: "সিগনেচার ফাস্ট লাইট/ডার্ক ইঞ্জিন",
+    variantName: "Light Mode Clean",
     accentColor: "#3B82F6",
     glowColor: "rgba(59,130,246,0.3)",
-    component: (props) => (
-      <DynamicArchetype07
-        {...props}
-        trayBorder="border-blue-500"
-        headerBar="bg-blue-600"
-      />
-    ),
-  },
-  // 15. Archetype 8, Variant 1
-  {
-    id: 15,
-    archetypeId: 8,
-    archetypeName: "Glassmorphic Center Prism with Torus",
-    archetypeNameBangla: "গ্লাসমর্ফিক প্রিজম ও টোরাস রিংস",
-    variantName: "Bioluminescent Lagoon",
-    accentColor: "#06B6D4",
-    glowColor: "rgba(6,182,212,0.3)",
-    component: (props) => (
-      <DynamicArchetype08 {...props} ringGradient="from-cyan-500 to-fuchsia-500" />
-    ),
-  },
-  // 16. Archetype 8, Variant 2
-  {
-    id: 16,
-    archetypeId: 8,
-    archetypeName: "Glassmorphic Center Prism with Torus",
-    archetypeNameBangla: "গ্লাসমর্ফিক প্রিজম ও টোরাস রিংস",
-    variantName: "Aurora Borealis Frost",
-    accentColor: "#10B981",
-    glowColor: "rgba(16,185,129,0.3)",
-    component: (props) => (
-      <DynamicArchetype08 {...props} ringGradient="from-emerald-400 to-indigo-500" />
-    ),
-  },
-  // 17. Archetype 9, Variant 1
-  {
-    id: 17,
-    archetypeId: 9,
-    archetypeName: "SVG Tree-Branch Mindmap Connectors",
-    archetypeNameBangla: "এসভিজি মাইন্ডম্যাপ ব্রাঞ্চেস",
-    variantName: "Cyan Neural Network",
-    accentColor: "#06B6D4",
-    glowColor: "rgba(6,182,212,0.3)",
-    component: (props) => (
-      <DynamicArchetype09 {...props} branchColor="#06B6D4" />
-    ),
-  },
-  // 18. Archetype 9, Variant 2
-  {
-    id: 18,
-    archetypeId: 9,
-    archetypeName: "SVG Tree-Branch Mindmap Connectors",
-    archetypeNameBangla: "এসভিজি মাইন্ডম্যাপ ব্রাঞ্চেস",
-    variantName: "Magenta Synapse Bridge",
-    accentColor: "#D946EF",
-    glowColor: "rgba(217,70,239,0.3)",
-    component: (props) => (
-      <DynamicArchetype09 {...props} branchColor="#D946EF" />
-    ),
-  },
-  // 19. Archetype 10, Variant 1
-  {
-    id: 19,
-    archetypeId: 10,
-    archetypeName: "Cyberpunk Chamfered HUD",
-    archetypeNameBangla: "সাইবারপাঙ্ক চাম্ফার্ড এইচইউডি",
-    variantName: "Matrix CRT Terminal",
-    accentColor: "#22C55E",
-    glowColor: "rgba(34,197,94,0.3)",
-    component: (props) => (
-      <DynamicArchetype10 {...props} techColor="#22C55E" />
-    ),
-  },
-  // 20. Archetype 10, Variant 2
-  {
-    id: 20,
-    archetypeId: 10,
-    archetypeName: "Cyberpunk Chamfered HUD",
-    archetypeNameBangla: "সাইবারপাঙ্ক চাম্ফার্ড এইচইউডি",
-    variantName: "Night City Yellow HUD",
-    accentColor: "#EAB308",
-    glowColor: "rgba(234,179,8,0.3)",
-    component: (props) => (
-      <DynamicArchetype10 {...props} techColor="#FACC15" />
-    ),
+    component: (props: any) => <SignatureFastMCQ {...props} />,
   },
 ];
 
-/* Helper to get template by ID */
-export function getShowcaseTemplateById(id: number): MCQArchetypeTemplate {
-  const found = SHOWCASE_TEMPLATES.find((t) => t.id === id);
-  return found || SHOWCASE_TEMPLATES[0];
+export function getShowcaseTemplateById(id?: number): MCQArchetypeTemplate {
+  return SHOWCASE_TEMPLATES[0];
 }
 
 /* =========================================================================
@@ -409,23 +197,12 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
   isConfirmed = false,
   isCorrect,
   disabled = false,
-  templateId: forcedTemplateId,
-  autoRandomize = true,
+  templateId,
+  autoRandomize = false,
   onTemplateChange,
   showProofBadge = true,
 }: UniversalQuizEngineProps) {
-  // Active template state (1-20)
-  const [activeTemplateId, setActiveTemplateId] = useState<number>(() => {
-    if (forcedTemplateId) return forcedTemplateId;
-    if (autoRandomize) {
-      return Math.floor(Math.random() * SHOWCASE_TEMPLATES.length) + 1;
-    }
-    return 1;
-  });
-
-  const lastQuestionKeyRef = useRef<string>("");
-
-  // Normalize Question from ANY structure (Chapter Quiz or Live Quiz)
+  // Normalize Question from ANY structure (Chapter Quiz, Studio Slides or Live Quiz)
   const normalizedQuestion: NormalizedQuizQuestion = useMemo(() => {
     if (!question) {
       return {
@@ -496,20 +273,42 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
       }
     }
 
-    // Resolve correct option index and raw correct answer key
+    // Extract reorder items
+    const resolvedOrder =
+      question.reorderItems ||
+      question.items ||
+      question.correctOrder ||
+      snap.reorderItems ||
+      snap.items ||
+      snap.steps ||
+      resolvedOptions;
+
+    // Resolve prompt text (with proper fallbacks for content / title in Fill Blanks, Matching, etc.)
+    const resolvedPrompt =
+      question.questionText ||
+      (resolvedType === "FILL_BLANKS"
+        ? (question.sentenceWithBlank || question.content || question.title)
+        : (question.title || question.content)) ||
+      snap.sentenceWithBlank ||
+      snap.questionText ||
+      snap.prompt ||
+      snap.content ||
+      snap.title ||
+      "প্রশ্ন প্রস্তুত হচ্ছে...";
+
+    // Resolve raw correct answer
     const rawCorrect =
       question.correctAnswer ??
       snap.correctAnswer ??
+      question.blankAnswer ??
+      snap.blankAnswer ??
       question.correctOption ??
-      snap.correctOption ??
-      question.correctOptionId ??
-      snap.correctOptionId;
+      snap.correctOption;
 
     let resolvedCorrectIndex = Number(
       question.correctOptionIndex ?? snap.correctOptionIndex ?? snap.correctIndex ?? -1
     );
 
-    // If correctOptionIndex wasn't a valid index in options, resolve from rawCorrect
     if (resolvedCorrectIndex < 0 || resolvedCorrectIndex >= resolvedOptions.length) {
       if (rawCorrect !== undefined && rawCorrect !== null) {
         const found = resolvedOptions.findIndex((optStr, idx) =>
@@ -531,16 +330,6 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
       }
     }
 
-    // Resolve prompt text (with proper fallbacks for content / title in Fill Blanks, Matching, etc.)
-    const resolvedPrompt =
-      question.questionText ||
-      (resolvedType === "FILL_BLANKS" ? (question.content || question.title) : (question.title || question.content)) ||
-      snap.questionText ||
-      snap.prompt ||
-      snap.content ||
-      snap.title ||
-      "প্রশ্ন প্রস্তুত হচ্ছে...";
-
     return {
       id: question.id || `q-${questionIndex}`,
       questionType: resolvedType,
@@ -557,62 +346,35 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
       acceptedAnswers:
         question.acceptedAnswers ||
         snap.acceptedAnswers ||
+        (question.blankAnswer ? [question.blankAnswer] : []) ||
         (rawCorrect && typeof rawCorrect === "string" ? [rawCorrect] : []),
       matchingPairs: resolvedPairs,
-      correctOrder:
-        question.correctOrder || question.items || snap.items || snap.steps || resolvedOptions,
+      correctOrder: resolvedOrder,
       explanation: question.explanation || snap.explanation,
-      marks: question.marks || snap.marks || 1,
-      timeLimit: question.timeLimit || snap.timeLimit || 60,
+      marks: question.marks || snap.marks || 100,
+      timeLimit: question.timeLimit || snap.timeLimit || 30,
       conceptTopic: question.conceptTopic || snap.conceptTopic,
     };
   }, [question, questionIndex]);
 
-  // Handle Dynamic Rotation on question change
-  const currentKey = `${normalizedQuestion.id}_idx_${questionIndex}`;
-  useEffect(() => {
-    if (forcedTemplateId) {
-      setActiveTemplateId(forcedTemplateId);
-      return;
-    }
-
-    if (lastQuestionKeyRef.current !== currentKey) {
-      lastQuestionKeyRef.current = currentKey;
-      if (autoRandomize) {
-        const total = SHOWCASE_TEMPLATES.length;
-        const nextId = Math.floor(Math.random() * total) + 1;
-        setActiveTemplateId(nextId);
-        if (onTemplateChange) onTemplateChange(nextId);
-      }
-    }
-  }, [currentKey, autoRandomize, forcedTemplateId, onTemplateChange]);
-
-  const activeTemplateDef = useMemo(() => {
-    return getShowcaseTemplateById(activeTemplateId);
-  }, [activeTemplateId]);
-
-  const ActiveMCQComponent = activeTemplateDef.component;
-
   return (
     <div className="relative w-full">
-
-      {/* Main Dynamic Template Body */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={`${activeTemplateId}-${normalizedQuestion.id}-${normalizedQuestion.questionType}`}
-          initial={{ opacity: 0, scale: 0.98, y: 8 }}
+          key={`${normalizedQuestion.id}-${normalizedQuestion.questionType}`}
+          initial={{ opacity: 0, scale: 0.98, y: 6 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.98, y: -8 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
+          exit={{ opacity: 0, scale: 0.98, y: -6 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
           className="w-full"
         >
-          {/* SPECIAL QUESTION TYPES (100% Full-Width Dedicated Templates via next/dynamic) */}
+          {/* 1. MATCHING: Interactive 2-Column Cross-Line SVG Board */}
           {normalizedQuestion.questionType === "MATCHING" ? (
             <div className="w-full max-w-5xl mx-auto">
               <DynamicMatchingBoard
                 question={normalizedQuestion}
                 selectedAnswer={selectedAnswer}
-                onSelectAnswer={onSelectAnswer}
+                onSelectAnswer={onSelectAnswer || (() => {})}
                 onConfirmAnswer={onConfirmAnswer}
                 isConfirmed={isConfirmed}
                 isCorrect={isCorrect}
@@ -620,11 +382,12 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
               />
             </div>
           ) : normalizedQuestion.questionType === "FILL_BLANKS" ? (
+            /* 2. FILL_BLANKS: Interactive Glowing Capsule Slot & Word-Bank */
             <div className="w-full max-w-5xl mx-auto">
               <DynamicFillBlanks
                 question={normalizedQuestion}
                 selectedAnswer={selectedAnswer}
-                onSelectAnswer={onSelectAnswer}
+                onSelectAnswer={onSelectAnswer || (() => {})}
                 onConfirmAnswer={onConfirmAnswer}
                 isConfirmed={isConfirmed}
                 isCorrect={isCorrect}
@@ -632,11 +395,12 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
               />
             </div>
           ) : normalizedQuestion.questionType === "REORDER" ? (
+            /* 3. REORDER: Draggable / Up-Down Sequence Rearranging Board */
             <div className="w-full max-w-5xl mx-auto">
               <DynamicReorderSequence
                 question={normalizedQuestion}
                 selectedAnswer={selectedAnswer}
-                onSelectAnswer={onSelectAnswer}
+                onSelectAnswer={onSelectAnswer || (() => {})}
                 onConfirmAnswer={onConfirmAnswer}
                 isConfirmed={isConfirmed}
                 isCorrect={isCorrect}
@@ -644,11 +408,12 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
               />
             </div>
           ) : normalizedQuestion.questionType === "TRUE_FALSE" ? (
+            /* 4. TRUE_FALSE: Symmetrical Neutral Dual Cards */
             <div className="w-full max-w-5xl mx-auto">
               <DynamicTrueFalse
                 question={normalizedQuestion}
                 selectedAnswer={selectedAnswer}
-                onSelectAnswer={onSelectAnswer}
+                onSelectAnswer={onSelectAnswer || (() => {})}
                 onConfirmAnswer={onConfirmAnswer}
                 isConfirmed={isConfirmed}
                 isCorrect={isCorrect}
@@ -656,8 +421,8 @@ export const UniversalQuizShowcaseEngine = React.memo(function UniversalQuizShow
               />
             </div>
           ) : (
-            /* MCQ ARCHETYPES (20 Rotating Templates via next/dynamic) */
-            <ActiveMCQComponent
+            /* 5. MCQ: 1 Signature Ultra-Fast Responsive Template */
+            <SignatureFastMCQ
               question={normalizedQuestion}
               questionIndex={questionIndex}
               totalQuestions={totalQuestions}

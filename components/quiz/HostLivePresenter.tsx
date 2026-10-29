@@ -915,7 +915,7 @@ export default function HostLivePresenter({
                         }}
                         className={`p-3.5 sm:p-4 rounded-2xl border-2 ${glow} backdrop-blur-md shadow-xl ${tilt} hover:scale-110 hover:z-20 transition-transform duration-200 flex items-center gap-3 cursor-default`}
                       >
-                        <RenderStudentAvatar avatarId={player.avatar} className="w-11 h-11 shrink-0" />
+                        <RenderStudentAvatar avatar={player.avatar} className="w-11 h-11 shrink-0" />
                         <div className="text-left space-y-0.5">
                           <div className="text-sm font-black text-white flex items-center gap-1.5">
                             <span>{player.name || "শিক্ষার্থী"}</span>

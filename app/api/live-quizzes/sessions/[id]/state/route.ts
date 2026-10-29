@@ -30,7 +30,7 @@ export async function GET(
     let common = getSessionCache(sessionId);
 
     if (!common) {
-      const session = institutionalDb.liveSessions.find(s => s.id === sessionId);
+      const session = institutionalDb.liveSessions.find((s) => s.id === sessionId);
       if (!session) {
         return NextResponse.json(
           { success: false, message: "Live quiz session not found" },
@@ -48,7 +48,7 @@ export async function GET(
       const questionEndsAt = session.questionEndsAt ? new Date(session.questionEndsAt) : null;
 
       const activeParticipants = institutionalDb.liveParticipants.filter(
-        p => p.sessionId === sessionId && p.status === "JOINED"
+        (p) => p.sessionId === sessionId && p.status === "JOINED"
       );
       const readyPlayers = (session as any).readyPlayers || [];
       const currentSlideResponses = institutionalDb.liveAnswers
@@ -59,13 +59,16 @@ export async function GET(
             id: a.id,
             playerId: a.playerId,
             studentName: p?.displayName || "শিক্ষার্থী",
-            avatar: (p as any)?.avatar || "🎓",
+            avatar: (p as any)?.avatar || "🚀",
             response: typeof a.answerPayload === "string" ? a.answerPayload : JSON.stringify(a.answerPayload),
-            submittedAt: a.submittedAt
+            answerPayload: a.answerPayload,
+            isCorrect: a.isCorrect,
+            responseTimeMs: a.responseTimeMs || 1000,
+            submittedAt: a.submittedAt,
           };
         });
 
-      // Check All-Voted Condition
+      // Check All-Voted Condition: all active joined participants have submitted
       const allVoted = Boolean((session as any).allVoted) || (activeParticipants.length > 0 && currentSlideResponses.length >= activeParticipants.length);
       if (allVoted) {
         (session as any).allVoted = true;
@@ -81,42 +84,50 @@ export async function GET(
 
       if (session.status === "COMPLETED") {
         phase = "COMPLETED";
-      } else if (session.status === "LOBBY" || !session.isQuizModeStarted) {
+      } else if (session.status === "LOBBY" || (!session.isQuizModeStarted && session.currentQuestionIndex === 0 && (session.status as string) !== "READY")) {
         phase = "LOBBY";
-      } else if (session.status === "READY") {
+      } else if ((session.status as string) === "READY") {
+        // Mandatory FIX 4: Waiting in READY_CHECK stage until teacher triggers question start
         phase = "READY";
       } else if (countdownEndsAt && now < countdownEndsAt) {
+        // Synchronized 3-2-1 Countdown (3 seconds)
         phase = "COUNTDOWN";
         countdownSecondsRemaining = Math.max(1, Math.ceil((countdownEndsAt.getTime() - now.getTime()) / 1000));
       } else if (previewEndsAt && now < previewEndsAt) {
+        // Synchronized Question Only (5 seconds, NO options)
         phase = "QUESTION_PREVIEW";
         previewSecondsRemaining = Math.max(0.1, Number(((previewEndsAt.getTime() - now.getTime()) / 1000).toFixed(1)));
       } else if (allVoted || (questionEndsAt && now >= questionEndsAt)) {
+        // Result Reveal: All students submitted or timer reached 00:00!
         phase = "QUESTION_ENDED";
         mainTimerSecondsRemaining = 0;
         isAnswerRevealed = true;
       } else {
+        // Options revealed, answering active!
         phase = "QUESTION_ACTIVE";
         canSubmitAnswer = true;
         mainTimerSecondsRemaining = questionEndsAt ? Math.max(0, Math.ceil((questionEndsAt.getTime() - now.getTime()) / 1000)) : 30;
       }
 
-      // Calculate option statistics
-      const optionStats = [0, 0, 0, 0];
-      const currentQAnswers = institutionalDb.liveAnswers.filter(
-        (a) => a.sessionId === sessionId && (currentQId ? a.questionId === currentQId : true)
-      );
-      currentQAnswers.forEach((ans) => {
+      // Calculate option statistics for MCQ
+      const optionsCount = (hostCurrentQuestion?.options?.length) || 4;
+      const optionStats = new Array(optionsCount).fill(0);
+      currentSlideResponses.forEach((ans) => {
         const p = ans.answerPayload;
-        if (typeof p === "number" && p >= 0 && p < 4) {
+        if (typeof p === "number" && p >= 0 && p < optionsCount) {
           optionStats[p] += 1;
         } else if (typeof p === "string") {
           const num = parseInt(p);
-          if (!isNaN(num) && num >= 0 && num < 4) {
+          if (!isNaN(num) && num >= 0 && num < optionsCount) {
             optionStats[num] += 1;
           }
         }
       });
+
+      // Calculate correct vs wrong breakdown for Host Chart
+      const correctCount = currentSlideResponses.filter((r) => r.isCorrect === true).length;
+      const wrongCount = currentSlideResponses.filter((r) => r.isCorrect === false).length;
+      const timedOutCount = Math.max(0, activeParticipants.length - currentSlideResponses.length);
 
       const sequenceState = {
         phase,
@@ -131,11 +142,12 @@ export async function GET(
       const topPlayers = [...activeParticipants]
         .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))
         .slice(0, 10)
-        .map(p => ({
+        .map((p) => ({
           id: p.id,
           displayName: p.displayName,
           totalScore: p.totalScore || 0,
-          avatar: (p as any).avatar || "🎓"
+          avatar: (p as any).avatar || "🚀",
+          correctAnswers: p.correctAnswers || 0,
         }));
 
       common = {
@@ -154,6 +166,9 @@ export async function GET(
         readyPlayers,
         currentSlideResponses,
         optionStats,
+        correctCount,
+        wrongCount,
+        timedOutCount,
         topPlayers,
         isQuizModeStarted: session.isQuizModeStarted || false,
         scheduledStartTime: (session as any).scheduledStartTime || null,
@@ -193,12 +208,17 @@ export async function GET(
         allVoted: common.allVoted,
         isAnswerRevealed: common.isAnswerRevealed,
         optionStats: common.optionStats,
+        correctCount: common.correctCount,
+        wrongCount: common.wrongCount,
+        timedOutCount: common.timedOutCount,
         isQuizModeStarted: common.isQuizModeStarted,
         scheduledStartTime: common.scheduledStartTime,
         activePreQuizActivity: common.activePreQuizActivity,
         lastSmsDispatched: common.lastSmsDispatched,
         showLeaderboard: common.showLeaderboard,
         topPlayers: common.topPlayers,
+        correctAnswer: common.correctAnswer,
+        explanation: common.hostCurrentQuestion?.explanation,
       });
     }
 
@@ -217,33 +237,38 @@ export async function GET(
     // Retrieve active motivation message ONLY if competitive quiz mode has started
     let motivationMessage = null;
     const participant = institutionalDb.liveParticipants.find(
-      p => p.id === playerId && p.sessionId === sessionId
+      (p) => p.id === playerId && p.sessionId === sessionId
     );
     if (common.session.isQuizModeStarted && participant && participant.motivationMessage && !participant.motivationMessage.shown) {
       motivationMessage = {
         category: participant.motivationMessage.category,
         message: participant.motivationMessage.message,
         questionIndex: participant.motivationMessage.questionIndex,
-        durationMs: 8000
+        durationMs: 8000,
       };
       participant.motivationMessage.shown = true;
     }
 
-    // Mid-session Join & Reconnect Resilience: check if this student already answered current slide
+    // Check if this student already answered current slide
     let hasAnsweredCurrent = false;
     let studentAnswerPayload: any = null;
+    let studentAnswerData: any = null;
 
     if (common.currentQId) {
       const studentAns = institutionalDb.liveAnswers.find(
-        a => a.sessionId === sessionId && a.playerId === playerId && a.questionId === common.currentQId
+        (a) => a.sessionId === sessionId && a.playerId === playerId && a.questionId === common.currentQId
       );
       if (studentAns) {
         hasAnsweredCurrent = true;
         studentAnswerPayload = studentAns.answerPayload;
+        studentAnswerData = {
+          answerPayload: studentAns.answerPayload,
+          isCorrect: studentAns.isCorrect,
+          responseTimeMs: studentAns.responseTimeMs,
+          totalPoints: studentAns.totalPoints,
+        };
         state.answered = true;
-        if (!state.originalAnswer) {
-          state.originalAnswer = { answerPayload: studentAns.answerPayload };
-        }
+        state.originalAnswer = studentAnswerData;
       }
     }
 
@@ -258,6 +283,9 @@ export async function GET(
       (state.session as any).isAnswerRevealed = common.isAnswerRevealed;
     }
 
+    // Question snapshot to return to student
+    const resolvedQuestion = state.currentQuestion || common.hostCurrentQuestion;
+
     return NextResponse.json({
       success: true,
       state,
@@ -268,13 +296,13 @@ export async function GET(
       previewSeconds: common.previewSecondsRemaining,
       mainTimerSeconds: common.mainTimerSecondsRemaining,
       timeLeft: common.mainTimerSecondsRemaining,
-      canSubmitAnswer: common.canSubmitAnswer,
+      canSubmitAnswer: common.canSubmitAnswer && !hasAnsweredCurrent,
       allVoted: common.allVoted,
       isAnswerRevealed: common.isAnswerRevealed,
       showLeaderboard: common.showLeaderboard,
       topPlayers: common.topPlayers,
-      currentSlide: state.currentQuestion || common.hostCurrentQuestion,
-      currentQuestion: state.currentQuestion || common.hostCurrentQuestion,
+      currentSlide: resolvedQuestion,
+      currentQuestion: resolvedQuestion,
       currentSlideResponses: common.currentSlideResponses,
       responsesCount: common.currentSlideResponses.length,
       submittedCount: common.currentSlideResponses.length,
@@ -286,20 +314,16 @@ export async function GET(
       readyCount: common.readyPlayers.length,
       playerAnswered: hasAnsweredCurrent,
       selectedOption: studentAnswerPayload,
+      studentAnswerData,
+      responseTimeMs: studentAnswerData?.responseTimeMs,
       optionStats: common.optionStats,
       isQuizModeStarted: common.isQuizModeStarted,
       scheduledStartTime: common.scheduledStartTime,
       activePreQuizActivity: common.activePreQuizActivity,
       motivationMessage,
-      correctAnswer: common.correctAnswer,
+      correctAnswer: common.isAnswerRevealed ? common.correctAnswer : undefined,
+      explanation: common.isAnswerRevealed ? common.hostCurrentQuestion?.explanation : undefined,
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, message: error.message || "Failed to fetch recovered state" },
-      { status: 500 }
-    );
-  }
-}
   } catch (error: any) {
     return NextResponse.json(
       { success: false, message: error.message || "Failed to fetch recovered state" },

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQuizSession } from "@/context/QuizSessionContext";
 import { QuizPlate } from "@/components/quiz/templates";
@@ -68,9 +68,24 @@ export default function LiveQuizPage() {
   } = useQuizSession();
 
   const router = useRouter();
+  const [submissionSpeed, setSubmissionSpeed] = useState<{ seconds: string; ms: number } | null>(null);
+  const questionStartTimeRef = useRef<number>(Date.now());
   const [localSelected, setLocalSelected] = useState<any>(null);
   const [wordInput, setWordInput] = useState("");
   const [openEndedInput, setOpenEndedInput] = useState("");
+
+  // Track start of active question timer
+  useEffect(() => {
+    if (currentPhase === "QUESTION_ACTIVE") {
+      questionStartTimeRef.current = Date.now();
+      setSubmissionSpeed(null);
+    }
+  }, [currentPhase, currentQuestionIdx]);
+
+  function toBanglaDigits(num: number | string): string {
+    const bn = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
+    return String(num).replace(/[0-9]/g, (d) => bn[parseInt(d)]);
+  }
 
   // Online / Offline connectivity listener
   const [isOnline, setIsOnline] = useState(true);
@@ -301,6 +316,9 @@ export default function LiveQuizPage() {
 
   const handleConfirm = () => {
     if (localSelected === null || currentPhase !== "QUESTION_ACTIVE" || !canSubmitAnswer) return;
+    const elapsed = Date.now() - questionStartTimeRef.current;
+    const secStr = (elapsed / 1000).toFixed(2);
+    setSubmissionSpeed({ seconds: secStr, ms: elapsed });
     handleSubmitAnswer(localSelected);
   };
 
@@ -380,7 +398,7 @@ export default function LiveQuizPage() {
             <span>প্রশ্ন {currentQuestionIdx + 1} / {totalQuestions}</span>
             <span>•</span>
             <span>খেলোয়াড়: {playerCount} জন</span>
-            {readyCount > 0 && (
+            {(readyCount || 0) > 0 && (
               <>
                 <span>•</span>
                 <span className="text-amber-400 font-bold">🔥 {readyCount} জন রেডি</span>
@@ -566,6 +584,18 @@ export default function LiveQuizPage() {
   // ==========================================
   const isPreviewPhase = !isNonGraded && (currentPhase === "QUESTION_PREVIEW" || previewSeconds > 0);
   const isOptionsRevealed = !isPreviewPhase && (currentPhase === "QUESTION_ACTIVE" || currentPhase === "QUESTION_ENDED");
+  const isAnswerRevealed =
+    allVoted ||
+    currentPhase === "QUESTION_ENDED" ||
+    (currentPhase as string) === "SHOW_RESULTS" ||
+    (currentPhase as string) === "REVEAL" ||
+    (!isPreviewPhase && timeLeft === 0 && currentPhase === "QUESTION_ACTIVE") ||
+    (answeredCount >= playerCount && playerCount > 0);
+
+  const speedSec = submissionSpeed?.seconds || ((lastAnswerFeedback as any)?.responseTimeMs ? (((lastAnswerFeedback as any).responseTimeMs / 1000).toFixed(2)) : null);
+  const speedMs = submissionSpeed?.ms || (lastAnswerFeedback as any)?.responseTimeMs || null;
+  const banglaSpeedSec = speedSec ? toBanglaDigits(speedSec) : null;
+  const banglaSpeedMs = speedMs ? toBanglaDigits(speedMs.toLocaleString("en-US")) : null;
 
   return (
     <div className="space-y-6 w-full max-w-2xl px-2 mx-auto relative">
@@ -929,10 +959,13 @@ export default function LiveQuizPage() {
                 }}
                 onConfirmAnswer={(ans) => {
                   setLocalSelected(ans);
+                  const elapsed = Date.now() - questionStartTimeRef.current;
+                  const secStr = (elapsed / 1000).toFixed(2);
+                  setSubmissionSpeed({ seconds: secStr, ms: elapsed });
                   handleSubmitAnswer(ans);
                 }}
-                isConfirmed={playerAnswered}
-                isCorrect={lastAnswerFeedback?.isCorrect}
+                isConfirmed={playerAnswered && isAnswerRevealed}
+                isCorrect={lastAnswerFeedback?.isCorrect ?? undefined}
                 disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
                 autoRandomize={false}
                 showProofBadge={true}
@@ -943,7 +976,7 @@ export default function LiveQuizPage() {
           {/* GRADED SUBMISSION CONTROL PANEL */}
           {!isNonGraded && !isPreviewPhase && (
             <div className="pt-2">
-              {!playerAnswered ? (
+              {!playerAnswered && !isAnswerRevealed ? (
                 <motion.button
                   whileHover={localSelected !== null && canSubmitAnswer ? { scale: 1.02 } : {}}
                   whileTap={localSelected !== null && canSubmitAnswer ? { scale: 0.98 } : {}}
@@ -966,47 +999,97 @@ export default function LiveQuizPage() {
                     </>
                   )}
                 </motion.button>
-              ) : (
-                <div className="space-y-3">
-                  {lastAnswerFeedback?.isCorrect === true ? (
-                    <div className="p-4 bg-emerald-500/15 border-2 border-emerald-500/50 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                      <div className="w-10 h-10 rounded-full bg-emerald-500/25 flex items-center justify-center shrink-0 border border-emerald-400/50">
-                        <Check className="w-6 h-6 text-emerald-300" />
-                      </div>
-                      <div className="text-left">
-                        <h4 className="text-emerald-300 font-black text-sm">সঠিক উত্তর! চমৎকার উত্তর দিয়েছেন!</h4>
-                        <p className="text-[10px] text-emerald-400/80 uppercase tracking-widest font-bold">
-                          +{lastAnswerFeedback.totalPoints ?? 100} পয়েন্ট অর্জিত হয়েছে
-                        </p>
-                      </div>
+              ) : playerAnswered && !isAnswerRevealed ? (
+                /* FIX 6: DEFERRED STUDENT FEEDBACK WAITING CARD */
+                <div className="p-5 rounded-2xl bg-linear-to-b from-indigo-950/60 to-slate-900/90 border-2 border-cyan-500/40 text-center space-y-3 shadow-[0_0_30px_rgba(6,182,212,0.15)] animate-in fade-in duration-300">
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black">
+                    <Check className="w-4 h-4 text-cyan-400" />
+                    <span>✅ তোমার উত্তর লক করা হয়েছে!</span>
+                  </div>
+
+                  {banglaSpeedSec && banglaSpeedMs && (
+                    <div className="py-1">
+                      <p className="text-sm sm:text-base font-black text-amber-300">
+                        ⚡ তুমি <span className="font-mono text-lg sm:text-xl text-amber-400 underline underline-offset-4">{banglaSpeedSec}</span> সেকেন্ডে ({banglaSpeedMs} মিলিসেকেন্ডে) উত্তর সাবমিট করেছো!
+                      </p>
                     </div>
-                  ) : lastAnswerFeedback?.isCorrect === false ? (
-                    <div className="p-4 bg-rose-500/15 border-2 border-rose-500/50 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(244,63,94,0.3)]">
-                      <div className="w-10 h-10 rounded-full bg-rose-500/25 flex items-center justify-center shrink-0 border border-rose-400/50">
-                        <AlertCircle className="w-6 h-6 text-rose-400" />
-                      </div>
-                      <div className="text-left">
-                        <h4 className="text-rose-300 font-black text-sm">ভুল উত্তর! সঠিক উত্তরটি সবুজ রঙে নির্দেশিত হয়েছে।</h4>
-                        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-                          পরবর্তী প্রশ্নের জন্য প্রস্তুত হোন
-                        </p>
-                      </div>
+                  )}
+
+                  <div className="flex items-center justify-center gap-2 text-xs sm:text-sm font-bold text-slate-300">
+                    <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                    <span>⏳ সবাই উত্তর দেওয়া বা সময় শেষ হওয়া পর্যন্ত অপেক্ষা করো...</span>
+                  </div>
+
+                  {playerCount > 0 && (
+                    <div className="pt-2 border-t border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                      <span>অন্যান্য শিক্ষার্থীরা উত্তর দিচ্ছে... ({toBanglaDigits(answeredCount)} / {toBanglaDigits(playerCount)} জমা হয়েছে)</span>
                     </div>
+                  )}
+                </div>
+              ) : isAnswerRevealed ? (
+                /* FIX 6: RESULT REVEAL (ALL VOTED OR TIMER HIT 0) */
+                <div className="space-y-3 animate-in fade-in duration-300">
+                  {playerAnswered ? (
+                    lastAnswerFeedback?.isCorrect === true ? (
+                      <div className="p-4 bg-emerald-500/15 border-2 border-emerald-500/50 rounded-2xl space-y-2 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-emerald-500/25 flex items-center justify-center shrink-0 border border-emerald-400/50">
+                            <Check className="w-6 h-6 text-emerald-300" />
+                          </div>
+                          <div className="text-left">
+                            <h4 className="text-emerald-300 font-black text-sm">🎉 সঠিক উত্তর! চমৎকার উত্তর দিয়েছেন!</h4>
+                            <p className="text-[10px] text-emerald-400/80 uppercase tracking-widest font-bold">
+                              +{lastAnswerFeedback.totalPoints ?? 100} পয়েন্ট অর্জিত হয়েছে
+                            </p>
+                          </div>
+                        </div>
+                        {banglaSpeedSec && (
+                          <div className="pt-1.5 border-t border-emerald-500/20 text-xs text-emerald-300 font-mono flex items-center gap-2">
+                            <span>⚡ সাবমিট স্পিড: {banglaSpeedSec} সেকেন্ড ({banglaSpeedMs} মি.সে.)</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-rose-500/15 border-2 border-rose-500/50 rounded-2xl space-y-2 shadow-[0_0_20px_rgba(244,63,94,0.3)]">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-rose-500/25 flex items-center justify-center shrink-0 border border-rose-400/50">
+                            <AlertCircle className="w-6 h-6 text-rose-400" />
+                          </div>
+                          <div className="text-left">
+                            <h4 className="text-rose-300 font-black text-sm">❌ ভুল উত্তর!</h4>
+                            {lastAnswerFeedback?.correctAnswer && (
+                              <p className="text-xs text-slate-300 font-bold mt-0.5">
+                                সঠিক উত্তর: <span className="text-emerald-400 font-black">{String(lastAnswerFeedback.correctAnswer)}</span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {banglaSpeedSec && (
+                          <div className="pt-1.5 border-t border-rose-500/20 text-xs text-slate-400 font-mono">
+                            <span>⚡ সাবমিট স্পিড: {banglaSpeedSec} সেকেন্ড</span>
+                          </div>
+                        )}
+                      </div>
+                    )
                   ) : (
-                    <div className="p-4 bg-cyan-500/15 border-2 border-cyan-500/40 rounded-2xl flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
-                      <div className="w-10 h-10 rounded-full bg-cyan-500/25 flex items-center justify-center shrink-0 border border-cyan-400/40">
-                        <Check className="w-6 h-6 text-cyan-300" />
+                    /* Did not submit before timer expired */
+                    <div className="p-4 bg-amber-500/15 border-2 border-amber-500/50 rounded-2xl flex items-center gap-3 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
+                      <div className="w-10 h-10 rounded-full bg-amber-500/25 flex items-center justify-center shrink-0 border border-amber-400/50">
+                        <XCircle className="w-6 h-6 text-amber-400" />
                       </div>
                       <div className="text-left">
-                        <h4 className="text-cyan-300 font-black text-sm">উত্তর সংরক্ষিত হয়েছে!</h4>
-                        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-                          টাইমার শেষ হওয়া পর্যন্ত অপেক্ষা করুন
-                        </p>
+                        <h4 className="text-amber-300 font-black text-sm">❌ সময় শেষ — উত্তর দিতে পারেননি!</h4>
+                        {lastAnswerFeedback?.correctAnswer && (
+                          <p className="text-xs text-slate-300 font-bold mt-0.5">
+                            সঠিক উত্তর: <span className="text-emerald-400 font-black">{String(lastAnswerFeedback.correctAnswer)}</span>
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
           )}
         </div>

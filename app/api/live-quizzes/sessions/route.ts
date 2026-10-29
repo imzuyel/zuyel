@@ -68,6 +68,15 @@ export async function POST(req: NextRequest) {
 
     const joinToken = `join-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    const academicYearId = body.academicYearId || (quiz as any)?.academicYearId || "2026";
+    const classId = body.classId || (quiz as any)?.classId;
+    const className = body.className || (quiz as any)?.className;
+    const tradeId = body.tradeId || (quiz as any)?.tradeId;
+    const tradeName = body.tradeName || body.trade || (quiz as any)?.tradeName || (quiz as any)?.category;
+    const subjectId = body.subjectId || (quiz as any)?.subjectId;
+    const subjectName = body.subjectName || body.subject || (quiz as any)?.subjectName;
+    const subjectCode = body.subjectCode || (quiz as any)?.subjectCode;
+
     const newSession: LiveSession = {
       id: `session-${Date.now()}`,
       quizId,
@@ -75,6 +84,14 @@ export async function POST(req: NextRequest) {
       sessionCode,
       joinToken,
       status: "LOBBY",
+      academicYearId,
+      classId,
+      className,
+      tradeId,
+      tradeName,
+      subjectId,
+      subjectName,
+      subjectCode,
       maxPlayers: 100,
       isLocked: false,
       currentQuestionIndex: 0,

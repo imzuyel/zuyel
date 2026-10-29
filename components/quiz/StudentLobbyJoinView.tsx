@@ -434,7 +434,7 @@ export default function StudentLobbyJoinView({
                       }`}
                       title={preset.name}
                     >
-                      <RenderStudentAvatar avatarId={preset.id} className="w-9 h-9" />
+                      <RenderStudentAvatar avatar={preset.id} className="w-9 h-9" />
                       <span className="text-[9px] font-bold truncate max-w-full mt-1">
                         {preset.name.split(" ")[0]}
                       </span>
@@ -515,7 +515,7 @@ export default function StudentLobbyJoinView({
           <div className="relative inline-block my-2">
             <div className="absolute inset-0 rounded-3xl bg-cyan-500/20 blur-xl animate-pulse" />
             <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-950 border-4 border-cyan-400/60 flex items-center justify-center shadow-2xl mx-auto">
-              <RenderStudentAvatar avatarId={selectedAvatar} className="w-16 h-16" />
+              <RenderStudentAvatar avatar={selectedAvatar} className="w-16 h-16" />
             </div>
           </div>
 

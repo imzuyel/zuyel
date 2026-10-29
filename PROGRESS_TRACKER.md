@@ -1416,3 +1416,168 @@
   - **Resolution**:
     - Relocated all hooks in `DualDeviceInteractivePreviewModal.tsx` to run unconditionally at component top level with safe fallbacks, moving the render guard `if (!isOpen || safeSlides.length === 0) return null;` after all hooks.
     - Added conditional render guards `{showDualDevicePreview && <DualDeviceInteractivePreviewModal ... />}` and `{showAiModal && <SmartAiSlideGeneratorModal ... />}` in `UnifiedQuizMentimeterWorkspace.tsx` to prevent fiber tree mismatch.
+
+
+## PHASE 15: CRITICAL ARCHITECTURAL FIX — ALL 7 LIVE QUIZ FIXES & 5-STAGE MENTIMETER/KAHOOT STATE MACHINE (COMPLETED)
+
+- [x] **FIX 1: Remove 20-Template Bloat & Fix Non-MCQ Rendering on Student Screen (`UniversalQuizShowcaseEngine.tsx` & Backend APIs)**
+  - Removed 20 heavy cycling templates in `UniversalQuizShowcaseEngine.tsx` and consolidated to 1 signature, ultra-fast, responsive Light/Dark mode template per question type:
+    - `MCQ`: Clean 2x2 interactive cards with `A, B, C, D` badges.
+    - `MATCHING` (ডান পাশ - বাম পাশ মিলকরণ): Dedicated interactive 2-column cross-line SVG matching board (`MatchingBoardTemplates.tsx`).
+    - `FILL_BLANKS` (শূন্যস্থান পূরণ): Dedicated inline glowing capsule input slot (`FillBlanksTemplates.tsx`) with word-bank chips.
+    - `REORDER` (সঠিক ক্রম সাজানো): Draggable / `↑` `↓` reorderable sequence cards (`ReorderSequenceTemplates.tsx`).
+    - `TRUE_FALSE` (সত্য / মিথ্যা): Symmetrical neutral cards (`সত্য` and `মিথ্যা`).
+  - Preserved complete question payload in `/api/quizzes/[id]/questions/route.ts` and `/api/live-quizzes/sessions/[id]/state/route.ts`:
+    - Full fidelity for `matchingPairs`, `reorderItems`, `sentenceWithBlank`, `blankAnswer`, `acceptedAnswers`.
+    - Eliminated accidental overwriting of non-MCQ slides with dummy 4-option MCQs.
+
+- [x] **FIX 2: 40+ Colorful Avatars & Real Join Flow in BOTH Preview AND Live (`/quiz/join` & `DualDeviceInteractivePreviewModal.tsx`)**
+  - Created `components/quiz/avatarData.tsx` with 42 vibrant, colorful 3D-gradient avatars (`COLORFUL_STUDENT_AVATARS`), helper `getAvatarById`, and component `RenderColorfulAvatar`.
+  - Upgraded `StudentJoinContentComponent.tsx`:
+    - 6-Digit Join Code input.
+    - Tab 1: `"📋 আজকের উপস্থিত তালিকা (Today's Attendance)"` vs Tab 2: `"✍️ নিজের নাম লিখুন (Manual Name)"`.
+    - 40+ colorful avatar selection grid with active glow styling.
+    - `"🚀 জয়েন করুন"` button.
+  - Upgraded Phone Simulator in `DualDeviceInteractivePreviewModal.tsx`:
+    - Starts on the Join Screen with 6-digit code and 1-click `"⚡ অটো কোড বসান"` helper (`849201`).
+    - Two Name tabs (Attendance dropdown vs. Manual input).
+    - 40+ colorful avatar selection grid.
+    - On join click: transitions to active slide, triggers join popup on Host screen, and increments live joined counter.
+
+- [x] **FIX 3: Welcome Screen Live Join Popups & Counter (`HostLiveFullscreenStage.tsx` & `DualDeviceInteractivePreviewModal.tsx`)**
+  - Host Stage real-time animated popups: `"🎉 {name} জয়েন করেছে!"` with chosen colorful avatar badge using `framer-motion` spring animation.
+  - Prominent live counter badge: `"👥 মোট জয়েন করেছে: X জন"` that updates dynamically.
+  - Welcome / Lobby slide avatar grid displaying all connected students.
+
+- [x] **FIX 4: Mandatory `READY_CHECK` State Before EVERY Graded Quiz Question**
+  - Enforced `READY_CHECK` stage prior to every graded quiz question:
+    - Student phone displays `"🙋‍♂️ আমি প্রস্তুত! (I'm Ready!)"` button (turns green `"✅ আপনি রেডি!"` on tap).
+    - Host screen displays `"⚡ পরবর্তী কুইজের জন্য কারা রেডি হচ্ছে দেখুন..."` with live counter `"🔥 X / Y জন স্টুডেন্ট রেডি!"`.
+    - Mentimeter-style animated floating, bouncing avatar bubble cloud (`framer-motion`).
+    - Teacher trigger button on Host: `"🚀 সবাই রেডি — প্রশ্ন শুরু করুন (Start Question)"`.
+
+- [x] **FIX 5: Synchronized `3-2-1` -> `5s Question Only` -> `Question + Options + Timer`**
+  - Stage `COUNTDOWN_321` (3 Seconds):
+    - Giant 3-2-1 animated countdown screen on both Host and Student devices.
+  - Stage `QUESTION_ONLY` (5 Seconds):
+    - Displays ONLY Question text in large typography with 5-second progress bar (`"📖 প্রশ্নটি মনোযোগ দিয়ে পড়ো..."`).
+    - STRICT: Zero options, matching pairs, blanks, or reorder items shown on Host or Student screens during preview.
+  - Stage `ANSWERING_ACTIVE` (Question + Options + Timer):
+    - Options revealed simultaneously and countdown timer starts across both Host and Student screens.
+
+- [x] **FIX 6: Deferred Student Feedback (Exact Submission Speed, NOT Right/Wrong Until End)**
+  - Student Phone submission behavior:
+    - On answer submission, locks answer and records exact submission duration (e.g. `৩.৪২ সেকেন্ডে (৩,৪২০ মিলিসেকেন্ডে)`).
+    - Sleek waiting card: `"✅ তোমার উত্তর লক করা হয়েছে!"`, `"⚡ তুমি ৩.৪২ সেকেন্ডে (৩,৪২০ মিলিসেকেন্ডে) উত্তর সাবমিট করেছো!"`, `"⏳ সবাই উত্তর দেওয়া বা সময় শেষ হওয়া পর্যন্ত অপেক্ষা করো..."`.
+    - Does NOT reveal Correct or Wrong until question concludes.
+  - `RESULT_REVEAL` Trigger:
+    - Triggers ONLY when either all students have submitted (`allVoted` / `answeredCount >= playerCount`) or question timer hits `00:00`.
+    - Timed-out students marked `"❌ সময় শেষ — উত্তর দিতে পারেননি"`.
+    - Simultaneous reveal: Correct (`🎉 সঠিক উত্তর! +পয়েন্ট`) or Wrong (`❌ ভুল হয়েছে` + correct answer) with submission speed badge.
+
+- [x] **FIX 7: Host Screen Reveal — Mentimeter Animated Charts (Bar/Pie), Explanation & Correct/Wrong Lists**
+  - Host Stage Result Reveal:
+    - Mentimeter-style animated chart with 1-click switcher:
+      - 📊 Vertical Bar Chart (upward growing bars, correct option in Emerald Green).
+      - 🍩 SVG Donut / Pie Chart.
+    - Question & Explanation card.
+    - List of "🏆 যারা সঠিক উত্তর দিয়েছে" with avatar, name, and exact submission speed.
+    - Teacher toggle: `"👁️ কে ভুল করেছে বা উত্তর দেয়নি দেখুন"` to display wrong/timed-out students.
+    - Seamless transition to next question (looping back to `READY_CHECK` if next is graded).
+
+## PHASE 16: CRITICAL ARCHITECTURAL SYNC MANDATE: CONNECT QUIZ STUDIO 100% TO GLOBAL ACADEMIC MAPPING (COMPLETED)
+
+- [x] **TASK 1: Replace Custom Class/Trade/Subject Selectors in `UnifiedQuizMentimeterWorkspace.tsx` with Global Academic Mapping Cascade**
+  - Bound the entire Quiz Studio, Gallery Filter Bar, and Presentation Studio strictly to `GlobalAcademicContext`, `ACADEMIC_CLASSES`, `ALL_TRADES`, and `fetchSubjectsByClassTrade` / `getSingleSourceSubjects`:
+    - **Deck Gallery Filter Bar**:
+      - Step 1: `Class Selector`: Active classes with authoritative BTEB numerical & display values.
+      - Step 2: `Class-Wise Trade Selector`: Dynamically locks to `"সাধারণ পাঠ্যক্রম (ট্রেড নেই)"` for pre-vocational Classes 6–8, and populates ONLY the 4 authoritative trades for Vocational Classes 9–12.
+      - Step 3: `Mapped Subject Selector`: Centrally loaded from `/api/academic/global-settings` with authoritative name & BTEB subject code.
+      - Bi-directional sync with `GlobalAcademicContext` and `window` event listeners (`ptsc_academic_context_changed`, `pts-academic-mapping-updated`).
+    - **Deck Gallery Cards**:
+      - Every quiz card displays high-contrast badges for mapped Class, Trade, and Mapped Subject (`{name} ({code})`).
+    - **New Presentation Creation Modal (`isCreateDeckModalOpen`)**:
+      - Replaced raw creation triggers with a dedicated 3-step cascading modal (`Class -> Class-wise Trade -> Mapped Subject`).
+    - **Studio Top Bar & Settings Drawer**:
+      - Studio header displays an active academic pill (`🎓 Class | 🛠️ Trade | 📚 Subject (Code)`).
+      - Quiz Settings Drawer contains **Section 0: সেন্ট্রাল একাডেমিক ম্যাপিং** with live cascading selectors for Class, Trade, and Mapped Subject.
+
+- [x] **TASK 2: Sync `SmartAiSlideGeneratorModal.tsx` & Central Book Suggestions with Global Academic Mapping**
+  - Inherits `activeClassId`, `activeTradeId`, `activeSubject`, `activeSubjectId`, and `activeSubjectCode` from the presentation deck.
+  - Added Section 0 Academic Mapping Cascade in the modal configure view.
+  - Automatically queries `/api/ai/pdf-manager?limit=50&classId=...&tradeId=...&subjectId=...` to automatically highlight and preselect the authoritative textbook (e.g., *IT Support & IoT Basics* for Class 9 Computer Trade).
+  - Preserved metadata on manual PDF upload.
+
+- [x] **TASK 3: Sync Live Session Attendance Dropdown (`StudentJoinContentComponent.tsx` & `HostLiveFullscreenStage.tsx`) with Mapped Class & Trade**
+  - Updated `/api/live-quizzes/sessions` to store `academicYearId`, `classId`, `className`, `tradeId`, `tradeName`, `subjectId`, `subjectName`, and `subjectCode`.
+  - Upgraded `/api/attendance` (`action=quiz_eligibility`):
+    - When `sessionCode` is provided, automatically extracts the session's mapped Class and Trade.
+    - Filters present attendance records and fallback active student lists using `matchesClass` and `matchesTrade` (handling both numeric IDs and textual codes).
+    - Guarantees that only students enrolled in that specific Class and Trade appear in the Attendance Name dropdown.
+  - Upgraded `HostLiveFullscreenStage.tsx` to render mapped Class, Trade, and Subject badges in the top join bar and Welcome / Lobby screens.
+  - Synchronized `DualDeviceInteractivePreviewModal.tsx` simulator with deck `classId` and `tradeId`.
+
+- [x] **TASK 4: Persist Mapped IDs & Names in `/api/quizzes` and `/api/quizzes/[id]`**
+  - Updated `POST /api/quizzes` and `PUT /api/quizzes/[id]` to persist and normalize `classId`, `className`, `tradeId`, `tradeName`, `subjectId`, `subjectName`, and `subjectCode`.
+  - Normalized mock documents in `lib/database.ts` with authoritative trade IDs.
+
+## PHASE 17: HYBRID WORKFLOW UPGRADE — COPY-PASTE IMPORT, TOPIC-ONLY AI, NON-DESTRUCTIVE APPENDING & ON-CANVAS SLIDE CO-PILOT (COMPLETED)
+
+- [x] **TASK 1: Upgrade `SmartAiSlideGeneratorModal.tsx` into a 4-Mode Universal AI & Copy-Paste Studio**
+  - Eliminated the mandatory PDF requirement; teachers can now create presentations freely using text or topic prompts.
+  - Implemented 4 distinct mode tabs inside `SmartAiSlideGeneratorModal`:
+    - **Tab 1: `📋 কপি-পেস্ট ইম্পোর্ট (Copy-Paste from Any AI / Text)`**:
+      - Large textarea accepting copy-pasted content from ChatGPT, Claude, Gemini, Google Docs, or raw notes.
+      - 1-Click Helper Button: `"🤖 অন্য AI (ChatGPT/Gemini)-এর জন্য রেডি প্রম্পট কপি করুন"` to copy an optimized Bengali prompt to clipboard.
+      - Direct connection to `/api/ai/parse-quiz-text` supporting auto-parsing into interactive slides (`MCQ`, `FILL_BLANKS`, `MATCHING`, `REORDER`, `TRUE_FALSE`, `WORD_CLOUD`, `OPEN_ENDED`, `TEXT_SLIDE`).
+    - **Tab 2: `💡 যেকোনো টপিক বা নির্দেশনা (Topic & Custom Prompt — No PDF)`**:
+      - 100% PDF-free generation. Teachers input a topic/chapter and desired slide count (1 to 20).
+      - Question type chips (`MCQ`, `FILL_BLANKS`, `MATCHING`, `REORDER`, `TRUE_FALSE`) and interactive class flow options (Intro Welcome, Word Cloud icebreaker, periodic leaderboard, and end-of-class feedback).
+    - **Tab 3: `📚 কেন্দ্রীয় বই ও পিডিএফ (From Uploaded Book / PDF)`**:
+      - Central library textbook selector with automatic filtering by mapped Class and Trade, plus page range (`From Page` to `To Page`) and custom PDF file drag-and-drop.
+    - **Tab 4: `🔄 বর্তমান স্লাইড আপডেট ও এক্সটেন্ড (AI Co-Pilot for Existing Deck)`**:
+      - Inspects slides currently on canvas via `existingSlides` and `activeSlideId`.
+      - Provides 4 Co-Pilot actions:
+        - `✨ বর্তমান স্লাইডগুলো আরও সুন্দর ও উন্নত করুন (Beautify)`
+        - `➕ বর্তমান স্লাইডের সাথে মিল রেখে আরও স্লাইড যোগ করুন (Extend Deck)` with zero duplicate questions
+        - `🔄 প্রশ্নের ধরন রূপান্তর করুন (Convert Slide Types)`
+        - `🗑️ দুর্বল বা ডুপ্লিকেট স্লাইড ছাঁটাই করুন (AI Cleanup)`
+    - **Step 2 Review Screen**:
+      - Interactive slide preview cards with inline editing, checkbox selection, question type indicators, and an insertion mode picker (`append`, `insert_after_active`, `update_in_place`, `replace_all`).
+
+- [x] **TASK 2: Strict Non-Destructive Additive Slide Management (`UnifiedQuizMentimeterWorkspace.tsx`)**
+  - Enforced strict non-destructive appending: manual slides and previously generated AI slides are never overwritten.
+  - Implemented insertion modes in `handleInsertAiSlides`:
+    - `append`: `[...currentDeck.slides, ...newSlides]` (Default mode).
+    - `insert_after_active`: Inserts immediately after the active slide.
+    - `update_in_place`: Replaces existing slides by matching `id` (used by Co-Pilot beautify & convert).
+    - `replace_all`: Replaces the deck slides only when explicitly requested.
+  - Auto-persists newly added/modified slides to server (`saveDeckToServer(updatedDeck, false)`).
+
+- [x] **TASK 3: On-Canvas "🪄 AI দিয়ে এই স্লাইডটি আপডেট করুন" Magic Bar**
+  - Added an on-canvas `"🪄 AI আপডেট"` action button and floating popover to the active slide toolbar in `UnifiedQuizMentimeterWorkspace.tsx`.
+  - 4 quick 1-click actions:
+    - `✨ লেখা ও অপশনগুলো আরও মানসম্মত ও নিখুঁত করো (Beautify)`
+    - `🧠 আরেকটু মানসম্মত ও কঠিন করো (Make Harder)`
+    - `🔀 অন্য ধরনে রূপান্তর করো (Convert Type)` with a dropdown for `MCQ`, `MATCHING`, `FILL_BLANKS`, `REORDER`, `TRUE_FALSE`
+    - `💡 সঠিক উত্তরের চমৎকার ব্যাখ্যা তৈরি করো (Generate Explanation)`
+  - Custom prompt input for freeform instructions.
+  - Live animated `Loader2` indicator during generation with non-blocking toast notifications.
+
+- [x] **TASK 4: Universal Backend Endpoints (`/api/ai/parse-quiz-text` and `/api/ai/questions/[id]/improve`)**
+  - **`app/api/ai/parse-quiz-text/route.ts`**:
+    - Instant JSON parsing (0ms) when input starts with `[` or `{`.
+    - Algorithmic regex parser supporting `MCQ`, `MATCHING`, `FILL_BLANKS`, `REORDER`, and `TRUE_FALSE`.
+    - Multi-key Gemini/AI failover fallback for messy or freeform ChatGPT/Claude outputs.
+    - Returns both `slides: ParsedPresentationSlide[]` and `questions: ParsedImportedQuestion[]`.
+  - **`app/api/ai/questions/[id]/improve/route.ts`**:
+    - Direct slide improvement endpoint accepting a full `slide: PresentationSlide` object in the request body.
+    - Supports actions: `"beautify"`, `"harder"`, `"convert"`, `"explain"`, and `"custom"`.
+    - Returns updated slide with preserved `id` for in-place canvas updates.
+
+- [x] **TASK 5: Architectural Fix for React State-in-Render Collision (`GlobalAcademicContext.tsx` & `UnifiedQuizMentimeterWorkspace.tsx`)**
+  - **Root Cause**: `GlobalAcademicContext`'s mutators (`setSelectedClassId`, `setSelectedTradeId`, etc.) were invoking `persistState` with a synchronous `window.dispatchEvent("ptsc_academic_context_changed")` *inside* React's `setState((prev) => ...)` pure updater functions during component render. When `handleContextEvent` in `UnifiedQuizMentimeterWorkspace` received the synchronous event and called `setFilterClass`, React triggered `Cannot update a component while rendering a different component`.
+  - **Resolution**:
+    - Made all `GlobalAcademicContext` state mutators 100% pure without side-effects.
+    - Moved localStorage persistence and window event dispatching to a dedicated post-hydration `useEffect`, dispatched asynchronously via `setTimeout(..., 0)` to guarantee zero render-phase collisions.
+    - Added defensive no-op identity checks `(prev => prev === next ? prev : next)` in `UnifiedQuizMentimeterWorkspace`'s context sync and event listener.

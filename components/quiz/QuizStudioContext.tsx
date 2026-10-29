@@ -3,13 +3,15 @@ import { ParsedImportedQuestion } from "@/app/api/ai/parse-quiz-text/route";
 
 export interface StudioQuestionItem {
   id: string;
-  type: "mcq_single" | "mcq_multiple" | "fill_blank" | "matching" | "true_false" | "short_answer" | "ordering";
+  type: "mcq_single" | "mcq_multiple" | "fill_blank" | "matching" | "true_false" | "short_answer" | "ordering" | "reorder" | "word_cloud" | "open_ended" | "text_slide";
   questionText: string;
   options?: string[];
-  correctAnswer?: number | boolean;
+  correctAnswer?: number | boolean | string;
   correctIndices?: number[];
   acceptedAnswers?: string[];
   pairs?: { left: string; right: string }[];
+  items?: string[];
+  content?: string;
   expectedAnswerKeyword?: string;
   explanation: string;
   conceptTopic: string;

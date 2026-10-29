@@ -38,14 +38,18 @@ export interface ParticipantReportRow {
   playerId: string;
   rank: number;
   displayName: string;
+  name?: string;
   studentId?: number;
   score: number;
   correctAnswers: number;
+  correctCount?: number;
   wrongAnswers: number;
   unanswered: number;
   accuracy: number;
   bestStreak: number;
   averageResponseTimeMs: number;
+  phone?: string;
+  totalQuestions?: number;
 }
 
 export class FinalResultService {

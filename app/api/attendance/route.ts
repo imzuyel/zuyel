@@ -1,5 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
+import { parseClassNumeric, ALL_TRADES } from "@/lib/academicStructure";
+
+function matchesClass(c1: any, c2: any): boolean {
+  if (c1 === c2 || String(c1) === String(c2)) return true;
+  const n1 = parseClassNumeric(c1);
+  const n2 = parseClassNumeric(c2);
+  return n1 > 0 && n2 > 0 && n1 === n2;
+}
+
+function matchesTrade(t1: any, t2: any): boolean {
+  if (!t2 || t2 === "all") return true;
+  if (!t1) return false;
+  if (t1 === t2 || String(t1).toLowerCase() === String(t2).toLowerCase()) return true;
+  const n1 = Number(t1);
+  const n2 = Number(t2);
+  if (!isNaN(n1) && !isNaN(n2)) {
+    if (n1 === n2) return true;
+    if ((n1 === 101 && n2 === 1) || (n1 === 1 && n2 === 101)) return true;
+    if ((n1 === 102 && n2 === 2) || (n1 === 2 && n2 === 102)) return true;
+    if ((n1 === 103 && n2 === 3) || (n1 === 3 && n2 === 103)) return true;
+    if ((n1 === 104 && n2 === 4) || (n1 === 4 && n2 === 104)) return true;
+  }
+  return false;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,20 +34,8 @@ export async function GET(req: NextRequest) {
     const dateParam = searchParams.get("date") || new Date().toISOString().split("T")[0];
 
     if (action === "quiz_eligibility") {
-      const targetClassId = classIdParam ? parseInt(classIdParam) : 4; // Default Class 9 (SSC Vocational)
-
-      // 1. Check today's or most recent attendance record for this class
-      let record = institutionalDb.attendanceRecords.find(
-        (r) => r.classId === targetClassId && r.date === dateParam
-      );
-
-      // If not found for today's exact date, find the latest available attendance record
-      if (!record) {
-        const recordsForClass = institutionalDb.attendanceRecords
-          .filter((r) => r.classId === targetClassId)
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        record = recordsForClass[0];
-      }
+      let targetClassId = classIdParam ? parseInt(classIdParam) : 4; // Default Class 9 (SSC Vocational)
+      let targetTradeId = searchParams.get("tradeId") ? parseInt(searchParams.get("tradeId")!) : undefined;
 
       // Check which students are already joined in the active live session
       const joinedStudentIds = new Set<number>();
@@ -40,6 +52,17 @@ export async function GET(req: NextRequest) {
         );
 
         if (session) {
+          if (session.classId) {
+            targetClassId = Number(session.classId);
+          }
+          if (session.tradeId) {
+            targetTradeId = Number(session.tradeId);
+          } else if (session.tradeName) {
+            const trd = ALL_TRADES.find(
+              (t) => t.name.toLowerCase() === session.tradeName?.toLowerCase() || t.nameBangla === session.tradeName
+            );
+            if (trd) targetTradeId = trd.id;
+          }
           const participants = institutionalDb.liveParticipants.filter(
             (p) => p.sessionId === session.id && (p.status === "JOINED" || p.connectionStatus === "online")
           );
@@ -47,12 +70,24 @@ export async function GET(req: NextRequest) {
             if (p.studentId) joinedStudentIds.add(p.studentId);
             if (p.displayName) {
               joinedNames.add(p.displayName.trim().toLowerCase());
-              // Clean up formatted name e.g. "আরিয়ান খান (রোল: ১০১)" -> "আরিয়ান খান"
               const baseName = p.displayName.split("(")[0].trim().toLowerCase();
               joinedNames.add(baseName);
             }
           });
         }
+      }
+
+      // 1. Check today's or most recent attendance record for this class & trade
+      let record = institutionalDb.attendanceRecords.find(
+        (r) => matchesClass(r.classId, targetClassId) && (!targetTradeId || matchesTrade(r.tradeId, targetTradeId)) && r.date === dateParam
+      );
+
+      // If not found for today's exact date, find the latest available attendance record
+      if (!record) {
+        const recordsForClass = institutionalDb.attendanceRecords
+          .filter((r) => matchesClass(r.classId, targetClassId) && (!targetTradeId || matchesTrade(r.tradeId, targetTradeId)))
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        record = recordsForClass[0];
       }
 
       let eligibleStudents: any[] = [];
@@ -76,20 +111,27 @@ export async function GET(req: NextRequest) {
             name: name,
             nameEnglish: studentProfile?.name || entry.name,
             trade: studentProfile?.tradeNameBangla || studentProfile?.tradeName || record?.tradeName || "IT Support & IoT",
+            tradeId: studentProfile?.tradeId || record?.tradeId,
             className: studentProfile?.className || record?.className || "Class 9 (SSC Vocational)",
+            classId: studentProfile?.classId || record?.classId,
             attendanceStatus: entry.status === "P" ? "উপস্থিত (Present)" : "বিলম্বে উপস্থিত (Late)",
             statusCode: entry.status,
             attendanceRate: studentProfile?.attendanceRate ?? 95,
             isJoined: isJoined,
           };
         });
+
+        if (targetTradeId) {
+          const filteredByTrade = eligibleStudents.filter((s) => matchesTrade(s.tradeId, targetTradeId));
+          if (filteredByTrade.length > 0) eligibleStudents = filteredByTrade;
+        }
       } else {
         // Fallback: active students for this class or general active students
         const studentsInClass = institutionalDb.students.filter(
-          (s) => (s.classId === targetClassId || targetClassId === 4) && s.status === "Active"
+          (s) => matchesClass(s.classId, targetClassId) && (!targetTradeId || matchesTrade(s.tradeId, targetTradeId)) && s.status === "Active"
         );
 
-        eligibleStudents = (studentsInClass.length > 0 ? studentsInClass : institutionalDb.students.slice(0, 25)).map(
+        eligibleStudents = (studentsInClass.length > 0 ? studentsInClass : institutionalDb.students.filter((s) => matchesClass(s.classId, targetClassId))).map(
           (s) => {
             const cleanNameLower = (s.nameBangla || s.name).trim().toLowerCase();
             const isJoined = joinedStudentIds.has(s.id) || joinedNames.has(cleanNameLower);
@@ -100,7 +142,9 @@ export async function GET(req: NextRequest) {
               name: s.nameBangla || s.name,
               nameEnglish: s.name,
               trade: s.tradeNameBangla || s.tradeName || "IT Support & IoT",
+              tradeId: s.tradeId,
               className: s.className || "Class 9 (SSC Vocational)",
+              classId: s.classId,
               attendanceStatus: "উপস্থিত (Present)",
               statusCode: "P",
               attendanceRate: s.attendanceRate ?? 96,

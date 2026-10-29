@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
+import { ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicStructure";
 import { extractRequestIdentity, requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
 import { isAuthorizedStaff } from "@/lib/rbac";
 
@@ -103,9 +104,32 @@ export async function PUT(
     }
 
     const body = await req.json();
+    const existing = institutionalDb.quizzes[index];
+    const effectiveClassId = body.classId !== undefined ? Number(body.classId) : existing.classId;
+    const effectiveClassName =
+      body.className ||
+      (effectiveClassId
+        ? ACADEMIC_CLASSES.find((c) => String(c.id) === String(effectiveClassId) || c.numericValue === Number(effectiveClassId))?.nameBangla
+        : existing.className);
+    const effectiveTradeId = body.tradeId !== undefined ? Number(body.tradeId) : existing.tradeId;
+    const effectiveTradeName =
+      body.tradeName ||
+      body.trade ||
+      (effectiveTradeId ? ALL_TRADES.find((t) => String(t.id) === String(effectiveTradeId))?.nameBangla : existing.tradeName);
+    const effectiveSubjectId = body.subjectId !== undefined ? Number(body.subjectId) : existing.subjectId;
+    const effectiveSubjectName = body.subjectName || body.subject || existing.subjectName;
+    const effectiveSubjectCode = body.subjectCode || existing.subjectCode;
+
     const updatedQuiz = {
-      ...institutionalDb.quizzes[index],
+      ...existing,
       ...body,
+      classId: effectiveClassId,
+      className: effectiveClassName,
+      tradeId: effectiveTradeId,
+      tradeName: effectiveTradeName,
+      subjectId: effectiveSubjectId,
+      subjectName: effectiveSubjectName,
+      subjectCode: effectiveSubjectCode,
       updatedAt: new Date().toISOString(),
     };
 

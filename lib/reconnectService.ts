@@ -251,26 +251,38 @@ export const SessionRecoveryService = {
     let answered = false;
     let originalAnswer: any = null;
 
-    const originalQ = totalQuestions > 0 && currentIdx < totalQuestions ? questions[currentIdx] : null;
+    const originalQ = totalQuestions > 0 && currentIdx < totalQuestions ? (questions[currentIdx] as any) : null;
     const sequenceState = computeQuizSequenceState(session, originalQ?.timeLimit || 30);
 
-    if (session.isQuizModeStarted && originalQ) {
+    if ((session.isQuizModeStarted || (session.status as string) === "READY" || session.status === "QUESTION_ACTIVE") && originalQ) {
       
       // Determine what to show based on authoritative sequence phase:
-      // In COUNTDOWN: questionText and options are masked so nothing is revealed premature
+      // In READY / COUNTDOWN: questionText and options are masked so nothing is revealed prematurely
       // In QUESTION_PREVIEW: questionText is revealed, but options are NOT revealed
       // In QUESTION_ACTIVE / QUESTION_ENDED: both questionText and options are fully revealed
-      const showQuestionText = sequenceState.phase !== "COUNTDOWN";
+      const showQuestionText = sequenceState.phase !== "COUNTDOWN" && sequenceState.phase !== "READY";
       const showOptions = sequenceState.isOptionsRevealed;
 
       currentQuestion = {
         id: originalQ.id,
-        questionText: showQuestionText ? originalQ.questionText : "",
+        questionText: showQuestionText ? (originalQ.questionText || originalQ.title || "") : "",
+        title: originalQ.title || originalQ.questionText || "",
         type: originalQ.type,
-        options: showOptions ? originalQ.options : [],
+        questionType: originalQ.questionType || originalQ.type,
+        options: showOptions ? (originalQ.options || []) : [],
         optionsRevealed: showOptions,
+        matchingPairs: showOptions ? (originalQ.matchingPairs || originalQ.pairs) : undefined,
+        pairs: showOptions ? (originalQ.pairs || originalQ.matchingPairs) : undefined,
+        sentenceWithBlank: originalQ.sentenceWithBlank || ((originalQ.type || "").toUpperCase() === "FILL_BLANKS" ? (originalQ.questionText || originalQ.title) : undefined),
+        blankAnswer: session.status === "QUESTION_ENDED" ? (originalQ.blankAnswer || originalQ.correctAnswer) : undefined,
+        reorderItems: showOptions ? (originalQ.reorderItems || originalQ.items || originalQ.correctOrder) : undefined,
+        items: showOptions ? (originalQ.items || originalQ.reorderItems || originalQ.correctOrder) : undefined,
+        correctOrder: session.status === "QUESTION_ENDED" ? (originalQ.correctOrder || originalQ.items) : undefined,
+        acceptedAnswers: showOptions ? (originalQ.acceptedAnswers || (originalQ.blankAnswer ? [originalQ.blankAnswer] : [])) : [],
         questionData: originalQ.questionData ? { ...originalQ.questionData } : undefined,
-        timeLimit: originalQ.timeLimit
+        timeLimit: originalQ.timeLimit,
+        marks: originalQ.marks || originalQ.points || 100,
+        points: originalQ.points || originalQ.marks || 100,
       };
 
       // Security validation: anti-cheat data leakage mask before end of question

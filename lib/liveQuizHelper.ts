@@ -57,6 +57,25 @@ export function computeQuizSequenceState(session: any, questionTimeLimit = 30): 
     };
   }
 
+  // Mandatory FIX 4: Waiting in READY_CHECK stage until teacher triggers question start
+  if (session.status === "READY") {
+    return {
+      phase: "READY",
+      countdownSecondsRemaining: 3,
+      previewSecondsRemaining: 5,
+      mainTimerSecondsRemaining: questionTimeLimit,
+      isOptionsRevealed: false,
+      canSubmitAnswer: false,
+      activeQuestionIndex: session.currentQuestionIndex || 0,
+      totalQuestions: session.totalQuestions || 0,
+      sequenceStartedAt: session.sequenceStartedAt,
+      readyEndsAt: session.readyEndsAt,
+      countdownEndsAt: session.countdownEndsAt,
+      previewEndsAt: session.previewEndsAt,
+      questionEndsAt: session.questionEndsAt
+    };
+  }
+
   const now = Date.now();
   const readyEndsAt = session.readyEndsAt ? new Date(session.readyEndsAt).getTime() : 0;
   const countdownEndsAt = session.countdownEndsAt ? new Date(session.countdownEndsAt).getTime() : 0;
@@ -342,18 +361,29 @@ export function getSessionQuestions(quizId: string): LiveQuestionSnapshot[] {
 
       const pairs = snap.pairs || snap.matchingPairs || snap.questionData?.pairs || snap.questionData?.matchingPairs;
       const orderList = snap.correctOrder || snap.items || snap.questionData?.items || snap.questionData?.correctOrder;
+      const sentenceWithBlank = snap.sentenceWithBlank || snap.questionData?.sentenceWithBlank || snap.questionText;
+      const blankAnswer = snap.blankAnswer || snap.questionData?.blankAnswer || (snap.acceptedAnswers && snap.acceptedAnswers[0]);
 
       return {
         id: String(qq.id),
         questionText: snap.questionText || (qq as any).questionText || "টেকনিক্যাল কুইজ প্রশ্ন",
         type,
         questionType: type,
-        options: options.length > 0 ? options : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
+        options: options.length > 0 ? options : (type === "mcq_single" || type === "MCQ" ? ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"] : []),
         matchingPairs: pairs,
+        pairs,
+        sentenceWithBlank,
+        blankAnswer,
+        reorderItems: orderList,
+        items: orderList,
         correctOrder: orderList,
+        acceptedAnswers: snap.acceptedAnswers || (blankAnswer ? [blankAnswer] : []),
         questionData: snap,
         timeLimit: qq.timeLimit || 30,
-        correctAnswer: correctAnswer ?? 0
+        marks: qq.marks || 100,
+        points: qq.marks || 100,
+        correctAnswer: correctAnswer ?? 0,
+        explanation: snap.explanation || qq.questionSnapshot?.explanation || ""
       };
     });
   }
@@ -365,40 +395,72 @@ export function getSessionQuestions(quizId: string): LiveQuestionSnapshot[] {
     const rawQuestions = (dbQuiz as any).questions || [];
 
     const unifiedList = [
-      ...rawSlides.map((s: any, idx: number) => ({
-        id: String(s.id || `slide-${idx}`),
-        questionText: s.title || s.content || "কন্টেন্ট স্লাইড",
-        type: (s.type || "TEXT_SLIDE").toUpperCase(),
-        questionType: (s.type || "TEXT_SLIDE").toUpperCase(),
-        options: s.options || [],
-        matchingPairs: s.pairs,
-        correctOrder: s.items,
-        acceptedAnswers: s.acceptedAnswers,
-        imageLeftUrl: s.imageLeftUrl,
-        imageRightUrl: s.imageRightUrl,
-        bulletPoints: s.bulletPoints,
-        content: s.content,
-        questionData: s,
-        timeLimit: s.timeLimit || 0,
-        correctAnswer: s.correctAnswer ?? 0,
-        explanation: s.explanation || "",
-      })),
-      ...rawQuestions.map((q: any, idx: number) => ({
-        id: String(q.id || `q-${idx}`),
-        questionText: q.question || q.questionText || "টেকনিক্যাল প্রশ্ন",
-        type: (q.type || q.questionType || "MCQ").toUpperCase(),
-        questionType: (q.type || q.questionType || "MCQ").toUpperCase(),
-        options: q.options && q.options.length > 0 ? q.options : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
-        matchingPairs: q.matchingPairs || q.pairs || q.questionData?.pairs,
-        correctOrder: q.correctOrder || q.items || q.questionData?.items,
-        acceptedAnswers: q.acceptedAnswers,
-        imageLeftUrl: q.imageLeftUrl,
-        imageRightUrl: q.imageRightUrl,
-        questionData: q,
-        timeLimit: q.timeLimit || 30,
-        correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
-        explanation: q.explanation || "",
-      })),
+      ...rawSlides.map((s: any, idx: number) => {
+        const sType = (s.type || "TEXT_SLIDE").toUpperCase();
+        const pairs = s.pairs || s.matchingPairs || s.questionData?.pairs;
+        const items = s.items || s.reorderItems || s.correctOrder || s.questionData?.items;
+        const sentenceWithBlank = s.sentenceWithBlank || s.title || s.content;
+        const blankAnswer = s.blankAnswer || s.correctAnswer || (s.acceptedAnswers && s.acceptedAnswers[0]);
+
+        return {
+          id: String(s.id || `slide-${idx}`),
+          questionText: s.title || s.content || "কন্টেন্ট স্লাইড",
+          title: s.title || s.content,
+          type: sType,
+          questionType: sType,
+          options: s.options || [],
+          matchingPairs: pairs,
+          pairs,
+          sentenceWithBlank,
+          blankAnswer,
+          reorderItems: items,
+          items,
+          correctOrder: items,
+          acceptedAnswers: s.acceptedAnswers || (blankAnswer ? [blankAnswer] : []),
+          imageLeftUrl: s.imageLeftUrl,
+          imageRightUrl: s.imageRightUrl,
+          bulletPoints: s.bulletPoints,
+          content: s.content,
+          questionData: s,
+          timeLimit: s.timeLimit || 0,
+          marks: s.points || s.marks || (s.timeLimit ? 100 : 0),
+          points: s.points || s.marks || (s.timeLimit ? 100 : 0),
+          correctAnswer: s.correctAnswer ?? 0,
+          explanation: s.explanation || "",
+        };
+      }),
+      ...rawQuestions.map((q: any, idx: number) => {
+        const qType = (q.type || q.questionType || "MCQ").toUpperCase();
+        const pairs = q.matchingPairs || q.pairs || q.questionData?.pairs;
+        const items = q.correctOrder || q.items || q.reorderItems || q.questionData?.items;
+        const sentenceWithBlank = q.sentenceWithBlank || q.question || q.questionText;
+        const blankAnswer = q.blankAnswer || q.correctAnswer || (q.acceptedAnswers && q.acceptedAnswers[0]);
+
+        return {
+          id: String(q.id || `q-${idx}`),
+          questionText: q.question || q.questionText || "টেকনিক্যাল প্রশ্ন",
+          title: q.question || q.questionText,
+          type: qType,
+          questionType: qType,
+          options: q.options && q.options.length > 0 ? q.options : (qType === "MCQ" ? ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"] : []),
+          matchingPairs: pairs,
+          pairs,
+          sentenceWithBlank,
+          blankAnswer,
+          reorderItems: items,
+          items,
+          correctOrder: items,
+          acceptedAnswers: q.acceptedAnswers || (blankAnswer ? [blankAnswer] : []),
+          imageLeftUrl: q.imageLeftUrl,
+          imageRightUrl: q.imageRightUrl,
+          questionData: q,
+          timeLimit: q.timeLimit || 30,
+          marks: q.marks || q.points || 100,
+          points: q.points || q.marks || 100,
+          correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
+          explanation: q.explanation || "",
+        };
+      }),
     ];
 
     if (unifiedList.length > 0) {

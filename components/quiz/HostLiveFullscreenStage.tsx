@@ -32,14 +32,20 @@ import {
   AlertTriangle,
   HelpCircle,
   FileSpreadsheet,
+  PieChart,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PresentationSlide, isGradedQuiz } from "./UnifiedQuizMentimeterWorkspace";
 import UniversalQuizShowcaseEngine from "./engine/UniversalQuizShowcaseEngine";
 import FloatingReactionOverlay from "./FloatingReactionOverlay";
+import { COLORFUL_STUDENT_AVATARS, RenderColorfulAvatar, getAvatarById } from "./avatarData";
 import { triggerFireworks } from "@/lib/confetti";
 
 interface HostLiveFullscreenStageProps {
+  className?: string;
+  tradeName?: string;
+  subjectName?: string;
+  subjectCode?: string;
   sessionId: string;
   sessionCode: string;
   deckTitle: string;
@@ -55,6 +61,10 @@ export default function HostLiveFullscreenStage({
   slides,
   scheduledStartTime,
   onClose,
+  className,
+  tradeName,
+  subjectName,
+  subjectCode,
 }: HostLiveFullscreenStageProps) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isAnswerRevealed, setIsAnswerRevealed] = useState(false);
@@ -89,6 +99,25 @@ export default function HostLiveFullscreenStage({
   const [isAdvancingSlide, setIsAdvancingSlide] = useState(false);
   const [timerSecondsLeft, setTimerSecondsLeft] = useState(30);
 
+  // Join popups queue (Fix 3)
+  const [joinPopups, setJoinPopups] = useState<Array<{ id: string; name: string; avatar: string }>>([]);
+  const prevPlayerIdsRef = React.useRef<string[]>([]);
+
+  // State Machine States (Fix 4, 5, 7)
+  const [serverPhase, setServerPhase] = useState<string>("READY");
+  const [readyPlayers, setReadyPlayers] = useState<any[]>([]);
+  const [readyCount, setReadyCount] = useState<number>(0);
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(0);
+  const [previewSeconds, setPreviewSeconds] = useState<number>(0);
+  const [chartType, setChartType] = useState<"bar" | "donut">("bar");
+  const [showWrongStudents, setShowWrongStudents] = useState<boolean>(false);
+  const [liveOptionStats, setLiveOptionStats] = useState<number[]>([]);
+  const [serverCorrectCount, setServerCorrectCount] = useState<number>(0);
+  const [serverWrongCount, setServerWrongCount] = useState<number>(0);
+  const [serverTimedOutCount, setServerTimedOutCount] = useState<number>(0);
+  const [serverExplanation, setServerExplanation] = useState<string>("");
+  const [isStartingQuestion, setIsStartingQuestion] = useState(false);
+
   const currentSlide = slides[currentSlideIndex] || slides[0];
   const isCurrentGraded = isGradedQuiz(currentSlide.type);
 
@@ -107,7 +136,7 @@ export default function HostLiveFullscreenStage({
     return () => clearInterval(interval);
   }, [scheduledSecondsLeft]);
 
-  // Poll players and live session state every 1.5s
+  // Poll players and live session state every 1.2s
   useEffect(() => {
     let isMounted = true;
     const pollInterval = setInterval(async () => {
@@ -118,6 +147,25 @@ export default function HostLiveFullscreenStage({
           const pData = await playersRes.json();
           if (isMounted && pData.success && Array.isArray(pData.players)) {
             setPlayers(pData.players);
+
+            // FIX 3: Detect newly joined students for real-time animated popup
+            const currentIds = pData.players.map((p: any) => p.id);
+            if (prevPlayerIdsRef.current.length > 0) {
+              const newArrivals = pData.players.filter((p: any) => !prevPlayerIdsRef.current.includes(p.id));
+              if (newArrivals.length > 0) {
+                newArrivals.forEach((np: any) => {
+                  const popId = `join-${np.id}-${Date.now()}`;
+                  setJoinPopups((prev) => [
+                    ...prev.slice(-3),
+                    { id: popId, name: np.displayName || "শিক্ষার্থী", avatar: np.avatar || "av_cyber_tiger" },
+                  ]);
+                  setTimeout(() => {
+                    setJoinPopups((prev) => prev.filter((item) => item.id !== popId));
+                  }, 4500);
+                });
+              }
+            }
+            prevPlayerIdsRef.current = currentIds;
           }
         }
 
@@ -130,25 +178,46 @@ export default function HostLiveFullscreenStage({
           }
         }
 
-        // 3. Fetch state to check for real-time smsDispatched
+        // 3. Fetch state to synchronize 5-stage Kahoot/Mentimeter engine
         const stateRes = await fetch(`/api/live-quizzes/sessions/${sessionId}/state?playerId=HOST`);
         if (stateRes.ok) {
           const sData = await stateRes.json();
-          if (isMounted && sData.lastSmsDispatched && sData.lastSmsDispatched.sent) {
-            setSmsToast(sData.lastSmsDispatched);
-            setTimeout(() => setSmsToast(null), 5000);
+          if (isMounted) {
+            if (sData.phase) setServerPhase(sData.phase);
+            if (sData.readyPlayers) setReadyPlayers(sData.readyPlayers);
+            if (sData.readyCount !== undefined) setReadyCount(sData.readyCount);
+            if (sData.countdownSeconds !== undefined) setCountdownSeconds(sData.countdownSeconds);
+            if (sData.previewSeconds !== undefined) setPreviewSeconds(sData.previewSeconds);
+            if (sData.mainTimerSeconds !== undefined) setTimerSecondsLeft(sData.mainTimerSeconds);
+            if (sData.optionStats) setLiveOptionStats(sData.optionStats);
+            if (sData.correctCount !== undefined) setServerCorrectCount(sData.correctCount);
+            if (sData.wrongCount !== undefined) setServerWrongCount(sData.wrongCount);
+            if (sData.timedOutCount !== undefined) setServerTimedOutCount(sData.timedOutCount);
+            if (sData.explanation) setServerExplanation(sData.explanation);
+            if (sData.isAnswerRevealed || sData.allVoted || sData.phase === "QUESTION_ENDED") {
+              setIsAnswerRevealed(true);
+            }
+            if (sData.currentQuestionIndex !== undefined && sData.currentQuestionIndex !== currentSlideIndex) {
+              setCurrentSlideIndex(sData.currentQuestionIndex);
+              setIsAnswerRevealed(false);
+              setShowWrongStudents(false);
+            }
+            if (sData.lastSmsDispatched && sData.lastSmsDispatched.sent) {
+              setSmsToast(sData.lastSmsDispatched);
+              setTimeout(() => setSmsToast(null), 5000);
+            }
           }
         }
       } catch {
         // safe polling catch
       }
-    }, 1500);
+    }, 1200);
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [sessionId]);
+  }, [sessionId, currentSlideIndex]);
 
   // Isolated countdown timer for graded slides
   useEffect(() => {
@@ -201,6 +270,24 @@ export default function HostLiveFullscreenStage({
     }
   };
 
+  // FIX 4 & 5: Teacher Trigger for Question Start from READY_CHECK stage
+  const handleStartQuestion = async () => {
+    setIsStartingQuestion(true);
+    try {
+      await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start_question" }),
+      });
+      setServerPhase("COUNTDOWN");
+      setCountdownSeconds(3);
+    } catch (e) {
+      console.error("Failed to start question:", e);
+    } finally {
+      setIsStartingQuestion(false);
+    }
+  };
+
   // Advance to next slide / question and sync student devices
   const handleNextSlide = async () => {
     if (currentSlideIndex >= slides.length - 1) {
@@ -208,7 +295,9 @@ export default function HostLiveFullscreenStage({
       return;
     }
     const nextIdx = currentSlideIndex + 1;
-    const isNextLeaderboard = slides[nextIdx]?.type === "LEADERBOARD";
+    const nextItem = slides[nextIdx];
+    const isNextGraded = nextItem?.type ? isGradedQuiz(nextItem.type) : false;
+    const isNextLeaderboard = nextItem?.type === "LEADERBOARD";
     setIsAdvancingSlide(true);
     try {
       await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
@@ -218,6 +307,9 @@ export default function HostLiveFullscreenStage({
       });
       setCurrentSlideIndex(nextIdx);
       setIsAnswerRevealed(false);
+      setShowWrongStudents(false);
+      setReadyPlayers([]);
+      setServerPhase(isNextGraded ? "READY" : "QUESTION_ACTIVE");
       setShowLeaderboardModal(isNextLeaderboard);
 
       // Auto-Leaderboard every 5 quiz questions (Task 1.3)
@@ -240,7 +332,9 @@ export default function HostLiveFullscreenStage({
   const handlePrevSlide = async () => {
     if (currentSlideIndex <= 0) return;
     const prevIdx = currentSlideIndex - 1;
-    const isPrevLeaderboard = slides[prevIdx]?.type === "LEADERBOARD";
+    const prevItem = slides[prevIdx];
+    const isPrevGraded = prevItem?.type ? isGradedQuiz(prevItem.type) : false;
+    const isPrevLeaderboard = prevItem?.type === "LEADERBOARD";
     setIsAdvancingSlide(true);
     try {
       await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
@@ -250,6 +344,9 @@ export default function HostLiveFullscreenStage({
       });
       setCurrentSlideIndex(prevIdx);
       setIsAnswerRevealed(false);
+      setShowWrongStudents(false);
+      setReadyPlayers([]);
+      setServerPhase(isPrevGraded ? "READY" : "QUESTION_ACTIVE");
       setShowLeaderboardModal(isPrevLeaderboard);
     } catch {
       setCurrentSlideIndex(prevIdx);
@@ -258,6 +355,7 @@ export default function HostLiveFullscreenStage({
       setIsAdvancingSlide(false);
     }
   };
+
 
   // Fullscreen Toggle
   const handleToggleFullscreen = () => {
@@ -385,6 +483,69 @@ export default function HostLiveFullscreenStage({
     }
   };
 
+  // Categorize Responders for Mentimeter Reveal (Fix 7 Requirement)
+  const { correctResponders, wrongResponders, timedOutPlayers } = useMemo(() => {
+    const answeredMap = new Map<string, any>();
+    currentSlideResponses.forEach((r) => {
+      answeredMap.set(r.playerId, r);
+    });
+
+    const correct: any[] = [];
+    const wrong: any[] = [];
+
+    currentSlideResponses.forEach((r) => {
+      if (r.isCorrect === true) {
+        correct.push(r);
+      } else {
+        wrong.push(r);
+      }
+    });
+
+    const timedOut = players.filter((p) => !answeredMap.has(p.id)).map((p) => ({
+      playerId: p.id,
+      studentName: p.displayName,
+      avatar: p.avatar || "av_cyber_tiger",
+      timedOut: true,
+    }));
+
+    return {
+      correctResponders: correct,
+      wrongResponders: wrong,
+      timedOutPlayers: timedOut,
+    };
+  }, [currentSlideResponses, players]);
+
+  // SVG Donut Slices Helper
+  const donutSlices = useMemo(() => {
+    const totalVotes = Math.max(1, currentSlideResponses.length);
+    const options = currentSlide.options || [];
+    let cumulative = 0;
+    const circumference = 2 * Math.PI * 65; // radius 65 => ~408.4
+
+    return options.map((opt, idx) => {
+      const votes = (optionStats[idx] && optionStats[idx].votes) || 0;
+      const percent = Math.round((votes / totalVotes) * 100);
+      const strokeDasharray = `${(percent / 100) * circumference} ${circumference}`;
+      const strokeDashoffset = -((cumulative / 100) * circumference);
+      cumulative += percent;
+
+      const colors = ["#06B6D4", "#A855F7", "#F59E0B", "#10B981", "#EC4899", "#3B82F6"];
+      const color = colors[idx % colors.length];
+      const isCorrect = isAnswerRevealed && idx === currentSlide.correctAnswer;
+
+      return {
+        label: String.fromCharCode(65 + idx),
+        text: opt,
+        votes,
+        percent,
+        strokeDasharray,
+        strokeDashoffset,
+        color,
+        isCorrect,
+      };
+    });
+  }, [currentSlide.options, currentSlide.correctAnswer, currentSlideResponses.length, optionStats, isAnswerRevealed]);
+
   const KAHOOT_COLORS = [
     { bg: "bg-red-600", text: "text-red-400", shape: "▲" },
     { bg: "bg-blue-600", text: "text-blue-400", shape: "◆" },
@@ -435,6 +596,33 @@ export default function HostLiveFullscreenStage({
           </button>
         </div>
 
+        {/* Center: Mapped Academic Context Badges */}
+        {(className || tradeName || subjectName) && (
+          <div className="hidden xl:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/80 text-xs font-bold">
+            {className && (
+              <span className="text-indigo-300 flex items-center gap-1">
+                <span>🎓</span> {className}
+              </span>
+            )}
+            {tradeName && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-emerald-300 flex items-center gap-1">
+                  <span>🛠️</span> {tradeName}
+                </span>
+              </>
+            )}
+            {subjectName && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-amber-300 flex items-center gap-1">
+                  <span>📚</span> {subjectName} {subjectCode ? `(${subjectCode})` : ""}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Right: Live Active Counters + Fullscreen Toggle */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-bold">
@@ -457,6 +645,28 @@ export default function HostLiveFullscreenStage({
           </button>
         </div>
       </header>
+
+      {/* FIX 3: Real-Time Join Popups Overlay */}
+      <div className="fixed top-20 right-6 z-50 flex flex-col gap-2.5 pointer-events-none">
+        <AnimatePresence>
+          {joinPopups.map((popup) => (
+            <motion.div
+              key={popup.id}
+              initial={{ opacity: 0, x: 60, scale: 0.85 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 50, scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              className="px-4 py-2.5 rounded-2xl bg-slate-900/95 border-2 border-emerald-400 text-white shadow-[0_0_25px_rgba(16,185,129,0.35)] flex items-center gap-3 backdrop-blur-xl pointer-events-auto"
+            >
+              <RenderColorfulAvatar avatarId={popup.avatar} size="xs" showGlow={false} />
+              <div>
+                <span className="text-xs font-black text-emerald-300 block">🎉 {popup.name} জয়েন করেছে!</span>
+                <span className="text-[10px] text-slate-400 block leading-tight">লাইভ সেশনে সফলভাবে যুক্ত হয়েছে</span>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       {/* =====================================================================
           2. CENTER GIANT PRESENTATION CANVAS
@@ -518,9 +728,7 @@ export default function HostLiveFullscreenStage({
                       key={p.id || i}
                       className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-bold text-white shadow-sm"
                     >
-                      <span className="w-5 h-5 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center text-white">
-                        {p.displayName?.[0] || "S"}
-                      </span>
+                      <RenderColorfulAvatar avatarId={p.avatar} size="xs" showGlow={false} />
                       <span>{p.displayName}</span>
                     </div>
                   ))
@@ -555,6 +763,99 @@ export default function HostLiveFullscreenStage({
               >
                 <Play className="w-4 h-4 fill-white" />
                 <span>🚀 অপেক্ষা না করে এখনই শুরু করুন (Start Now)</span>
+              </button>
+            </div>
+          </div>
+        ) : currentSlideIndex === 0 && !isCurrentGraded ? (
+          /* =====================================================================
+             FIX 3: WELCOME / LOBBY SLIDE WITH LIVE JOIN GRID & PROMINENT COUNTER
+             ===================================================================== */
+          <div className="w-full max-w-5xl rounded-3xl bg-slate-900/90 border border-slate-800 p-8 sm:p-12 shadow-2xl relative space-y-8 text-center backdrop-blur-xl">
+            <div className="space-y-3">
+              <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 border border-cyan-400/50 shadow-[0_0_20px_rgba(6,182,212,0.3)]">
+                <Sparkles className="w-4 h-4 text-cyan-400 animate-spin" />
+                <span className="text-xs sm:text-sm font-black text-cyan-300 uppercase tracking-widest">
+                  লাইভ প্রেজেন্টেশন ও ইন্টারেক্টিভ কুইজ
+                </span>
+              </div>
+
+              <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
+                {deckTitle || currentSlide.title || "স্বাগতম!"}
+              </h1>
+
+              {/* Mapped Academic Badges in Lobby */}
+              {(className || tradeName || subjectName) && (
+                <div className="flex items-center justify-center gap-2 flex-wrap pt-1 pb-2">
+                  {className && (
+                    <span className="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-bold text-xs">
+                      🎓 {className}
+                    </span>
+                  )}
+                  {tradeName && (
+                    <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-xs">
+                      🛠️ {tradeName}
+                    </span>
+                  )}
+                  {subjectName && (
+                    <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-xs">
+                      📚 {subjectName} {subjectCode ? `(${subjectCode})` : ""}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <p className="text-slate-300 text-sm sm:text-base max-w-xl mx-auto">
+                মোবাইলে ব্রাউজার খুলে কোডটি দিয়ে ক্লাসে যুক্ত হোন।
+              </p>
+            </div>
+
+            {/* Prominent Live Counter Badge (Fix 3 Requirement) */}
+            <div className="inline-flex items-center gap-3 px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-slate-900/90 to-emerald-950/80 border-2 border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.35)]">
+              <Users className="w-6 h-6 text-emerald-400 animate-bounce" />
+              <span className="text-base sm:text-xl font-black text-white">
+                👥 মোট জয়েন করেছে: <strong className="text-emerald-300 font-mono text-2xl">{players.length}</strong> জন
+              </span>
+            </div>
+
+            {/* Live Joined Avatar Grid (Fix 3 Requirement) */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400 px-2 max-w-4xl mx-auto">
+                <span>শিক্ষার্থী তালিকা ({players.length} জন)</span>
+                <span className="text-emerald-400 font-mono">🟢 Realtime Sync</span>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-3 max-h-64 overflow-y-auto p-4 rounded-3xl bg-slate-950/60 border border-slate-800 max-w-4xl mx-auto">
+                {players.length === 0 ? (
+                  <div className="py-8 text-slate-500 text-xs sm:text-sm space-y-1">
+                    <p>এখনো কোনো শিক্ষার্থী যুক্ত হয়নি...</p>
+                    <p className="text-[11px] text-slate-600">শিক্ষার্থীদের মোবাইলে কোড <span className="font-mono text-amber-400 font-bold">{sessionCode}</span> ইনপুট করতে বলুন।</p>
+                  </div>
+                ) : (
+                  players.map((p, i) => (
+                    <motion.div
+                      key={p.id || i}
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: "spring", stiffness: 350, damping: 20 }}
+                      className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/80 text-white shadow-lg hover:scale-105 transition-transform"
+                    >
+                      <RenderColorfulAvatar avatarId={p.avatar} size="xs" showGlow={false} />
+                      <span className="text-xs font-bold truncate max-w-[140px]">{p.displayName}</span>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Start Button */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleNextSlide}
+                className="px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-600 to-indigo-600 hover:from-indigo-400 hover:to-purple-500 text-white font-black text-base shadow-[0_0_35px_rgba(99,102,241,0.5)] flex items-center justify-center gap-3 mx-auto cursor-pointer transition active:scale-95"
+              >
+                <span>🚀 সেশন শুরু করুন (Start Session)</span>
+                <ArrowRight className="w-5 h-5" />
               </button>
             </div>
           </div>
@@ -813,47 +1114,425 @@ export default function HostLiveFullscreenStage({
             </div>
           )}
 
-          {/* 5. GRADED QUIZ VIA UNIVERSAL SHOWCASE ENGINE (20 ROTATING TEMPLATES) */}
+          {/* 5. GRADED QUIZ: EXACT 5-STAGE MENTIMETER/KAHOOT STATE MACHINE (Fix 1, 4, 5, 7) */}
           {isCurrentGraded && (
             <div className="space-y-6 w-full">
-              <UniversalQuizShowcaseEngine
-                question={currentSlide}
-                questionIndex={currentSlideIndex}
-                totalQuestions={slides.length}
-                templateId={((currentSlideIndex || 0) % 20) + 1}
-                isConfirmed={isAnswerRevealed}
-                isCorrect={isAnswerRevealed}
-                disabled={true}
-                autoRandomize={false}
-                showProofBadge={true}
-              />
+              {/* STAGE 1: READY_CHECK (Fix 4 Requirement) */}
+              {serverPhase === "READY" && !isAnswerRevealed && (
+                <div className="py-6 px-4 sm:px-8 text-center space-y-8 rounded-3xl bg-slate-950/70 border-2 border-amber-500/30 backdrop-blur-xl shadow-2xl">
+                  <div className="space-y-2">
+                    <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-amber-500/20 text-amber-300 font-black text-xs sm:text-sm border border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.3)] uppercase tracking-wider">
+                      <Flame className="w-4 h-4 text-amber-400 animate-bounce" />
+                      <span>স্টুডেন্ট রেডিনেস চেক (Student Readiness Check)</span>
+                    </div>
 
-              {/* Live Answer Submissions Breakdown Bar */}
-              {currentSlideResponses.length > 0 && currentSlide.type === "MCQ" && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl bg-slate-950/70 border border-slate-800">
-                  {(currentSlide.options || []).map((opt, idx) => {
-                    const color = KAHOOT_COLORS[idx % KAHOOT_COLORS.length];
-                    const stat = optionStats[idx] || { votes: 0, percent: 0 };
-                    const isCorrect = isAnswerRevealed && idx === currentSlide.correctAnswer;
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-3 rounded-xl border text-center transition-all ${
-                          isCorrect ? "bg-emerald-500/20 border-emerald-500" : "bg-slate-900 border-slate-800"
+                    <h2 className="text-2xl sm:text-4xl font-black text-white tracking-wide pt-2">
+                      ⚡ পরবর্তী কুইজের জন্য কারা রেডি হচ্ছে দেখুন...
+                    </h2>
+                    <p className="text-sm text-slate-300 max-w-lg mx-auto">
+                      শিক্ষার্থীরা তাদের ডিভাইসে &ldquo;🙋‍♂️ আমি প্রস্তুত!&rdquo; বাটনে চাপ দিচ্ছেন। সবাই রেডি হলে নিচের বাটনে ক্লিক করে প্রশ্ন শুরু করুন।
+                    </p>
+                  </div>
+
+                  {/* Prominent Live Counter Badge */}
+                  <div className="inline-flex items-center gap-3 px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/30 to-amber-500/20 border-2 border-amber-400/60 shadow-[0_0_30px_rgba(245,158,11,0.35)]">
+                    <Flame className="w-6 h-6 text-amber-400 animate-pulse fill-current" />
+                    <span className="text-lg sm:text-2xl font-black text-white">
+                      🔥 <strong className="text-amber-300 font-mono text-3xl">{readyPlayers.length}</strong> / {players.length} জন স্টুডেন্ট রেডি!
+                    </span>
+                  </div>
+
+                  {/* Mentimeter-Style Animated Avatar Cloud (Fix 4 Requirement) */}
+                  <div className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 min-h-[220px] flex flex-wrap items-center justify-center gap-4 relative overflow-hidden">
+                    {readyPlayers.length === 0 ? (
+                      <div className="py-8 text-center space-y-2 text-slate-500">
+                        <Users className="w-12 h-12 mx-auto text-slate-600 animate-pulse" />
+                        <p className="text-sm font-bold text-slate-400">স্টুডেন্টদের ফোনে &ldquo;আমি প্রস্তুত!&rdquo; বাটনে চাপতে বলুন...</p>
+                      </div>
+                    ) : (
+                      readyPlayers.map((rp, idx) => (
+                        <motion.div
+                          key={rp.playerId || rp.id || idx}
+                          initial={{ scale: 0, opacity: 0, y: 30 }}
+                          animate={{
+                            scale: 1,
+                            opacity: 1,
+                            y: [0, (idx % 2 === 0 ? -8 : 8), 0],
+                          }}
+                          transition={{
+                            y: { duration: 2.2 + (idx % 3) * 0.3, repeat: Infinity, ease: "easeInOut" },
+                            type: "spring",
+                            stiffness: 300,
+                            damping: 20,
+                            delay: idx * 0.03,
+                          }}
+                          className="flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-2 border-amber-400/70 text-white shadow-xl hover:scale-110 transition-transform"
+                        >
+                          <RenderColorfulAvatar avatarId={rp.avatar} size="xs" showGlow={false} />
+                          <span className="text-xs font-black text-amber-200">{rp.name}</span>
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                        </motion.div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Prominent Teacher Start Button (Fix 4 Requirement) */}
+                  <div className="pt-2">
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                      disabled={isStartingQuestion}
+                      onClick={handleStartQuestion}
+                      className="px-8 sm:px-12 py-4 sm:py-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-base sm:text-xl shadow-[0_0_40px_rgba(16,185,129,0.6)] flex items-center justify-center gap-3 mx-auto cursor-pointer border border-emerald-300 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isStartingQuestion ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-slate-950" />
+                      ) : (
+                        <>
+                          <Play className="w-6 h-6 fill-slate-950" />
+                          <span>🚀 সবাই রেডি — প্রশ্ন শুরু করুন (Start Question)</span>
+                        </>
+                      )}
+                    </motion.button>
+                  </div>
+                </div>
+              )}
+
+              {/* STAGE 2: COUNTDOWN_321 (Fix 5 Requirement) */}
+              {(serverPhase === "COUNTDOWN" || countdownSeconds > 0) && !isAnswerRevealed && (
+                <div className="py-16 text-center space-y-6">
+                  <motion.div
+                    key={countdownSeconds}
+                    initial={{ scale: 2.2, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.5, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 350, damping: 20 }}
+                    className="w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-600 flex items-center justify-center mx-auto text-6xl sm:text-8xl font-black text-white shadow-[0_0_60px_rgba(6,182,212,0.6)] border-4 border-white/30"
+                  >
+                    <span>{countdownSeconds > 0 ? countdownSeconds : "GO!"}</span>
+                  </motion.div>
+                  <p className="text-lg font-black text-cyan-300 tracking-wider uppercase animate-pulse">
+                    প্রস্তুত হও! কাউন্টডাউন চলছে...
+                  </p>
+                </div>
+              )}
+
+              {/* STAGE 3: QUESTION_ONLY (5 Seconds — NO OPTIONS!) (Fix 5 Requirement) */}
+              {(serverPhase === "QUESTION_PREVIEW" || previewSeconds > 0) && !isAnswerRevealed && (
+                <div className="py-12 px-6 sm:px-12 rounded-3xl bg-slate-950/80 border-2 border-indigo-500/40 text-center space-y-8 backdrop-blur-2xl shadow-2xl">
+                  <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-500/20 text-indigo-300 font-black text-xs sm:text-sm border border-indigo-500/40 uppercase tracking-widest">
+                    <Eye className="w-4 h-4 text-indigo-400 animate-pulse" />
+                    <span>📖 প্রশ্নটি মনোযোগ দিয়ে পড়ো... ({previewSeconds}s)</span>
+                  </div>
+
+                  <h2 className="text-3xl sm:text-5xl font-black text-white leading-snug max-w-4xl mx-auto">
+                    {(currentSlide as any).questionText || currentSlide.title}
+                  </h2>
+
+                  {/* 5s Smooth Progress Bar */}
+                  <div className="w-full max-w-xl mx-auto space-y-2">
+                    <div className="h-3 w-full bg-slate-900 rounded-full border border-slate-800 overflow-hidden">
+                      <motion.div
+                        className="h-full bg-gradient-to-r from-cyan-400 via-indigo-500 to-purple-500"
+                        initial={{ width: "100%" }}
+                        animate={{ width: "0%" }}
+                        transition={{ duration: 5, ease: "linear" }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono font-bold text-slate-400">
+                      🔒 অপশনসমূহ গোপন রয়েছে — ৫ সেকেন্ড পর উন্মোচিত হবে
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* STAGE 4: ANSWERING_ACTIVE (Question + Options + Timer) (Fix 5 Requirement) */}
+              {serverPhase === "QUESTION_ACTIVE" && !isAnswerRevealed && (
+                <div className="space-y-6 w-full">
+                  <div className="flex items-center justify-between px-2">
+                    <div className="flex items-center gap-2 font-mono text-sm font-bold text-slate-400">
+                      <Clock className="w-4 h-4 text-cyan-400 animate-spin" />
+                      <span>টাইম বাকি: <strong className="text-white text-base">{timerSecondsLeft}s</strong></span>
+                    </div>
+                    <div className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30">
+                      📨 {currentSlideResponses.length} / {players.length} জন উত্তর জমা দিয়েছেন
+                    </div>
+                  </div>
+
+                  {/* 1 Signature Fast Template for Active Answering */}
+                  <UniversalQuizShowcaseEngine
+                    question={currentSlide}
+                    questionIndex={currentSlideIndex}
+                    totalQuestions={slides.length}
+                    selectedAnswer={null}
+                    onSelectAnswer={() => {}}
+                    isConfirmed={false}
+                    disabled={true}
+                    autoRandomize={false}
+                    showProofBadge={true}
+                  />
+                </div>
+              )}
+
+              {/* STAGE 5: RESULT_REVEAL — Mentimeter Animated Charts, Explanation & Lists (Fix 7 Requirement) */}
+              {isAnswerRevealed && (
+                <div className="space-y-6 w-full">
+                  {/* Mentimeter Result Stats Bar */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-4 rounded-2xl bg-emerald-950/60 border-2 border-emerald-500/60 text-center space-y-1">
+                      <span className="text-xs font-bold text-emerald-300 block">সঠিক উত্তর</span>
+                      <span className="text-2xl sm:text-3xl font-black text-white font-mono">
+                        ✅ {correctResponders.length || serverCorrectCount} জন
+                      </span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-rose-950/60 border-2 border-rose-500/60 text-center space-y-1">
+                      <span className="text-xs font-bold text-rose-300 block">ভুল উত্তর</span>
+                      <span className="text-2xl sm:text-3xl font-black text-white font-mono">
+                        ❌ {wrongResponders.length || serverWrongCount} জন
+                      </span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-amber-950/60 border-2 border-amber-500/60 text-center space-y-1">
+                      <span className="text-xs font-bold text-amber-300 block">সময় শেষ / উত্তর দেয়নি</span>
+                      <span className="text-2xl sm:text-3xl font-black text-white font-mono">
+                        ⏰ {timedOutPlayers.length || serverTimedOutCount} জন
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 1-Click Chart Switcher (Fix 7 Requirement) */}
+                  <div className="flex items-center justify-between p-2 rounded-2xl bg-slate-900 border border-slate-800">
+                    <span className="text-xs font-bold text-slate-300 px-2">মেন্টমিটার চার্ট ভিউ:</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setChartType("bar")}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer ${
+                          chartType === "bar"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                            : "bg-slate-800 text-slate-400 hover:text-white"
                         }`}
                       >
-                        <div className="flex items-center justify-center gap-1.5 mb-1">
-                          <span className={`w-4 h-4 rounded text-[10px] font-black text-white flex items-center justify-center ${color.bg}`}>
-                            {color.shape}
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        <span>📊 বার চার্ট</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChartType("donut")}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer ${
+                          chartType === "donut"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                            : "bg-slate-800 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <PieChart className="w-3.5 h-3.5" />
+                        <span>🍩 পাই / ডোনাট চার্ট</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Chart Rendering (Bar vs Donut) */}
+                  {chartType === "bar" ? (
+                    /* Animated Vertical Bar Chart */
+                    <div className="p-6 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end min-h-[220px] pt-4">
+                        {(currentSlide.options || []).map((opt, idx) => {
+                          const stat = optionStats[idx] || { votes: 0, percent: 0 };
+                          const isCorrect = idx === currentSlide.correctAnswer;
+                          const badgeLetter = String.fromCharCode(65 + idx);
+
+                          return (
+                            <div key={idx} className="flex flex-col items-center h-full justify-end gap-2">
+                              {/* Vote count & percent pill */}
+                              <span className={`text-xs font-mono font-black px-2 py-0.5 rounded-md ${
+                                isCorrect ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-slate-300"
+                              }`}>
+                                {stat.votes} ভোট ({stat.percent}%)
+                              </span>
+
+                              {/* Upward Growing Bar */}
+                              <div className="w-full h-44 rounded-2xl bg-slate-900 border border-slate-800 flex items-end p-1.5 overflow-hidden">
+                                <motion.div
+                                  initial={{ height: "0%" }}
+                                  animate={{ height: `${Math.max(6, stat.percent)}%` }}
+                                  transition={{ duration: 0.65, ease: "easeOut", delay: idx * 0.08 }}
+                                  className={`w-full rounded-xl transition-all flex items-center justify-center font-bold text-xs ${
+                                    isCorrect
+                                      ? "bg-gradient-to-t from-emerald-600 to-emerald-400 text-slate-950 shadow-[0_0_20px_rgba(16,185,129,0.5)] ring-2 ring-emerald-300"
+                                      : "bg-gradient-to-t from-indigo-900 to-indigo-600 text-white"
+                                  }`}
+                                >
+                                  {isCorrect && <Check className="w-4 h-4 stroke-[3]" />}
+                                </motion.div>
+                              </div>
+
+                              {/* Option label & text */}
+                              <div className="text-center w-full">
+                                <span className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-xs font-black font-mono mb-1 ${
+                                  isCorrect ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-white"
+                                }`}>
+                                  {badgeLetter}
+                                </span>
+                                <p className="text-xs font-bold text-slate-300 line-clamp-2 px-1">
+                                  {opt}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Smooth SVG Donut Chart */
+                    <div className="p-6 rounded-3xl bg-slate-950/80 border border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-8">
+                      <div className="relative w-48 h-48 shrink-0 flex items-center justify-center">
+                        <svg className="w-full h-full -rotate-90" viewBox="0 0 160 160">
+                          {donutSlices.map((slice, i) => (
+                            <circle
+                              key={i}
+                              cx="80"
+                              cy="80"
+                              r="65"
+                              fill="transparent"
+                              stroke={slice.color}
+                              strokeWidth="24"
+                              strokeDasharray={slice.strokeDasharray}
+                              strokeDashoffset={slice.strokeDashoffset}
+                              className="transition-all duration-700"
+                            />
+                          ))}
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                          <span className="text-2xl font-black text-white font-mono">
+                            {currentSlideResponses.length}
                           </span>
-                          <span className="text-xs font-bold text-white truncate">{opt}</span>
-                        </div>
-                        <div className="font-mono text-xs font-black text-cyan-300">
-                          {stat.votes} ভোট ({stat.percent}%)
+                          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">মোট ভোট</span>
                         </div>
                       </div>
-                    );
-                  })}
+
+                      {/* Donut Legend */}
+                      <div className="space-y-2 w-full max-w-sm">
+                        {donutSlices.map((slice, i) => (
+                          <div
+                            key={i}
+                            className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 ${
+                              slice.isCorrect
+                                ? "bg-emerald-500/20 border-emerald-400 text-emerald-200"
+                                : "bg-slate-900 border-slate-800 text-slate-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: slice.color }} />
+                              <span className="text-xs font-black font-mono">{slice.label}.</span>
+                              <span className="text-xs font-bold truncate">{slice.text}</span>
+                            </div>
+                            <div className="font-mono text-xs font-black shrink-0">
+                              {slice.votes} ভোট ({slice.percent}%)
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Question & Explanation Card (Fix 7 Requirement) */}
+                  <div className="p-6 rounded-3xl bg-slate-900/90 border-2 border-indigo-500/40 space-y-3 text-left shadow-xl">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <span className="text-xs font-black text-indigo-300 uppercase tracking-wider">
+                        সঠিক সমাধান ও শিক্ষক ব্যাখ্যা
+                      </span>
+                      <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-black flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>সঠিক উত্তর: {typeof currentSlide.correctAnswer === "number" && currentSlide.options ? currentSlide.options[currentSlide.correctAnswer] : String(currentSlide.correctAnswer || "সঠিক উত্তর")}</span>
+                      </span>
+                    </div>
+
+                    <h4 className="text-base sm:text-lg font-bold text-white">
+                      {(currentSlide as any).questionText || currentSlide.title}
+                    </h4>
+
+                    {(currentSlide.explanation || serverExplanation) && (
+                      <div className="p-4 rounded-2xl bg-indigo-950/50 border border-indigo-800/60 text-indigo-200 text-xs sm:text-sm leading-relaxed">
+                        💡 <strong className="text-white">ব্যাখ্যা:</strong> {currentSlide.explanation || serverExplanation}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Auto-Displayed Correct Responders List (Fix 7 Requirement) */}
+                  <div className="space-y-3 text-left">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-xs sm:text-sm font-black text-emerald-300 flex items-center gap-2">
+                        <span>🏆 যারা সঠিক উত্তর দিয়েছে ({correctResponders.length} জন):</span>
+                      </span>
+                      <span className="text-[11px] font-mono text-emerald-400">তড়িৎ গতি ও নির্ভুল স্কোর</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2.5 p-4 rounded-2xl bg-slate-950/60 border border-slate-800">
+                      {correctResponders.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-2">কেউ সঠিক উত্তর দিতে পারেনি।</p>
+                      ) : (
+                        correctResponders.map((r, i) => (
+                          <motion.div
+                            key={r.id || r.playerId || i}
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ delay: i * 0.04 }}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/50 text-white shadow-sm"
+                          >
+                            <RenderColorfulAvatar avatarId={r.avatar} size="xs" showGlow={false} />
+                            <span className="text-xs font-bold">{r.studentName}</span>
+                            {r.responseTimeMs && (
+                              <span className="text-[10px] font-mono font-black text-emerald-300 bg-emerald-950/80 px-1.5 py-0.5 rounded-md">
+                                {(r.responseTimeMs / 1000).toFixed(2)}s
+                              </span>
+                            )}
+                          </motion.div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Teacher Toggle for Wrong / Timed-Out Students (Fix 7 Requirement) */}
+                  <div className="text-left space-y-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowWrongStudents(!showWrongStudents)}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-black text-rose-300 flex items-center gap-2 cursor-pointer transition"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-rose-400" />
+                      <span>
+                        {showWrongStudents
+                          ? "গোপন করুন"
+                          : `👁️ কে ভুল করেছে বা উত্তর দেয়নি দেখুন (${wrongResponders.length + timedOutPlayers.length} জন)`}
+                      </span>
+                    </button>
+
+                    <AnimatePresence>
+                      {showWrongStudents && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="p-4 rounded-2xl bg-rose-950/20 border border-rose-500/40 space-y-3"
+                        >
+                          <div className="flex flex-wrap gap-2">
+                            {[...wrongResponders, ...timedOutPlayers].map((st, i) => (
+                              <div
+                                key={st.id || st.playerId || i}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-rose-500/40 text-rose-200 text-xs font-bold"
+                              >
+                                <RenderColorfulAvatar avatarId={st.avatar} size="xs" showGlow={false} />
+                                <span>{st.studentName}</span>
+                                <span className="text-[9px] text-rose-400 uppercase font-mono">
+                                  {st.timedOut ? "⏰ সময় শেষ" : "❌ ভুল"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
               )}
             </div>
