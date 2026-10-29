@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { getSessionQuestions } from "@/lib/liveQuizHelper";
+import { invalidateSessionCache } from "@/lib/sessionCache";
 
 export async function POST(
   req: NextRequest,
@@ -40,6 +41,7 @@ export async function POST(
       session.status = "COMPLETED";
       session.updatedAt = now.toISOString();
       session.endedAt = now.toISOString();
+      invalidateSessionCache(id);
 
       return NextResponse.json({
         success: true,
@@ -63,6 +65,7 @@ export async function POST(
     session.currentQuestionIndex = nextIdx;
     (session as any).allVoted = false;
     (session as any).isAnswerRevealed = false;
+    (session as any).showLeaderboard = body.showLeaderboard !== undefined ? Boolean(body.showLeaderboard) : nextItem?.type === "LEADERBOARD";
     (session as any).readyPlayers = []; // Reset ready players for the new question cycle
     (session as any).sequenceStartedAt = now.toISOString();
     (session as any).countdownEndsAt = countdownDuration > 0 ? countdownEndsAt.toISOString() : undefined;
@@ -70,6 +73,7 @@ export async function POST(
     session.questionStartedAt = now.toISOString();
     session.questionEndsAt = questionEndsAt ? questionEndsAt.toISOString() : undefined;
     session.updatedAt = now.toISOString();
+    invalidateSessionCache(id);
 
     return NextResponse.json({
       success: true,

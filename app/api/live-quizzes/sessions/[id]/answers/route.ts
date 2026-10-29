@@ -5,6 +5,7 @@ import { ScoringService, LeaderboardService } from "@/lib/scoringService";
 import { SecurityService } from "@/lib/reconnectService";
 import { MOTIVATION_MESSAGES } from "@/lib/motivationMessages";
 import { sendSmsGateway } from "@/lib/smsGatewayEngine";
+import { invalidateSessionCache } from "@/lib/sessionCache";
 
 export async function POST(
   req: NextRequest,
@@ -304,6 +305,8 @@ export async function POST(
       (session as any).isAnswerRevealed = true;
       (session as any).questionEndsAt = new Date().toISOString(); // Freeze timer immediately!
     }
+
+    invalidateSessionCache(id);
 
     return NextResponse.json({
       success: true,

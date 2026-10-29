@@ -75,7 +75,9 @@ export type SlideType =
   | "FILL_BLANKS"
   | "MATCHING"
   | "REORDER"
-  | "TRUE_FALSE";
+  | "TRUE_FALSE"
+  // 4. Special Slides
+  | "LEADERBOARD";
 
 export interface SlideTypeConfig {
   id: SlideType;
@@ -129,6 +131,15 @@ export const SLIDE_TYPES_REGISTRY: SlideTypeConfig[] = [
     desc: "শিক্ষার্থীরা সরাসরি শিক্ষককে প্রশ্ন করতে পারে",
     isGraded: false,
   },
+  // 🏆 লিডারবোর্ড স্লাইড (Special)
+  {
+    id: "LEADERBOARD" as SlideType,
+    category: "content" as SlideCategory,
+    label: "🏆 লিডারবোর্ড স্লাইড",
+    icon: "🏆",
+    desc: "শিক্ষার্থীদের তাৎক্ষণিক র‍্যাংকিং ও স্কোরবোর্ড",
+    isGraded: false,
+  },
   // 🏆 কুইজ প্রতিযোগিতা (Graded with Timer & Points)
   {
     id: "MCQ",
@@ -174,6 +185,10 @@ export const SLIDE_TYPES_REGISTRY: SlideTypeConfig[] = [
 
 export const isGradedQuiz = (type: SlideType | string): boolean => {
   return ["MCQ", "FILL_BLANKS", "MATCHING", "REORDER", "TRUE_FALSE"].includes(type);
+};
+
+export const isLeaderboardSlide = (type: SlideType | string): boolean => {
+  return type === "LEADERBOARD";
 };
 
 export interface PresentationSlide {
@@ -356,6 +371,7 @@ export default function UnifiedQuizMentimeterWorkspace({
     reactionsEnabled: true,
     showCorrectOnWrong: true,
     showLeaderboard: true,
+    leaderboardMode: "manual" as "manual" | "after_every" | "after_3" | "after_5",
     scheduledStartTime: "",
     autoSmsMilestone: "every_5" as "off" | "every_3" | "every_5" | "every_10" | "end_quiz",
     smsRecipient: "both" as "student" | "guardian" | "both",
@@ -368,6 +384,10 @@ export default function UnifiedQuizMentimeterWorkspace({
   // FLOATING EXPLANATION POPOVER STATE
   const [showExplanationPopover, setShowExplanationPopover] = useState(false);
   const [showNewSlidePopover, setShowNewSlidePopover] = useState(false);
+
+  // DRAG-AND-DROP REORDERING STATE (TASK 1)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
 
   // DUAL-DEVICE PREVIEW & FULLSCREEN PRESENTER STATES
   const [showDualDevicePreview, setShowDualDevicePreview] = useState(false);
@@ -615,8 +635,8 @@ export default function UnifiedQuizMentimeterWorkspace({
     const newSlide: PresentationSlide = {
       id: newSlideId,
       type,
-      title: "", // Blank custom prompt rule!
-      content: type === "TEXT_SLIDE" ? "" : undefined,
+      title: type === "LEADERBOARD" ? "🏆 লাইভ লিডারবোর্ড ও র‍্যাঙ্কিং" : "", // Blank custom prompt rule!
+      content: type === "TEXT_SLIDE" ? "" : type === "LEADERBOARD" ? "চলতি সেশনের শীর্ষ স্কোরার ও পয়েন্ট তালিকা" : undefined,
       options:
         type === "MCQ"
           ? ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"]
@@ -777,6 +797,29 @@ export default function UnifiedQuizMentimeterWorkspace({
     setCurrentDeck((prev) => ({ ...prev, slides: list }));
   };
 
+  // Drag-and-Drop Reordering Handler (TASK 1)
+  const handleDropSlide = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= currentDeck.slides.length ||
+      toIndex >= currentDeck.slides.length
+    ) {
+      setDraggingIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const list = [...currentDeck.slides];
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, moved);
+    setCurrentDeck((prev) => ({ ...prev, slides: list }));
+    setCurrentSlideId(moved.id);
+    setDraggingIndex(null);
+    setDragOverIndex(null);
+    showToast(`✨ স্লাইড #${fromIndex + 1} কে #${toIndex + 1} পজিশনে সরানো হয়েছে`, "info");
+  };
+
   // Save Deck Handler
   const handleSaveDeck = async () => {
     await saveDeckToServer(currentDeck, true);
@@ -917,10 +960,10 @@ export default function UnifiedQuizMentimeterWorkspace({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
             className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl border shadow-2xl flex items-center gap-3 text-xs font-bold backdrop-blur-xl ${toastMessage.type === "success"
-                ? "bg-emerald-950/90 text-emerald-200 border-emerald-500/80 shadow-emerald-500/20"
-                : toastMessage.type === "error"
-                  ? "bg-rose-950/90 text-rose-200 border-rose-500/80 shadow-rose-500/20"
-                  : "bg-cyan-950/90 text-cyan-200 border-cyan-500/80 shadow-cyan-500/20"
+              ? "bg-emerald-950/90 text-emerald-200 border-emerald-500/80 shadow-emerald-500/20"
+              : toastMessage.type === "error"
+                ? "bg-rose-950/90 text-rose-200 border-rose-500/80 shadow-rose-500/20"
+                : "bg-cyan-950/90 text-cyan-200 border-cyan-500/80 shadow-cyan-500/20"
               }`}
           >
             {toastMessage.type === "success" ? (
@@ -1152,8 +1195,8 @@ export default function UnifiedQuizMentimeterWorkspace({
       {activeView === "studio" && (
         <div
           className={`w-full transition-all duration-300 ${isFullscreenFocus
-              ? "fixed inset-0 z-50 bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden"
-              : "w-full h-[calc(100vh-68px)] flex flex-col bg-slate-100 dark:bg-slate-950 overflow-hidden"
+            ? "fixed inset-0 z-50 bg-slate-100 dark:bg-slate-950 flex flex-col overflow-hidden"
+            : "w-full h-[calc(100vh-68px)] flex flex-col bg-slate-100 dark:bg-slate-950 overflow-hidden"
             }`}
         >
           {/* 1. TOP STUDIO HEADER (h-14 px-5 border-b bg-white dark:bg-slate-900) */}
@@ -1502,6 +1545,34 @@ export default function UnifiedQuizMentimeterWorkspace({
                               </button>
                             </div>
                           </div>
+
+                          {/* CATEGORY 4: স্পেশাল লিডারবোর্ড স্লাইড (TASK 3) */}
+                          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-orange-500/10 border border-amber-300 dark:border-amber-700/60 space-y-2">
+                            <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                              <span className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center text-sm">🏆</span>
+                              <span>৪. লিডারবোর্ড স্লাইড (Leaderboard — Host Controlled)</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleAddNewSlide("LEADERBOARD");
+                                setShowNewSlidePopover(false);
+                              }}
+                              className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-600/60 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/40 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-sm"
+                            >
+                              <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-500 text-white flex items-center justify-center text-base shrink-0 shadow-sm">
+                                🏆
+                              </span>
+                              <div>
+                                <div className="text-xs font-black text-amber-700 dark:text-amber-300 group-hover:text-amber-600 dark:group-hover:text-amber-200">
+                                  🏆 লিডারবোর্ড স্লাইড (LEADERBOARD)
+                                </div>
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                  যেখানে খুশি বসান — হোস্ট স্লাইডে আসলেই স্টুডেন্টদের ফোনে লাইভ র‍্যাঙ্ক ও টপ ১০ ভেসে উঠবে!
+                                </div>
+                              </div>
+                            </button>
+                          </div>
                         </motion.div>
                       </div>
                     )}
@@ -1526,6 +1597,14 @@ export default function UnifiedQuizMentimeterWorkspace({
 
                   const getThumbStyles = (t: SlideType) => {
                     switch (t) {
+                      case "LEADERBOARD":
+                        return {
+                          border: isSelected
+                            ? "border-amber-500 ring-2 ring-amber-400/40 bg-amber-50/70 dark:bg-amber-950/50"
+                            : "border-amber-300 dark:border-amber-800 hover:border-amber-500",
+                          badge: "bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black",
+                          label: "🏆 লিডারবোর্ড",
+                        };
                       case "MCQ":
                         return {
                           border: isSelected ? "border-indigo-500 ring-2 ring-indigo-400/40 bg-indigo-50/70 dark:bg-indigo-950/50" : "border-indigo-200/80 dark:border-indigo-900/50 hover:border-indigo-400",
@@ -1583,15 +1662,45 @@ export default function UnifiedQuizMentimeterWorkspace({
                   return (
                     <div
                       key={slide.id}
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", String(idx));
+                        e.dataTransfer.effectAllowed = "move";
+                        setDraggingIndex(idx);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (dragOverIndex !== idx) setDragOverIndex(idx);
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverIndex === idx) setDragOverIndex(null);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const fromIdx = Number(e.dataTransfer.getData("text/plain"));
+                        if (!isNaN(fromIdx)) {
+                          handleDropSlide(fromIdx, idx);
+                        }
+                      }}
+                      onDragEnd={() => {
+                        setDraggingIndex(null);
+                        setDragOverIndex(null);
+                      }}
                       onClick={() => setCurrentSlideId(slide.id)}
-                      className={`group relative rounded-2xl border-2 p-2 transition-all cursor-pointer flex flex-col justify-between aspect-16/10 shadow-xs ${thumbStyle.border}`}
+                      className={`group relative rounded-2xl border-2 p-2 transition-all cursor-grab active:cursor-grabbing flex flex-col justify-between aspect-16/10 shadow-xs ${dragOverIndex === idx
+                        ? "border-indigo-500 scale-105 shadow-xl bg-indigo-50/80 dark:bg-indigo-950/60 ring-2 ring-indigo-400"
+                        : draggingIndex === idx
+                          ? "opacity-40 border-dashed border-indigo-400"
+                          : thumbStyle.border
+                        }`}
                     >
                       {/* Thumbnail Header */}
                       <div className="flex items-center justify-between text-[10px] font-black">
                         <span
                           className={`w-4 h-4 rounded-md flex items-center justify-center font-mono ${isSelected
-                              ? "bg-slate-950 text-white"
-                              : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                            ? "bg-slate-950 text-white"
+                            : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
                             }`}
                         >
                           {idx + 1}
@@ -1604,9 +1713,11 @@ export default function UnifiedQuizMentimeterWorkspace({
 
                       {/* Title Preview */}
                       <p className="text-[11px] font-black text-slate-800 dark:text-slate-200 line-clamp-2 my-auto leading-tight">
-                        {slide.title.trim() || (
-                          <span className="italic opacity-40 font-normal">খালি স্লাইড</span>
-                        )}
+                        {slide.type === "LEADERBOARD"
+                          ? "🏆 লিডারবোর্ড স্লাইড"
+                          : slide.title.trim() || (
+                            <span className="italic opacity-40 font-normal">খালি স্লাইড</span>
+                          )}
                       </p>
 
                       {/* Footer: Timer or Points badge + Hover Actions */}
@@ -1615,6 +1726,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                           <span className="text-amber-500 font-bold font-mono">
                             {slide.points}p • {slide.timeLimit}s
                           </span>
+                        ) : slide.type === "LEADERBOARD" ? (
+                          <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">🏆 লাইভ র‍্যাঙ্ক</span>
                         ) : (
                           <span className="text-slate-400 font-medium font-mono">কন্টেন্ট</span>
                         )}
@@ -1697,6 +1810,9 @@ export default function UnifiedQuizMentimeterWorkspace({
                       <option value="REORDER">🔢 ধারাবাহিক ক্রম সাজানো</option>
                       <option value="TRUE_FALSE">⚖️ সত্য / মিথ্যা (True/False)</option>
                     </optgroup>
+                    <optgroup label="🏆 স্পেশাল স্লাইড">
+                      <option value="LEADERBOARD">🏆 লাইভ লিডারবোর্ড স্লাইড</option>
+                    </optgroup>
                   </select>
                 </div>
 
@@ -1715,8 +1831,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                             type="button"
                             onClick={() => updateCurrentSlide({ timeLimit: t })}
                             className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.timeLimit === t
-                                ? "bg-cyan-500 text-slate-950 border-cyan-400 font-bold"
-                                : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
+                              ? "bg-cyan-500 text-slate-950 border-cyan-400 font-bold"
+                              : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
                               }`}
                           >
                             {t}s
@@ -1737,8 +1853,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                             type="button"
                             onClick={() => updateCurrentSlide({ points: p })}
                             className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.points === p
-                                ? "bg-amber-500 text-slate-950 border-amber-400 font-bold"
-                                : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
+                              ? "bg-amber-500 text-slate-950 border-amber-400 font-bold"
+                              : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
                               }`}
                           >
                             {p}p
@@ -1755,8 +1871,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                   type="button"
                   onClick={() => setShowExplanationPopover(!showExplanationPopover)}
                   className={`px-2.5 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1 cursor-pointer ${currentSlide.explanation
-                      ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700"
-                      : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-indigo-500"
+                    ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700"
+                    : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-indigo-500"
                     }`}
                 >
                   <Info className="w-3.5 h-3.5" />
@@ -1823,8 +1939,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                             <div
                               key={optIdx}
                               className={`p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 relative shadow-sm ${isCorrect
-                                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-400/40"
-                                  : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                                ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-400/40"
+                                : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
                                 }`}
                             >
                               {/* Correct Answer Circular Toggle (Click to mark Green Correct) */}
@@ -1832,8 +1948,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                                 type="button"
                                 onClick={() => updateCurrentSlide({ correctAnswer: optIdx })}
                                 className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 transition-transform active:scale-95 cursor-pointer ${isCorrect
-                                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
-                                    : "bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
+                                  ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
+                                  : "bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
                                   }`}
                                 title="সঠিক উত্তর হিসেবে চিহ্নিত করুন"
                               >
@@ -1907,8 +2023,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                         type="button"
                         onClick={() => updateCurrentSlide({ correctAnswer: true })}
                         className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === true
-                            ? "bg-emerald-500 text-white border-emerald-400 shadow-xl shadow-emerald-500/30 scale-102"
-                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                          ? "bg-emerald-500 text-white border-emerald-400 shadow-xl shadow-emerald-500/30 scale-102"
+                          : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
                           }`}
                       >
                         <CheckCircle2 className="w-10 h-10" />
@@ -1919,8 +2035,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                         type="button"
                         onClick={() => updateCurrentSlide({ correctAnswer: false })}
                         className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === false
-                            ? "bg-rose-500 text-white border-rose-400 shadow-xl shadow-rose-500/30 scale-102"
-                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                          ? "bg-rose-500 text-white border-rose-400 shadow-xl shadow-rose-500/30 scale-102"
+                          : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
                           }`}
                       >
                         <X className="w-10 h-10 stroke-[3]" />
@@ -2284,6 +2400,43 @@ export default function UnifiedQuizMentimeterWorkspace({
                       </div>
                     </div>
                   )}
+
+                  {/* TYPE: Leaderboard Slide (TASK 3) */}
+                  {currentSlide.type === "LEADERBOARD" && (
+                    <div className="p-8 rounded-3xl bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-orange-500/10 border-2 border-amber-400/40 text-center space-y-6">
+                      <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black text-xs uppercase tracking-wider border border-amber-400/40">
+                        <Award className="w-4 h-4 text-amber-500" />
+                        <span>লাইভ কুইজ লিডারবোর্ড স্লাইড (Host-Gated)</span>
+                      </div>
+                      <div className="space-y-2">
+                        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+                          🏆 শীর্ষ মেধাতালিকা ও লাইভ র‍্যাংকিং
+                        </h2>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
+                          হোস্ট যখন এই স্লাইডে আসবেন, স্বয়ংক্রিয়ভাবে প্রজেক্টরে অ্যানিমেটেড পোডিয়াম এবং স্টুডেন্টদের ফোনে তাদের ব্যক্তিগত র‍্যাঙ্ক ও টপ ১০ স্কোরার ভেসে উঠবে।
+                        </p>
+                      </div>
+
+                      {/* Mock Preview Podium */}
+                      <div className="flex items-end justify-center gap-3 pt-2">
+                        <div className="w-24 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-center space-y-1 h-28 flex flex-col justify-end border border-slate-200 dark:border-slate-700">
+                          <div className="text-xl">🥈</div>
+                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">২য় স্থান</div>
+                          <div className="text-[10px] text-amber-500 font-mono font-bold">২৮০ pt</div>
+                        </div>
+                        <div className="w-28 p-3 rounded-2xl bg-amber-500/20 text-center space-y-1 h-36 flex flex-col justify-end border-2 border-amber-400 shadow-lg">
+                          <div className="text-3xl">👑</div>
+                          <div className="text-xs font-black text-amber-700 dark:text-amber-300">১ম স্থান</div>
+                          <div className="text-[11px] text-amber-600 font-mono font-black">৩৫০ pt</div>
+                        </div>
+                        <div className="w-24 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-center space-y-1 h-24 flex flex-col justify-end border border-slate-200 dark:border-slate-700">
+                          <div className="text-xl">🥉</div>
+                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">৩য় স্থান</div>
+                          <div className="text-[10px] text-amber-500 font-mono font-bold">২৫০ pt</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. Stage Card Footer Info */}
@@ -2473,6 +2626,60 @@ export default function UnifiedQuizMentimeterWorkspace({
                       </div>
                     </div>
 
+                    {/* Section: Leaderboard Display Mode (TASK 3) */}
+                    <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                      <span className="text-xs font-black text-amber-500 uppercase tracking-wider block flex items-center gap-1.5">
+                        <Award className="w-4 h-4" />
+                        <span>🏆 লিডারবোর্ড প্রদর্শনের নিয়ম</span>
+                      </span>
+                      <p className="text-[10px] text-slate-500">
+                        শিক্ষার্থীদের স্ক্রিনে ও প্রজেক্টরে লিডারবোর্ড কখন দৃশ্যমান হবে তা নির্ধারণ করুন:
+                      </p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeckSettings((prev: any) => ({
+                              ...prev,
+                              leaderboardMode: "after_every",
+                            }));
+                            showToast("⚡ প্রতিটি প্রশ্নের পর অটো-লিডারবোর্ড সক্রিয়", "success");
+                          }}
+                          className={`p-2.5 rounded-xl border text-left flex items-center justify-between text-xs font-bold transition cursor-pointer ${(deckSettings as any).leaderboardMode === "after_every"
+                            ? "bg-amber-50 dark:bg-amber-950/40 border-amber-500 text-amber-700 dark:text-amber-300 shadow-sm"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400"
+                            }`}
+                        >
+                          <div>
+                            <div className="font-black">⚡ প্রতিটি প্রশ্নের পর অটোমেটিক লিডারবোর্ড দেখান</div>
+                            <div className="text-[10px] opacity-75">প্রতিটি প্রশ্ন শেষেই স্বয়ংক্রিয়ভাবে লিডারবোর্ড পপআপ হবে</div>
+                          </div>
+                          {(deckSettings as any).leaderboardMode === "after_every" && <Check className="w-4 h-4 text-amber-500" />}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeckSettings((prev: any) => ({
+                              ...prev,
+                              leaderboardMode: "manual",
+                            }));
+                            showToast("🎯 শুধুমাত্র নির্ধারিত লিডারবোর্ড স্লাইডে দেখানোর নিয়ম সক্রিয়", "info");
+                          }}
+                          className={`p-2.5 rounded-xl border text-left flex items-center justify-between text-xs font-bold transition cursor-pointer ${(deckSettings as any).leaderboardMode !== "after_every"
+                            ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-sm"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400"
+                            }`}
+                        >
+                          <div>
+                            <div className="font-black">🎯 শুধুমাত্র নির্ধারিত লিডারবোর্ড স্লাইডে দেখান</div>
+                            <div className="text-[10px] opacity-75">শুধুমাত্র যখন আপনি LEADERBOARD স্লাইডে যাবেন তখনই দেখাবে</div>
+                          </div>
+                          {(deckSettings as any).leaderboardMode !== "after_every" && <Check className="w-4 h-4 text-indigo-500" />}
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Section 3: Configurable Auto-Funny & Praise SMS Engine (Task 2) */}
                     <div className="space-y-4 pt-3 border-t border-slate-200 dark:border-slate-800">
                       <div className="flex items-center justify-between">
@@ -2502,8 +2709,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                               type="button"
                               onClick={() => setDeckSettings((prev) => ({ ...prev, autoSmsMilestone: item.key as any }))}
                               className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-left border ${deckSettings.autoSmsMilestone === item.key
-                                  ? "bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-300 font-black shadow-xs"
-                                  : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                                ? "bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-300 font-black shadow-xs"
+                                : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
                                 }`}
                             >
                               {item.label}
@@ -2514,8 +2721,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                           type="button"
                           onClick={() => setDeckSettings((prev) => ({ ...prev, autoSmsMilestone: "end_quiz" }))}
                           className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-bold transition text-left border ${deckSettings.autoSmsMilestone === "end_quiz"
-                              ? "bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-300 font-black shadow-xs"
-                              : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                            ? "bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-300 font-black shadow-xs"
+                            : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
                             }`}
                         >
                           🏁 শুধুমাত্র কুইজ শেষে ফাইনাল রেজাল্ট SMS
@@ -2540,8 +2747,8 @@ export default function UnifiedQuizMentimeterWorkspace({
                                   type="button"
                                   onClick={() => setDeckSettings((prev) => ({ ...prev, smsRecipient: rec.key as any }))}
                                   className={`py-1.5 px-1 rounded-xl text-[10px] font-bold transition text-center border ${deckSettings.smsRecipient === rec.key
-                                      ? "bg-indigo-500/15 border-indigo-500 text-indigo-600 dark:text-indigo-300 font-black"
-                                      : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500"
+                                    ? "bg-indigo-500/15 border-indigo-500 text-indigo-600 dark:text-indigo-300 font-black"
+                                    : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500"
                                     }`}
                                 >
                                   {rec.label}
@@ -2640,25 +2847,29 @@ export default function UnifiedQuizMentimeterWorkspace({
       {/* =======================================================================
           SMART CENTRAL BOOK & PDF AI STUDIO MODAL (PHASE 2)
           ======================================================================= */}
-      <SmartAiSlideGeneratorModal
-        isOpen={showAiModal}
-        onClose={() => setShowAiModal(false)}
-        onInsertSlides={handleInsertAiSlides}
-        activeTrade={currentDeck.trade}
-        activeClass={String(currentDeck.classId || "")}
-      />
+      {showAiModal && (
+        <SmartAiSlideGeneratorModal
+          isOpen={showAiModal}
+          onClose={() => setShowAiModal(false)}
+          onInsertSlides={handleInsertAiSlides}
+          activeTrade={currentDeck.trade}
+          activeClass={String(currentDeck.classId || "")}
+        />
+      )}
 
       {/* =======================================================================
           DUAL-DEVICE INTERACTIVE PREVIEW MODAL (PHASE 3 TASK 2)
           ======================================================================= */}
-      <DualDeviceInteractivePreviewModal
-        isOpen={showDualDevicePreview}
-        onClose={() => setShowDualDevicePreview(false)}
-        slides={currentDeck.slides}
-        initialSlideIndex={currentDeck.slides.findIndex((s) => s.id === currentSlideId)}
-        deckTitle={currentDeck.title}
-        tradeName={currentDeck.trade}
-      />
+      {showDualDevicePreview && (
+        <DualDeviceInteractivePreviewModal
+          isOpen={showDualDevicePreview}
+          onClose={() => setShowDualDevicePreview(false)}
+          slides={currentDeck.slides}
+          initialSlideIndex={currentDeck.slides.findIndex((s) => s.id === currentSlideId)}
+          deckTitle={currentDeck.title}
+          tradeName={currentDeck.trade}
+        />
+      )}
 
       {/* =======================================================================
           FULLSCREEN LIVE PRESENTER STAGE (PHASE 3 TASK 3)

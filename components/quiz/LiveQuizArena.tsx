@@ -3372,7 +3372,7 @@ Explanation: এটি সঠিক উত্তরের ব্যাখ্য�
                   question={activeQuizQuestions[previewCurrentQIndex]}
                   questionIndex={previewCurrentQIndex}
                   totalQuestions={activeQuizQuestions.length}
-                  templateId={previewTemplateId}
+                  templateId={previewTemplateId || (((previewCurrentQIndex || 0) % 20) + 1)}
                   selectedAnswer={previewSelectedAnswer}
                   onSelectAnswer={(ans) => setPreviewSelectedAnswer(ans)}
                   onTemplateChange={(newId) => setPreviewTemplateId(newId)}

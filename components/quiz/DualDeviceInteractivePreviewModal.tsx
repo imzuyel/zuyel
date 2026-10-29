@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   X,
   Smartphone,
@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PresentationSlide, isGradedQuiz } from "./UnifiedQuizMentimeterWorkspace";
+import UniversalQuizShowcaseEngine from "./engine/UniversalQuizShowcaseEngine";
 
 interface DualDeviceInteractivePreviewModalProps {
   isOpen: boolean;
@@ -58,10 +59,10 @@ export default function DualDeviceInteractivePreviewModal({
   deckTitle = "স্মার্ট প্রেজেন্টেশন ও কুইজ",
   tradeName = "ভোকেশনাল কোর্স",
 }: DualDeviceInteractivePreviewModalProps) {
-  if (!isOpen || !slides || slides.length === 0) return null;
+  const safeSlides = slides || [];
 
   const [activeSlideIndex, setActiveSlideIndex] = useState(
-    Math.min(Math.max(0, initialSlideIndex), slides.length - 1)
+    Math.min(Math.max(0, initialSlideIndex), Math.max(0, safeSlides.length - 1))
   );
 
   // Live testable simulated responses per slide
@@ -81,16 +82,17 @@ export default function DualDeviceInteractivePreviewModal({
   const [floatingEmojis, setFloatingEmojis] = useState<Array<{ id: string; emoji: string; x: number }>>([]);
   const [spotlightCard, setSpotlightCard] = useState<any | null>(null);
 
-  const currentSlide = slides[activeSlideIndex] || slides[0];
-  const isCurrentGraded = isGradedQuiz(currentSlide.type);
+  const currentSlide = safeSlides[activeSlideIndex] || safeSlides[0] || ({} as PresentationSlide);
+  const isCurrentGraded = currentSlide?.type ? isGradedQuiz(currentSlide.type) : false;
 
   // Responses for the current slide
   const currentResponses = useMemo(() => {
+    if (!currentSlide?.id) return [];
     return simulatedResponses[currentSlide.id] || [];
-  }, [simulatedResponses, currentSlide.id]);
+  }, [simulatedResponses, currentSlide?.id]);
 
-  const hasSubmittedCurrent = !!studentSubmitted[currentSlide.id];
-  const currentFeedback = studentAnswerFeedback[currentSlide.id];
+  const hasSubmittedCurrent = currentSlide?.id ? !!studentSubmitted[currentSlide.id] : false;
+  const currentFeedback = currentSlide?.id ? studentAnswerFeedback[currentSlide.id] : undefined;
 
   // Advance / Previous Slide
   const handlePrevSlide = () => {
@@ -277,6 +279,8 @@ export default function DualDeviceInteractivePreviewModal({
     { bg: "bg-emerald-600", text: "text-emerald-400", border: "border-emerald-500", shape: "■" },
   ];
 
+  if (!isOpen || safeSlides.length === 0) return null;
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 text-white flex flex-col overflow-hidden select-none font-sans">
       {/* =====================================================================
@@ -421,6 +425,51 @@ export default function DualDeviceInteractivePreviewModal({
               </div>
 
               {/* SLIDE TYPE SPECIFIC PROJECTOR RENDERING */}
+              {/* 0. LEADERBOARD */}
+              {currentSlide.type === "LEADERBOARD" && (
+                <div className="p-8 rounded-3xl bg-slate-950/80 border-2 border-amber-500/40 text-center space-y-6">
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 text-amber-300 font-black text-xs border border-amber-500/40">
+                    <Award className="w-4 h-4 text-amber-400" />
+                    <span>🏆 লাইভ লিডারবোর্ড সেশন স্টেজ</span>
+                  </div>
+                  
+                  {/* Podium for Top 3 */}
+                  <div className="flex items-end justify-center gap-4 pt-4">
+                    {/* 2nd Place */}
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl mb-1">🥈</span>
+                      <span className="text-xs font-bold text-slate-300">তানভীর আহমেদ</span>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold">২৮০ পয়েন্ট</span>
+                      <div className="w-20 sm:w-24 h-24 rounded-t-2xl bg-gradient-to-t from-slate-800 to-slate-700 border-t-2 border-slate-400 flex items-center justify-center font-black text-slate-300 text-lg shadow-lg">
+                        2
+                      </div>
+                    </div>
+                    {/* 1st Place */}
+                    <div className="flex flex-col items-center">
+                      <span className="text-3xl mb-1 animate-bounce">👑</span>
+                      <span className="text-sm font-black text-amber-300">রাকিবুল হাসান</span>
+                      <span className="text-xs text-amber-400 font-mono font-black">৩৫০ পয়েন্ট</span>
+                      <div className="w-24 sm:w-28 h-32 rounded-t-2xl bg-gradient-to-t from-amber-600 to-amber-500 border-t-2 border-amber-300 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-amber-500/30">
+                        1
+                      </div>
+                    </div>
+                    {/* 3rd Place */}
+                    <div className="flex flex-col items-center">
+                      <span className="text-2xl mb-1">🥉</span>
+                      <span className="text-xs font-bold text-slate-300">সাদিয়া আফরিন</span>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold">২৩০ পয়েন্ট</span>
+                      <div className="w-20 sm:w-24 h-16 rounded-t-2xl bg-gradient-to-t from-amber-900/80 to-amber-800/80 border-t-2 border-amber-700 flex items-center justify-center font-black text-amber-200 text-lg shadow-lg">
+                        3
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-400 font-medium">
+                    শিক্ষার্থীদের স্ক্রিনেও স্বয়ংক্রিয়ভাবে তাদের অবস্থান ও শীর্ষ স্কোরারদের তালিকা প্রদর্শিত হচ্ছে।
+                  </p>
+                </div>
+              )}
+
               {/* 1. TEXT_SLIDE */}
               {currentSlide.type === "TEXT_SLIDE" && (
                 <div className="p-6 rounded-2xl bg-indigo-950/30 border border-indigo-900/50 text-indigo-100 space-y-3 text-center">
@@ -547,127 +596,35 @@ export default function DualDeviceInteractivePreviewModal({
                 </div>
               )}
 
-              {/* 5. MCQ (4 Option Bars with Live Votes) */}
-              {currentSlide.type === "MCQ" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  {(currentSlide.options || []).map((opt, idx) => {
-                    const color = KAHOOT_COLORS[idx % KAHOOT_COLORS.length];
-                    const stat = optionStats[idx] || { votes: 0, percent: 0 };
-                    const isCorrect = isAnswerRevealed && idx === currentSlide.correctAnswer;
-                    const isRevealedWrong = isAnswerRevealed && idx !== currentSlide.correctAnswer;
+              {/* 5. GRADED QUIZZES WITH UNIVERSAL SHOWCASE ENGINE (20 ROTATING TEMPLATES) */}
+              {isCurrentGraded && (
+                <div className="space-y-4 w-full">
+                  <UniversalQuizShowcaseEngine
+                    question={currentSlide}
+                    questionIndex={activeSlideIndex}
+                    totalQuestions={slides.length}
+                    templateId={((activeSlideIndex || 0) % 20) + 1}
+                    selectedAnswer={studentSelectedOption}
+                    isConfirmed={isAnswerRevealed}
+                    isCorrect={isAnswerRevealed}
+                    disabled={true}
+                    autoRandomize={false}
+                    showProofBadge={true}
+                  />
 
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-4 rounded-2xl border-2 transition-all relative overflow-hidden text-left flex items-center justify-between gap-3 ${
-                          isCorrect
-                            ? "bg-emerald-600/30 border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
-                            : isRevealedWrong
-                            ? "bg-slate-900/60 border-slate-800 opacity-40"
-                            : "bg-slate-900/90 border-slate-800"
-                        }`}
-                      >
-                        {/* Fill Progress Bar */}
-                        <div
-                          className={`absolute inset-y-0 left-0 ${color.bg}/20 transition-all duration-500`}
-                          style={{ width: `${stat.percent}%` }}
-                        />
-
-                        <div className="flex items-center gap-3 relative z-10">
-                          <span
-                            className={`w-9 h-9 rounded-xl ${color.bg} text-white font-black text-sm flex items-center justify-center shrink-0 shadow-md`}
-                          >
-                            {color.shape}
-                          </span>
-                          <div>
-                            <span className="font-bold text-sm text-white block leading-snug">
-                              {opt}
-                            </span>
-                            {isCorrect && (
-                              <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 mt-0.5">
-                                <Check className="w-3 h-3 stroke-[3]" /> সঠিক উত্তর
-                              </span>
-                            )}
+                  {currentSlide.type === "MCQ" && currentResponses.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800">
+                      {(currentSlide.options || []).map((opt, idx) => {
+                        const stat = optionStats[idx] || { votes: 0, percent: 0 };
+                        return (
+                          <div key={idx} className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-center font-mono">
+                            <span className="text-[11px] text-slate-400 block truncate">{opt}</span>
+                            <span className="text-xs font-black text-white">{stat.votes} ভোট ({stat.percent}%)</span>
                           </div>
-                        </div>
-
-                        <div className="text-right relative z-10 font-mono">
-                          <span className="text-sm font-black text-white">{stat.votes} ভোট</span>
-                          <span className="text-[10px] text-slate-400 block">{stat.percent}%</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* 6. TRUE_FALSE */}
-              {currentSlide.type === "TRUE_FALSE" && (
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { label: "সত্য (True)", val: true, bg: "from-emerald-600 to-teal-700" },
-                    { label: "মিথ্যা (False)", val: false, bg: "from-rose-600 to-pink-700" },
-                  ].map((tf, i) => {
-                    const isCorrect = isAnswerRevealed && Boolean(currentSlide.correctAnswer) === tf.val;
-                    return (
-                      <div
-                        key={i}
-                        className={`p-6 rounded-3xl border-2 text-center transition-all bg-gradient-to-br ${tf.bg}/20 ${
-                          isCorrect ? "border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.4)]" : "border-slate-800"
-                        }`}
-                      >
-                        <h3 className="text-xl font-black text-white mb-2">{tf.label}</h3>
-                        {isCorrect && (
-                          <span className="inline-flex items-center gap-1 text-xs font-black text-emerald-300 bg-emerald-950/80 px-3 py-1 rounded-full border border-emerald-500">
-                            <Check className="w-3.5 h-3.5 stroke-[3]" /> সঠিক উত্তর
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* 7. MATCHING */}
-              {currentSlide.type === "MATCHING" && (
-                <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
-                  <span className="text-xs font-bold text-slate-400 block mb-2">সঠিক জোড়া তালিকা:</span>
-                  {(currentSlide.pairs || []).map((p, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold">
-                      <span className="text-amber-300">{p.left}</span>
-                      <span className="text-slate-500">⟷</span>
-                      <span className="text-emerald-300">{p.right}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* 8. FILL_BLANKS */}
-              {currentSlide.type === "FILL_BLANKS" && (
-                <div className="p-6 rounded-2xl bg-slate-950/60 border border-slate-800 text-center space-y-3">
-                  <p className="text-base font-bold text-slate-300">
-                    {currentSlide.title || "নিচের শূন্যস্থানে সঠিক শব্দ বসান:"}
-                  </p>
-                  {isAnswerRevealed && (
-                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500 text-emerald-300 text-xs font-black">
-                      <Check className="w-4 h-4" />
-                      <span>সঠিক উত্তর: {(currentSlide.acceptedAnswers || []).join(", ") || "নির্দিষ্ট উত্তর"}</span>
+                        );
+                      })}
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* 9. REORDER */}
-              {currentSlide.type === "REORDER" && (
-                <div className="space-y-2">
-                  {(currentSlide.items || []).map((item, idx) => (
-                    <div key={idx} className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3 text-xs font-bold">
-                      <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-black flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <span className="text-white">{item}</span>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
@@ -751,6 +708,33 @@ export default function DualDeviceInteractivePreviewModal({
             {/* Scrollable Student Content Area */}
             <div className="flex-1 p-3.5 overflow-y-auto space-y-3 flex flex-col justify-between">
               {/* SLIDE TYPE SPECIFIC STUDENT PHONE VIEW */}
+              {/* 0. LEADERBOARD on Student Phone */}
+              {currentSlide.type === "LEADERBOARD" && (
+                <div className="space-y-4 my-auto text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mx-auto text-3xl">
+                    🏆
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-black text-white">লাইভ লিডারবোর্ড</h4>
+                    <p className="text-[10px] text-amber-400 font-bold">
+                      শিক্ষক বোর্ডে লিডারবোর্ড প্রদর্শন করছেন
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-slate-900 border border-amber-500/30 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300">আপনার বর্তমান র‍্যাংক</span>
+                      <span className="text-xs font-black text-amber-400 font-mono">#১ম স্থান</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300">মোট অর্জিত পয়েন্ট</span>
+                      <span className="text-xs font-black text-emerald-400 font-mono">৩৫০ পয়েন্ট</span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    পরবর্তী প্রশ্ন শুরু হওয়া পর্যন্ত অপেক্ষা করুন
+                  </p>
+                </div>
+              )}
 
               {/* 1 & 2: TEXT_SLIDE or IMAGE_COMPARE */}
               {(currentSlide.type === "TEXT_SLIDE" || currentSlide.type === "IMAGE_COMPARE") && (

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FinalResultService, QuizReportService } from "@/lib/reportService";
 import { sendSmsGateway } from "@/lib/smsGatewayEngine";
 import prisma from "@/lib/prisma";
+import { invalidateSessionCache } from "@/lib/sessionCache";
 
 export async function POST(
   req: NextRequest,
@@ -11,6 +12,15 @@ export async function POST(
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const result = FinalResultService.finalize(id);
+
+    try {
+      await prisma.liveQuizSession.update({
+        where: { id },
+        data: { status: "COMPLETED", endedAt: new Date() }
+      });
+    } catch {}
+
+    invalidateSessionCache(id);
 
     let finalSmsCount = 0;
     if (body.sendFinalSummarySms) {

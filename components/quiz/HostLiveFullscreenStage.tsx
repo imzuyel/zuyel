@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PresentationSlide, isGradedQuiz } from "./UnifiedQuizMentimeterWorkspace";
+import UniversalQuizShowcaseEngine from "./engine/UniversalQuizShowcaseEngine";
 import FloatingReactionOverlay from "./FloatingReactionOverlay";
 import { triggerFireworks } from "@/lib/confetti";
 
@@ -185,23 +186,39 @@ export default function HostLiveFullscreenStage({
     }
   }, [isAllVoted, isAnswerRevealed]);
 
+  // Grand Finale Completion Handler (Task 3)
+  const handleEndAndShowPodium = async () => {
+    setIsFinalPodiumOpen(true);
+    triggerFireworks();
+    try {
+      await fetch(`/api/live-quizzes/sessions/${sessionId}/end-quiz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    } catch (e) {
+      console.error("Failed to signal quiz completion:", e);
+    }
+  };
+
   // Advance to next slide / question and sync student devices
   const handleNextSlide = async () => {
     if (currentSlideIndex >= slides.length - 1) {
-      setIsFinalPodiumOpen(true);
-      triggerFireworks();
+      handleEndAndShowPodium();
       return;
     }
     const nextIdx = currentSlideIndex + 1;
+    const isNextLeaderboard = slides[nextIdx]?.type === "LEADERBOARD";
     setIsAdvancingSlide(true);
     try {
       await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slideIndex: nextIdx }),
+        body: JSON.stringify({ slideIndex: nextIdx, showLeaderboard: isNextLeaderboard }),
       });
       setCurrentSlideIndex(nextIdx);
       setIsAnswerRevealed(false);
+      setShowLeaderboardModal(isNextLeaderboard);
 
       // Auto-Leaderboard every 5 quiz questions (Task 1.3)
       if (isCurrentGraded) {
@@ -223,15 +240,17 @@ export default function HostLiveFullscreenStage({
   const handlePrevSlide = async () => {
     if (currentSlideIndex <= 0) return;
     const prevIdx = currentSlideIndex - 1;
+    const isPrevLeaderboard = slides[prevIdx]?.type === "LEADERBOARD";
     setIsAdvancingSlide(true);
     try {
       await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slideIndex: prevIdx }),
+        body: JSON.stringify({ slideIndex: prevIdx, showLeaderboard: isPrevLeaderboard }),
       });
       setCurrentSlideIndex(prevIdx);
       setIsAnswerRevealed(false);
+      setShowLeaderboardModal(isPrevLeaderboard);
     } catch {
       setCurrentSlideIndex(prevIdx);
       setIsAnswerRevealed(false);
@@ -327,6 +346,20 @@ export default function HostLiveFullscreenStage({
     }).filter((item) => item.totalCount > 0);
 
     return list.sort((a, b) => a.accuracy - b.accuracy).slice(0, 3);
+  }, [slides, answers]);
+
+  // Overall Class Accuracy (Task 3)
+  const overallAccuracy = useMemo(() => {
+    const gradedSlides = slides.filter((s) => ["MCQ", "TRUE_FALSE", "FILL_BLANKS"].includes(s.type));
+    let totalGradedAnswers = 0;
+    let totalCorrectAnswers = 0;
+    gradedSlides.forEach((s) => {
+      const slideAnswers = answers.filter((a) => a.questionId === s.id || a.slideId === s.id);
+      totalGradedAnswers += slideAnswers.length;
+      totalCorrectAnswers += slideAnswers.filter((a) => a.isCorrect === true).length;
+    });
+    if (totalGradedAnswers === 0) return 0;
+    return Math.round((totalCorrectAnswers / totalGradedAnswers) * 100);
   }, [slides, answers]);
 
   // Download CSV
@@ -576,6 +609,89 @@ export default function HostLiveFullscreenStage({
 
           {/* SLIDE TYPE SPECIFIC HOST STAGE RENDERING */}
 
+          {/* 0. LEADERBOARD SLIDE */}
+          {currentSlide.type === "LEADERBOARD" && (
+            <div className="p-8 sm:p-12 rounded-3xl bg-slate-950/90 border-2 border-amber-500/40 text-center space-y-8 backdrop-blur-2xl shadow-2xl">
+              <div className="inline-flex items-center gap-2.5 px-6 py-2 rounded-full bg-amber-500/20 text-amber-300 font-black text-sm border border-amber-500/50 shadow-[0_0_25px_rgba(245,158,11,0.3)]">
+                <Trophy className="w-5 h-5 text-amber-400" />
+                <span>🏆 লাইভ লিডারবোর্ড — সেরা প্রতিযোগীগণ</span>
+              </div>
+
+              {/* 3D Top 3 Podium */}
+              <div className="flex items-end justify-center gap-4 sm:gap-8 pt-6 pb-4">
+                {/* 2nd Place */}
+                {topPlayers[1] ? (
+                  <motion.div
+                    initial={{ y: 50, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                    className="flex flex-col items-center"
+                  >
+                    <span className="text-3xl sm:text-4xl mb-1">🥈</span>
+                    <span className="text-sm sm:text-base font-bold text-slate-200">{topPlayers[1].displayName}</span>
+                    <span className="text-xs sm:text-sm text-cyan-300 font-mono font-bold">{topPlayers[1].totalScore || 0} পয়েন্ট</span>
+                    <div className="w-28 sm:w-36 h-36 rounded-t-3xl bg-gradient-to-t from-slate-900 to-slate-800 border-t-4 border-slate-400 flex items-center justify-center font-black text-slate-300 text-3xl shadow-xl mt-2">
+                      2
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="w-28 sm:w-36 h-28 opacity-20" />
+                )}
+
+                {/* 1st Place */}
+                {topPlayers[0] ? (
+                  <motion.div
+                    initial={{ y: 60, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.4, type: "spring", stiffness: 200 }}
+                    className="flex flex-col items-center"
+                  >
+                    <span className="text-4xl sm:text-5xl mb-1 animate-bounce">👑</span>
+                    <span className="text-base sm:text-lg font-black text-amber-300">{topPlayers[0].displayName}</span>
+                    <span className="text-sm sm:text-base text-amber-400 font-mono font-black">{topPlayers[0].totalScore || 0} পয়েন্ট</span>
+                    <div className="w-32 sm:w-44 h-48 rounded-t-3xl bg-gradient-to-t from-amber-600 via-amber-500 to-yellow-400 border-t-4 border-yellow-200 flex items-center justify-center font-black text-slate-950 text-4xl shadow-2xl shadow-amber-500/40 mt-2">
+                      1
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="text-slate-500 font-bold py-12">খেলোয়াড় যুক্ত হননি</div>
+                )}
+
+                {/* 3rd Place */}
+                {topPlayers[2] ? (
+                  <motion.div
+                    initial={{ y: 40, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
+                    className="flex flex-col items-center"
+                  >
+                    <span className="text-3xl sm:text-4xl mb-1">🥉</span>
+                    <span className="text-sm sm:text-base font-bold text-slate-200">{topPlayers[2].displayName}</span>
+                    <span className="text-xs sm:text-sm text-cyan-300 font-mono font-bold">{topPlayers[2].totalScore || 0} পয়েন্ট</span>
+                    <div className="w-28 sm:w-36 h-28 rounded-t-3xl bg-gradient-to-t from-amber-950 to-amber-900 border-t-4 border-amber-600 flex items-center justify-center font-black text-amber-300 text-3xl shadow-xl mt-2">
+                      3
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="w-28 sm:w-36 h-24 opacity-20" />
+                )}
+              </div>
+
+              {/* Ranks 4 to 10 Horizontal Pill Row */}
+              {topPlayers.length > 3 && (
+                <div className="flex flex-wrap justify-center gap-2 max-w-3xl mx-auto pt-2">
+                  {topPlayers.slice(3, 8).map((p, idx) => (
+                    <div key={p.id || idx} className="px-4 py-2 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center gap-2 text-xs font-bold">
+                      <span className="text-slate-400">#{idx + 4}</span>
+                      <span className="text-white">{p.displayName}</span>
+                      <span className="text-cyan-400 font-mono">({p.totalScore || 0} pts)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 1. TEXT_SLIDE */}
           {currentSlide.type === "TEXT_SLIDE" && (
             <div className="p-8 rounded-3xl bg-indigo-950/20 border border-indigo-900/40 text-center space-y-4">
@@ -697,121 +813,49 @@ export default function HostLiveFullscreenStage({
             </div>
           )}
 
-          {/* 5. GRADED QUIZ: MCQ (Kahoot Style Colored Bars) */}
-          {currentSlide.type === "MCQ" && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {(currentSlide.options || []).map((opt, idx) => {
-                const color = KAHOOT_COLORS[idx % KAHOOT_COLORS.length];
-                const stat = optionStats[idx] || { votes: 0, percent: 0 };
-                const isCorrect = isAnswerRevealed && idx === currentSlide.correctAnswer;
-                const isWrong = isAnswerRevealed && idx !== currentSlide.correctAnswer;
+          {/* 5. GRADED QUIZ VIA UNIVERSAL SHOWCASE ENGINE (20 ROTATING TEMPLATES) */}
+          {isCurrentGraded && (
+            <div className="space-y-6 w-full">
+              <UniversalQuizShowcaseEngine
+                question={currentSlide}
+                questionIndex={currentSlideIndex}
+                totalQuestions={slides.length}
+                templateId={((currentSlideIndex || 0) % 20) + 1}
+                isConfirmed={isAnswerRevealed}
+                isCorrect={isAnswerRevealed}
+                disabled={true}
+                autoRandomize={false}
+                showProofBadge={true}
+              />
 
-                return (
-                  <div
-                    key={idx}
-                    className={`p-5 rounded-2xl border-2 transition-all relative overflow-hidden text-left flex items-center justify-between gap-4 ${
-                      isCorrect
-                        ? "bg-emerald-600/30 border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.3)]"
-                        : isWrong
-                        ? "bg-slate-900/40 border-slate-800 opacity-40"
-                        : "bg-slate-900/90 border-slate-800"
-                    }`}
-                  >
-                    {/* Fill vote percentage */}
-                    <div
-                      className={`absolute inset-y-0 left-0 ${color.bg}/25 transition-all duration-700`}
-                      style={{ width: `${stat.percent}%` }}
-                    />
-
-                    <div className="flex items-center gap-3.5 relative z-10">
-                      <span
-                        className={`w-11 h-11 rounded-2xl ${color.bg} text-white font-black text-lg flex items-center justify-center shrink-0 shadow-lg`}
+              {/* Live Answer Submissions Breakdown Bar */}
+              {currentSlideResponses.length > 0 && currentSlide.type === "MCQ" && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl bg-slate-950/70 border border-slate-800">
+                  {(currentSlide.options || []).map((opt, idx) => {
+                    const color = KAHOOT_COLORS[idx % KAHOOT_COLORS.length];
+                    const stat = optionStats[idx] || { votes: 0, percent: 0 };
+                    const isCorrect = isAnswerRevealed && idx === currentSlide.correctAnswer;
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3 rounded-xl border text-center transition-all ${
+                          isCorrect ? "bg-emerald-500/20 border-emerald-500" : "bg-slate-900 border-slate-800"
+                        }`}
                       >
-                        {color.shape}
-                      </span>
-                      <div>
-                        <span className="font-black text-base text-white block leading-snug">{opt}</span>
-                        {isCorrect && (
-                          <span className="text-xs font-black text-emerald-400 flex items-center gap-1 mt-1">
-                            <Check className="w-3.5 h-3.5 stroke-[3]" /> সঠিক উত্তর
+                        <div className="flex items-center justify-center gap-1.5 mb-1">
+                          <span className={`w-4 h-4 rounded text-[10px] font-black text-white flex items-center justify-center ${color.bg}`}>
+                            {color.shape}
                           </span>
-                        )}
+                          <span className="text-xs font-bold text-white truncate">{opt}</span>
+                        </div>
+                        <div className="font-mono text-xs font-black text-cyan-300">
+                          {stat.votes} ভোট ({stat.percent}%)
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="text-right relative z-10 font-mono">
-                      <span className="text-base font-black text-white">{stat.votes} ভোট</span>
-                      <span className="text-xs text-slate-400 block">{stat.percent}%</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 6. TRUE_FALSE */}
-          {currentSlide.type === "TRUE_FALSE" && (
-            <div className="grid grid-cols-2 gap-6">
-              {[
-                { label: "সত্য (True)", val: true, bg: "from-emerald-600 to-teal-700" },
-                { label: "মিথ্যা (False)", val: false, bg: "from-rose-600 to-pink-700" },
-              ].map((tf, i) => {
-                const isCorrect = isAnswerRevealed && Boolean(currentSlide.correctAnswer) === tf.val;
-                return (
-                  <div
-                    key={i}
-                    className={`p-8 rounded-3xl border-2 text-center transition-all bg-gradient-to-br ${tf.bg}/25 ${
-                      isCorrect ? "border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.4)]" : "border-slate-800"
-                    }`}
-                  >
-                    <h3 className="text-3xl font-black text-white mb-2">{tf.label}</h3>
-                    {isCorrect && (
-                      <span className="inline-flex items-center gap-1 text-sm font-black text-emerald-300 bg-emerald-950 px-4 py-1.5 rounded-full border border-emerald-500">
-                        <Check className="w-4 h-4 stroke-[3]" /> সঠিক উত্তর
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 7. MATCHING, FILL_BLANKS, REORDER */}
-          {currentSlide.type === "MATCHING" && (
-            <div className="p-6 rounded-3xl bg-slate-950/60 border border-slate-800 space-y-3">
-              <span className="text-xs font-bold text-slate-400 block">সঠিক জোড়া তালিকা:</span>
-              {(currentSlide.pairs || []).map((p, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-sm font-bold">
-                  <span className="text-amber-300">{p.left}</span>
-                  <span className="text-slate-500">⟷</span>
-                  <span className="text-emerald-300">{p.right}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {currentSlide.type === "FILL_BLANKS" && (
-            <div className="p-8 rounded-3xl bg-slate-950/60 border border-slate-800 text-center space-y-4">
-              <p className="text-lg font-bold text-slate-300">{currentSlide.title}</p>
-              {isAnswerRevealed && (
-                <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-500/20 border border-emerald-500 text-emerald-300 text-sm font-black">
-                  <Check className="w-5 h-5" />
-                  <span>সঠিক উত্তর: {(currentSlide.acceptedAnswers || []).join(", ")}</span>
+                    );
+                  })}
                 </div>
               )}
-            </div>
-          )}
-
-          {currentSlide.type === "REORDER" && (
-            <div className="space-y-2.5">
-              {(currentSlide.items || []).map((item, idx) => (
-                <div key={idx} className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3 text-sm font-bold">
-                  <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-black flex items-center justify-center shrink-0">
-                    {idx + 1}
-                  </span>
-                  <span className="text-white">{item}</span>
-                </div>
-              ))}
             </div>
           )}
         </div>
@@ -871,10 +915,20 @@ export default function HostLiveFullscreenStage({
             </button>
           )}
 
-          {/* Show Leaderboard Modal */}
+          {/* Show Leaderboard Modal & Broadcast to Students */}
           <button
             type="button"
-            onClick={() => setShowLeaderboardModal(true)}
+            onClick={async () => {
+              const nextState = !showLeaderboardModal;
+              setShowLeaderboardModal(nextState);
+              try {
+                await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ slideIndex: currentSlideIndex, showLeaderboard: nextState }),
+                });
+              } catch {}
+            }}
             className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
           >
             <Trophy className="w-3.5 h-3.5 text-amber-400" />
@@ -884,10 +938,7 @@ export default function HostLiveFullscreenStage({
           {/* End Presentation / Show Podium Button */}
           <button
             type="button"
-            onClick={() => {
-              setIsFinalPodiumOpen(true);
-              triggerFireworks();
-            }}
+            onClick={handleEndAndShowPodium}
             className="px-3.5 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
           >
             <Flag className="w-3.5 h-3.5" />
@@ -1114,17 +1165,39 @@ export default function HostLiveFullscreenStage({
               </button>
 
               {/* Header */}
-              <div className="text-center space-y-2">
+              <div className="text-center space-y-3">
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black tracking-wide uppercase">
                   <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
                   গ্র্যান্ড ফাইনাল ও পোস্ট-সেশন অ্যানালিটিক্স
                 </div>
-                <h2 className="text-3xl sm:text-4xl font-black text-white">
-                  🏁 {deckTitle} — প্রেজেন্টেশন সমাপ্ত!
+
+                {/* Royal Celebration Banner (Task 3) */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  className="p-4 sm:p-5 rounded-3xl bg-linear-to-r from-amber-500/20 via-yellow-500/25 to-amber-500/20 border-2 border-amber-400/60 shadow-[0_0_35px_rgba(245,158,11,0.3)] text-center space-y-1.5"
+                >
+                  <div className="text-lg sm:text-2xl font-black text-amber-300 flex items-center justify-center gap-2">
+                    <span>🎊 ধন্যবাদ ও অভিনন্দন! আজকের সেশন সফলভাবে সমাপ্ত হয়েছে!</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-amber-200/90 font-medium">
+                    সকল শিক্ষার্থীর সক্রিয় অংশগ্রহণ প্রশংসনীয়। নিচে ক্লাসের সার্বিক ফলাফল ও পারফরম্যান্স বিশ্লেষণ প্রদর্শিত হলো।
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                    <span className="px-3.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>🎯 ক্লাসের সার্বিক নির্ভুলতা: {overallAccuracy}%</span>
+                    </span>
+                    <span className="px-3.5 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-black flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>মোট অংশগ্রহণকারী: {players.length} জন</span>
+                    </span>
+                  </div>
+                </motion.div>
+
+                <h2 className="text-2xl sm:text-3xl font-black text-white">
+                  🏁 {deckTitle} — ফলাফল সারসংক্ষেপ
                 </h2>
-                <p className="text-xs sm:text-sm text-slate-400">
-                  অংশগ্রহণকারী শিক্ষার্থীদের পারফরম্যান্স ও ক্লাসরুম অ্যানালিটিক্স সামারি
-                </p>
               </div>
 
               {/* 3 Nav Tabs */}
@@ -1228,6 +1301,38 @@ export default function HostLiveFullscreenStage({
                       </div>
                     </div>
                   </div>
+
+                  {/* 4th - 10th Honorable List (Task 3) */}
+                  {topPlayers.length > 3 && (
+                    <div className="space-y-2 pt-2 border-t border-slate-800">
+                      <div className="flex items-center justify-between px-1">
+                        <h4 className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                          <Award className="w-4 h-4 text-amber-400" />
+                          <span>৪র্থ থেকে ১০ম সম্মাননা তালিকা:</span>
+                        </h4>
+                        <span className="text-[10px] text-slate-500">শীর্ষ দশ প্রতিযোগী</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {topPlayers.slice(3, 10).map((p, idx) => (
+                          <div
+                            key={p.id || idx}
+                            className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-6 h-6 rounded-lg bg-indigo-950 text-indigo-300 border border-indigo-800/50 flex items-center justify-center font-mono font-bold text-[11px]">
+                                #{idx + 4}
+                              </span>
+                              <span className="font-bold text-white truncate max-w-[130px]">{p.displayName}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-400">⭐ {p.correctAnswers || 0}টি সঠিক</span>
+                              <span className="font-mono font-bold text-amber-300">{p.totalScore || 0} pts</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Full Participant Table */}
                   <div className="space-y-2 pt-2 border-t border-slate-800">

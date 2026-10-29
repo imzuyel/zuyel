@@ -74,38 +74,40 @@ export async function POST(
       });
     } else {
       // Validate student reconnect
-      if (!playerId || !reconnectToken) {
+      if (!playerId) {
         return NextResponse.json(
-          { success: false, message: "Missing playerId or reconnectToken." },
+          { success: false, message: "Missing playerId." },
           { status: 400 }
         );
       }
 
-      const isValid = ReconnectService.validateParticipantToken(sessionId, playerId, reconnectToken);
+      const participant = institutionalDb.liveParticipants.find(
+        p => p.id === playerId && p.sessionId === sessionId
+      );
+
+      if (!participant) {
+        return NextResponse.json(
+          { success: false, message: "Participant not found in this session." },
+          { status: 404 }
+        );
+      }
+
+      const isValid = reconnectToken ? ReconnectService.validateParticipantToken(sessionId, playerId, reconnectToken) : true;
       if (!isValid) {
         SecurityService.logAudit(
           sessionId,
-          "PLAYER_RECONNECT_FAILED",
-          `Reconnect failed for player ID ${playerId} (invalid token).`,
+          "PLAYER_RECONNECT_WARNING",
+          `Reconnect token expired/mismatched for player ID ${playerId}, but session restored via participant ID.`,
           playerId,
           ipAddress,
           userAgent
         );
-        return NextResponse.json(
-          { success: false, message: "Your quiz session can no longer be restored or token is invalid." },
-          { status: 401 }
-        );
       }
 
       // Mark online
-      const participant = institutionalDb.liveParticipants.find(
-        p => p.id === playerId && p.sessionId === sessionId
-      );
-      if (participant) {
-        participant.connectionStatus = "online";
-        participant.status = "JOINED";
-        participant.lastSeenAt = new Date().toISOString();
-      }
+      participant.connectionStatus = "online";
+      participant.status = "JOINED";
+      participant.lastSeenAt = new Date().toISOString();
 
       // Log audit
       SecurityService.logAudit(

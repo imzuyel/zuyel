@@ -176,11 +176,11 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     };
     fetchStudents();
 
-    const saved = localStorage.getItem("quiz_student_session") || localStorage.getItem("pgtsc_live_quiz_player");
+    const saved = localStorage.getItem("pgtsc_active_live_quiz") || localStorage.getItem("quiz_student_session") || localStorage.getItem("pgtsc_live_quiz_player");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.roomPin || parsed.sessionCode) {
+        if (parsed.roomPin || parsed.sessionCode || parsed.pin || parsed.sessionId) {
           attemptReconnection(parsed);
         }
       } catch (e) {
@@ -192,31 +192,57 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
   const attemptReconnection = async (parsed: any) => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/live-quizzes/join`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionCode: parsed.roomPin || parsed.sessionCode,
-          displayName: parsed.studentName || parsed.displayName,
-          studentId: parsed.studentId,
-          playerToken: parsed.sessionToken || parsed.playerToken,
-          reconnectToken: parsed.reconnectToken,
-          role: "student"
-        })
-      });
-      const data = await res.json();
+      const targetPin = parsed.pin || parsed.sessionCode || parsed.roomPin;
+      const targetPlayerId = parsed.participantId || parsed.playerId;
+
+      // 1. Try dedicated reconnect endpoint first if sessionId is known
+      let res: Response | null = null;
+      if (parsed.sessionId && targetPlayerId) {
+        res = await fetch(`/api/live-quizzes/sessions/${parsed.sessionId}/reconnect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            playerId: targetPlayerId,
+            reconnectToken: parsed.reconnectToken || parsed.playerToken || parsed.sessionToken,
+            role: "student"
+          })
+        }).catch(() => null);
+      }
+
+      // 2. Fallback to /api/live-quizzes/join
+      if (!res || !res.ok) {
+        res = await fetch(`/api/live-quizzes/join`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionCode: targetPin,
+            displayName: parsed.studentName || parsed.displayName,
+            studentId: parsed.roll || parsed.studentId,
+            playerToken: parsed.sessionToken || parsed.playerToken,
+            reconnectToken: parsed.reconnectToken,
+            playerId: targetPlayerId,
+            role: "student"
+          })
+        }).catch(() => null);
+      }
+
+      let data: any = null;
+      if (res && res.ok) {
+        data = await res.json().catch(() => null);
+      }
       setLoading(false);
 
-      if (data.success && (data.participant || data.state?.participant)) {
-        const participant = data.participant || data.state?.participant;
+      if (data && data.success) {
+        const participant = data.participant || data.state?.participant || { id: targetPlayerId, displayName: parsed.studentName };
         const session = data.session || data.state?.session;
         const newTok = data.reconnectToken || parsed.reconnectToken;
 
         setPlayerToken(participant.playerToken || parsed.sessionToken || participant.id);
-        setParticipantId(participant.id);
-        setSessionCode(parsed.roomPin || parsed.sessionCode || session?.sessionCode);
-        setDisplayName(participant.displayName);
+        setParticipantId(participant.id || targetPlayerId);
+        setSessionCode(targetPin || session?.sessionCode);
+        setDisplayName(participant.displayName || parsed.studentName);
         setReconnectToken(newTok || "");
+
         if (session) {
           setActiveSession(session);
           setSessionStatus(session.status);
@@ -224,11 +250,24 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
           setCurrentQuestionIdx(session.currentQuestionIndex || 0);
         }
         setJoined(true);
+
         if (data.state?.currentQuestion) setCurrentQuestion(data.state.currentQuestion);
-        if (participant.stats) setStudentStats(participant.stats);
-      } else {
-        localStorage.removeItem("quiz_student_session");
-        localStorage.removeItem("pgtsc_live_quiz_player");
+        if (participant.stats || data.state?.participant?.stats) setStudentStats(participant.stats || data.state?.participant?.stats);
+        
+        // Recover answered state for current question on page reload
+        if (data.state?.answered) {
+          setPlayerAnswered(true);
+          if (data.state?.originalAnswer?.answerPayload !== undefined) {
+            setSelectedOption(data.state.originalAnswer.answerPayload);
+          }
+          if (data.state?.originalAnswer?.isCorrect !== undefined) {
+            setLastAnswerFeedback({
+              isCorrect: data.state.originalAnswer.isCorrect,
+              correctAnswer: data.state.originalAnswer.correctAnswer,
+              totalPoints: data.state.originalAnswer.totalPoints
+            });
+          }
+        }
       }
     } catch (err) {
       console.error("Failed to restore session:", err);
@@ -322,6 +361,13 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
           if (data.playerAnswered !== undefined) setPlayerAnswered(data.playerAnswered);
           if (data.timeLeft !== undefined && currentPhase === "QUESTION_ACTIVE") setTimeLeft(data.timeLeft);
           if (data.motivationMessage) setActiveMotivation(data.motivationMessage);
+          if (data.showLeaderboard !== undefined) {
+            setActiveSession((prev: any) => ({
+              ...prev,
+              showLeaderboard: data.showLeaderboard,
+              topPlayers: data.topPlayers || prev?.topPlayers || [],
+            }));
+          }
         }
       } catch (err) {
         setNetworkStatus("disconnected");
@@ -330,10 +376,24 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
       }
     };
 
+    let isCancelled = false;
+    let pollTimeout: NodeJS.Timeout | null = null;
+
+    const scheduleNextPoll = () => {
+      if (isCancelled) return;
+      const jitter = 1200 + Math.floor(Math.random() * 400); // 1200ms - 1600ms random adaptive jitter
+      pollTimeout = setTimeout(async () => {
+        await pollState();
+        scheduleNextPoll();
+      }, jitter);
+    };
+
     pollState();
-    pollingIntervalRef.current = setInterval(pollState, 1500);
+    scheduleNextPoll();
 
     return () => {
+      isCancelled = true;
+      if (pollTimeout) clearTimeout(pollTimeout);
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
   }, [joined, activeSession?.id, participantId]);
@@ -373,21 +433,25 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
         setParticipantId(data.participant.id);
         setReconnectToken(data.reconnectToken || "");
         
-        // Requirement 4: Store studentId, studentName, roomPin, sessionToken in localStorage
+        // Persistent Session Identity (Task 2.1)
         const sessionPayload = {
           studentId: studentIdParam ? String(studentIdParam) : (data.participant.studentId ? String(data.participant.studentId) : undefined),
           studentName: data.participant.displayName,
+          displayName: data.participant.displayName,
+          roll: studentIdParam ? String(studentIdParam) : (data.participant.studentId ? String(data.participant.studentId) : ""),
           avatar: avatarParam || data.participant.avatar || "🚀",
           roomPin: data.session.sessionCode || sessionCode.trim(),
+          pin: data.session.sessionCode || sessionCode.trim(),
+          sessionCode: data.session.sessionCode || sessionCode.trim(),
           sessionToken: resolvedToken,
           sessionId: data.session.id,
-          sessionCode: data.session.sessionCode || sessionCode.trim(),
-          displayName: data.participant.displayName,
           playerToken: resolvedToken,
           playerId: data.participant.id,
+          participantId: data.participant.id,
           reconnectToken: data.reconnectToken || ""
         };
 
+        localStorage.setItem("pgtsc_active_live_quiz", JSON.stringify(sessionPayload));
         localStorage.setItem("quiz_student_session", JSON.stringify(sessionPayload));
         localStorage.setItem("pgtsc_live_quiz_player", JSON.stringify(sessionPayload));
         
@@ -441,39 +505,54 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     const timeTaken = Math.max(1, (currentQuestion.timeLimit || 30) - timeLeft);
     setSelectedOption(answer);
     setIsSubmitting(true);
-    try {
-      const res = await fetch(`/api/live-quizzes/sessions/${activeSession.id}/answers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          playerId: participantId,
-          participantId,
-          questionId: currentQuestion.id,
-          answerPayload: answer,
-          answer: answer,
-          timeTakenSeconds: timeTaken
-        })
-      });
 
-      const data = await res.json();
-      setIsSubmitting(false);
+    // Auto-Retry on Answer Submit with Exponential Backoff (Task 2.4)
+    let attempt = 0;
+    let submittedSuccessfully = false;
 
-      if (data.success) {
-        setPlayerAnswered(true);
-        if (data.isCorrect !== undefined || data.correctAnswer !== undefined) {
-          setLastAnswerFeedback({
-            isCorrect: data.isCorrect,
-            correctAnswer: data.correctAnswer,
-            totalPoints: data.totalPoints
-          });
+    while (attempt < 3 && !submittedSuccessfully) {
+      attempt++;
+      try {
+        const res = await fetch(`/api/live-quizzes/sessions/${activeSession.id}/answers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            playerId: participantId,
+            participantId,
+            questionId: currentQuestion.id,
+            answerPayload: answer,
+            answer: answer,
+            timeTakenSeconds: timeTaken
+          })
+        });
+
+        const data = await res.json();
+        if (data && data.success) {
+          submittedSuccessfully = true;
+          setPlayerAnswered(true);
+          if (data.isCorrect !== undefined || data.correctAnswer !== undefined) {
+            setLastAnswerFeedback({
+              isCorrect: data.isCorrect,
+              correctAnswer: data.correctAnswer,
+              totalPoints: data.totalPoints
+            });
+          }
+          break;
+        } else {
+          if (attempt >= 3) {
+            setErrorMessage(data?.message || data?.error || "উত্তর জমা দিতে সমস্যা হয়েছে।");
+          }
         }
-      } else {
-        setErrorMessage(data.message || data.error || "উত্তর জমা দিতে সমস্যা হয়েছে।");
+      } catch (err: any) {
+        if (attempt >= 3) {
+          setErrorMessage("নেটওয়ার্ক দুর্বল। দয়া করে পুনঃসংযোগ করুন।");
+        } else {
+          // Exponential backoff: wait 400ms, then 800ms
+          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 400));
+        }
       }
-    } catch (err: any) {
-      setIsSubmitting(false);
-      setErrorMessage("নেটওয়ার্ক ত্রুটি।");
     }
+    setIsSubmitting(false);
   };
 
   const handleNextQuestion = useCallback(async () => {

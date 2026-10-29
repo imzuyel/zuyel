@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const digitsOnly = rawCode.replace(/\D/g, "");
 
     let session = institutionalDb.liveSessions.find(
-      s => (s.sessionCode === rawCode || s.pinCode === rawCode || (digitsOnly.length >= 4 && (s.sessionCode === digitsOnly || s.pinCode === digitsOnly))) && ["CREATED", "LOBBY"].includes(s.status)
+      s => (s.sessionCode === rawCode || s.pinCode === rawCode || (digitsOnly.length >= 4 && (s.sessionCode === digitsOnly || s.pinCode === digitsOnly))) && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(s.status)
     );
 
     // AI Studio preview fallback: automatically instantiate mock session if testing in preview
@@ -68,7 +68,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (session.isLocked) {
+    const isReconnectingPlayer = Boolean(
+      playerToken && institutionalDb.liveParticipants.some(p => p.sessionId === session.id && (p.playerToken === playerToken || p.id === body.playerId))
+    );
+
+    if (session.isLocked && !isReconnectingPlayer) {
       return NextResponse.json(
         { success: false, message: "এই লবিটি হোস্ট দ্বারা লক করা হয়েছে। আপনি এখন প্রবেশ করতে পারবেন না।" },
         { status: 403 }
@@ -76,7 +80,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Phase 14: Check Session Freeze
-    if ((session as any).eligibilityFrozen && session.status !== "LOBBY" && session.status !== "CREATED") {
+    if ((session as any).eligibilityFrozen && session.status !== "LOBBY" && session.status !== "CREATED" && !isReconnectingPlayer) {
       return NextResponse.json(
         { success: false, message: "কুইজ সেশন ইতিমধ্যে শুরু হয়ে গেছে এবং অংশগ্রহণকারী তালিকা স্থবির (Frozen) করা হয়েছে।" },
         { status: 403 }
@@ -206,10 +210,16 @@ export async function POST(req: NextRequest) {
         p => p.sessionId === session.id && p.displayName.toLowerCase() === displayName.trim().toLowerCase() && p.status === "JOINED"
       );
       if (duplicateName) {
-        return NextResponse.json(
-          { success: false, message: "এই নামটি ইতিমধ্যে ব্যবহার করা হয়েছে। অনুগ্রহ করে অন্য নাম ব্যবহার করুন।" },
-          { status: 400 }
-        );
+        duplicateName.connectionStatus = "online";
+        duplicateName.lastSeenAt = new Date().toISOString();
+        const reconnectToken = ReconnectService.generateTokens(session.id, duplicateName.id);
+        return NextResponse.json({
+          success: true,
+          message: "পূর্ববর্তী সেশনে পুনরায় সংযুক্ত হয়েছেন।",
+          session,
+          participant: duplicateName,
+          reconnectToken
+        });
       }
     }
 

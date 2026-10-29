@@ -214,55 +214,80 @@ export function StudentJoinContentComponent() {
   const [reconnectToken, setReconnectToken] = useState<string>("");
   const reconnectAttemptsRef = useRef<number>(0);
 
-  // Check localStorage for active reconnection
+  // Check localStorage for active reconnection (Task 2.2)
   useEffect(() => {
     const checkActiveSession = async () => {
       try {
-        const saved = localStorage.getItem("pgtsc_live_quiz_player");
+        const saved = localStorage.getItem("pgtsc_active_live_quiz") || localStorage.getItem("pgtsc_live_quiz_player");
         if (saved) {
           const parsed = JSON.parse(saved);
           
           setLoading(true);
-          const res = await fetch(`/api/live-quizzes/sessions/${parsed.sessionId}/join`, {
+          let res = await fetch(`/api/live-quizzes/sessions/${parsed.sessionId}/reconnect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              sessionCode: parsed.sessionCode,
-              displayName: parsed.displayName,
-              playerToken: parsed.playerToken,
-              reconnectToken: parsed.reconnectToken,
+              playerId: parsed.playerId || parsed.participantId,
+              reconnectToken: parsed.reconnectToken || parsed.playerToken,
               role: "student"
             })
           }).catch(() => null);
+
+          if (!res || !res.ok) {
+            res = await fetch(`/api/live-quizzes/join`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionCode: parsed.sessionCode || parsed.pin,
+                displayName: parsed.displayName || parsed.studentName,
+                playerToken: parsed.playerToken,
+                reconnectToken: parsed.reconnectToken,
+                studentId: parsed.studentId || parsed.roll,
+                role: "student"
+              })
+            }).catch(() => null);
+          }
+
           let data: any = null;
           if (res && res.ok && (res.headers.get("content-type") || "").includes("application/json")) {
             data = await res.json().catch(() => null);
           }
           setLoading(false);
 
-          if (data && data.success && data.state) {
-            const { state, reconnectToken: newTok } = data;
+          if (data && data.success && (data.state || data.session)) {
+            const state = data.state || {};
+            const session = state.session || data.session;
+            const participant = state.participant || data.participant || {};
+            const newTok = data.reconnectToken || parsed.reconnectToken;
             
-            setPlayerToken(parsed.playerToken || state.participant.id);
-            setParticipantId(state.participant.id);
-            setSessionCode(parsed.sessionCode);
-            setDisplayName(state.participant.displayName);
+            setPlayerToken(parsed.playerToken || participant.id);
+            setParticipantId(participant.id || parsed.playerId || parsed.participantId);
+            setSessionCode(parsed.sessionCode || session?.sessionCode);
+            setDisplayName(participant.displayName || parsed.displayName);
             setReconnectToken(newTok);
-            setActiveSession(state.session);
-            setSessionStatus(state.session.status);
+            setActiveSession(session);
+            setSessionStatus(session.status);
             setJoined(true);
             
             // Restore recovered state instantly
-            setTotalQuestions(state.session.totalQuestions);
-            setCurrentQuestionIdx(state.session.currentQuestionIndex);
+            if (session.totalQuestions) setTotalQuestions(session.totalQuestions);
+            if (session.currentQuestionIndex !== undefined) setCurrentQuestionIdx(session.currentQuestionIndex);
             if (state.currentQuestion) {
               setCurrentQuestion(state.currentQuestion);
             }
-            if (state.participant.stats) {
-              setStudentStats(state.participant.stats);
+            if (participant.stats) {
+              setStudentStats(participant.stats);
             }
             if (data.motivationMessage) {
               setActiveMotivation(data.motivationMessage);
+            }
+
+            // Restore answered state if student already submitted on this slide
+            if (state.answered) {
+              setPlayerAnswered(true);
+              if (state.originalAnswer?.answerPayload !== undefined) {
+                setSelectedOption(state.originalAnswer.answerPayload);
+              }
             }
           }
         }
@@ -482,6 +507,7 @@ export function StudentJoinContentComponent() {
           studentId: data.participant.studentId,
           reconnectToken: data.reconnectToken || ""
         };
+        localStorage.setItem("pgtsc_active_live_quiz", JSON.stringify(sessionStore));
         localStorage.setItem("pgtsc_live_quiz_player", JSON.stringify(sessionStore));
         
         if (data.quiz) {

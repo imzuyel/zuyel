@@ -4,6 +4,7 @@ import { QuizSecurityEngine } from "@/lib/quizSecurityEngine";
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
 import { MOTIVATION_MESSAGES } from "@/lib/motivationMessages";
 import { sendSmsGateway } from "@/lib/smsGatewayEngine";
+import { invalidateSessionCache } from "@/lib/sessionCache";
 
 // ==========================================
 // RATE LIMITING & SUBMISSION THROTTLING
@@ -411,6 +412,8 @@ export async function POST(
       (sessionObj as any).isAnswerRevealed = true;
       (sessionObj as any).questionEndsAt = new Date().toISOString(); // Freeze timer immediately!
     }
+
+    invalidateSessionCache(sessionId);
 
     return NextResponse.json({
       success: true,

@@ -130,6 +130,14 @@ export default function SmartAiSlideGeneratorModal({
   const [includeWarmup, setIncludeWarmup] = useState<boolean>(true);
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "mixed">("mixed");
 
+  // TASK 2: Complete Smart Class Flow State (সম্ভাষণ + ওয়ার্মআপ + কুইজ + লিডারবোর্ড + সমাপনী)
+  const [includeGreeting, setIncludeGreeting] = useState<boolean>(true);
+  const [includeIcebreaker, setIncludeIcebreaker] = useState<boolean>(true);
+  const [includePrepCheck, setIncludePrepCheck] = useState<boolean>(true);
+  const [leaderboardInterval, setLeaderboardInterval] = useState<"none" | "every_1" | "every_3" | "every_5">("every_3");
+  const [includeClosingFeedback, setIncludeClosingFeedback] = useState<boolean>(true);
+  const [customFlowPrompt, setCustomFlowPrompt] = useState<string>("");
+
   // Generation Progress & State
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStep, setGenerationStep] = useState(1);
@@ -291,6 +299,12 @@ export default function SmartAiSlideGeneratorModal({
 
     try {
       let res: Response;
+      const combinedInstructions = [
+        customFlowPrompt.trim() ? `[শিক্ষকের বিশেষ সেশন ফ্লো নির্দেশনা]: ${customFlowPrompt.trim()}` : "",
+        `BTEB কারিগরি বোর্ডের কারিকুলাম ও পাঠ্যবইয়ের পৃষ্ঠা ${fromPage}-${toPage} এর ওপর ভিত্তি করে প্রশ্ন তৈরি করুন।`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 
       if (selectedBookId) {
         // Generate grounded directly from central PDF endpoint with granular page range
@@ -305,8 +319,8 @@ export default function SmartAiSlideGeneratorModal({
             count: slideCount,
             questionTypes: selectedTypes,
             difficulty,
-            includeWarmup,
-            additionalInstructions: `BTEB কারিগরি বোর্ডের কারিকুলাম ও পাঠ্যবইয়ের পৃষ্ঠা ${fromPage}-${toPage} এর ওপর ভিত্তি করে প্রশ্ন তৈরি করুন।`,
+            includeWarmup: includeIcebreaker || includeWarmup,
+            additionalInstructions: combinedInstructions,
           }),
         });
       } else {
@@ -320,7 +334,8 @@ export default function SmartAiSlideGeneratorModal({
             count: slideCount,
             questionType: selectedTypes.join(",").toLowerCase(),
             difficulty,
-            includeWarmup,
+            includeWarmup: includeIcebreaker || includeWarmup,
+            additionalInstructions: combinedInstructions,
           }),
         });
       }
@@ -334,13 +349,28 @@ export default function SmartAiSlideGeneratorModal({
         // Map returned questions into GeneratedItem list
         const mappedItems: GeneratedItem[] = [];
 
-        // 1. Add interactive warmup slide if requested
-        if (includeWarmup) {
+        // 1. 👋 শুরুর সম্ভাষণ স্লাইড (Welcome & Greeting Slide - TEXT_SLIDE)
+        if (includeGreeting) {
           mappedItems.push({
-            id: `warmup-wordcloud-${Date.now()}`,
+            id: `greeting-${Date.now()}`,
+            type: "TEXT_SLIDE",
+            title: `👋 স্বাগতম: ${chapterPrompt.trim() || selectedBook?.title || "আজকের পাঠ ও কুইজ সেশন"}`,
+            options: [],
+            correctAnswer: 0,
+            timeLimit: 0,
+            points: 0,
+            explanation: "আজকের ক্লাসে সবাইকে স্বাগতম! সবাই নিজ নিজ ডিভাইস থেকে সক্রিয়ভাবে অংশ নিন।",
+            isSelected: true,
+          });
+        }
+
+        // 2. ☁️ আগের ক্লাস কেমন লেগেছে / আজ কেমন আছো? (Icebreaker Word Cloud - WORD_CLOUD)
+        if (includeIcebreaker) {
+          mappedItems.push({
+            id: `icebreaker-${Date.now()}`,
             type: "WORD_CLOUD",
-            title: `আজকের বিষয়: "${chapterPrompt || selectedBook?.title || "পাঠ আলোচনা"}" — আপনার মাথায় প্রথম কোন শব্দটি আসে?`,
-            options: ["প্রযুক্তি", "দক্ষতা", "উদ্ভাবন", "সার্কিট", "অটোমেশন"],
+            title: `☁️ আজকের ক্লাস শুরু করার আগে — আপনার মন কেমন আছে বা আগের ক্লাস কেমন লেগেছিল? ১টি শব্দে জানান!`,
+            options: ["উৎসাহী", "ভালো", "প্রস্তুত", "আগ্রহী", "চমৎকার"],
             correctAnswer: 0,
             timeLimit: 0,
             points: 0,
@@ -349,7 +379,32 @@ export default function SmartAiSlideGeneratorModal({
           });
         }
 
-        // 2. Add AI generated questions
+        // 3. 🎯 আজকের ক্লাসের প্রস্তুতি কেমন? (Preparation Check-in - OPEN_ENDED)
+        if (includePrepCheck) {
+          mappedItems.push({
+            id: `prep-check-${Date.now()}`,
+            type: "OPEN_ENDED",
+            title: `🎯 আজকের বিষয়বস্তুর ওপর আপনার বর্তমান প্রস্তুতি বা কোনো বিশেষ প্রত্যাশা থাকলে ১-২ বাক্যে লিখুন:`,
+            options: [],
+            correctAnswer: 0,
+            timeLimit: 0,
+            points: 0,
+            explanation: "শিক্ষার্থীদের উন্মুক্ত প্রতিক্রিয়া ও প্রাক-প্রস্তুতি নিরীক্ষণ।",
+            isSelected: true,
+          });
+        }
+
+        // 4. Graded Quiz Questions + Auto-Inserted Leaderboard Slides
+        const autoInterval =
+          leaderboardInterval === "every_1"
+            ? 1
+            : leaderboardInterval === "every_3"
+            ? 3
+            : leaderboardInterval === "every_5"
+            ? 5
+            : 0;
+        let gradedCount = 0;
+
         data.questions.forEach((q: any, idx: number) => {
           const rawType = (q.type || q.questionType || "MCQ").toUpperCase().replace(/^MCQ_SINGLE$/, "MCQ");
           let normalizedType: SlideType = "MCQ";
@@ -393,7 +448,39 @@ export default function SmartAiSlideGeneratorModal({
             sourceExcerpt: q.sourceExcerpt,
             isSelected: true,
           });
+
+          gradedCount++;
+
+          // Auto-Insert Leaderboard Slides (Task 2 & 3)
+          if (autoInterval > 0 && gradedCount % autoInterval === 0) {
+            mappedItems.push({
+              id: `leaderboard-auto-${Date.now()}-${gradedCount}`,
+              type: "LEADERBOARD",
+              title: `🏆 লাইভ লিডারবোর্ড — রাউন্ড ${Math.floor(gradedCount / autoInterval)} এর ফলাফল`,
+              options: [],
+              correctAnswer: 0,
+              timeLimit: 0,
+              points: 0,
+              explanation: "শীর্ষ শিক্ষার্থীদের তাৎক্ষণিক র‍্যাংকিং ও স্কোরবোর্ড প্রদর্শন।",
+              isSelected: true,
+            });
+          }
         });
+
+        // 5. 💬 আজকের ক্লাস ও কুইজ কেমন লাগলো? (Closing Reflection & Feedback - OPEN_ENDED / WORD_CLOUD)
+        if (includeClosingFeedback) {
+          mappedItems.push({
+            id: `closing-feedback-${Date.now()}`,
+            type: "WORD_CLOUD",
+            title: `💬 আজকের পুরো ক্লাস ও কুইজ সেশন কেমন লাগলো? ১টি শব্দে আপনার মূল্যবান ফিডব্যাক দিন!`,
+            options: ["অসাধারণ", "সহজবোধ্য", "উপকারী", "আনন্দদায়ক", "প্রেরণাদায়ক"],
+            correctAnswer: 0,
+            timeLimit: 0,
+            points: 0,
+            explanation: "ক্লাস শেষে শিক্ষার্থীদের স্বতঃস্ফূর্ত মূল্যায়ন ও অনুভূতি সংগ্রহ।",
+            isSelected: true,
+          });
+        }
 
         setGeneratedItems(mappedItems);
         setStep("review");
@@ -918,26 +1005,146 @@ export default function SmartAiSlideGeneratorModal({
                   </div>
                 </div>
 
-                {/* Warmup Slide Toggle */}
-                <div className="p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-lg">💬</span>
-                    <div>
-                      <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                        শুরুতে ১টি ইন্টারেক্টিভ ওয়ার্মআপ স্লাইড যুক্ত করুন
-                      </h5>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        ক্লাস শুরু করতে লাইভ ওয়ার্ড ক্লাউড বা মুক্ত মতামত স্লাইড
-                      </p>
+                {/* SECTION: 🎭 AI দিয়ে সম্পূর্ণ ইন্টারঅ্যাক্টিভ সেশন ডিজাইন (TASK 2) */}
+                <div className="p-4 rounded-3xl bg-gradient-to-br from-indigo-50/70 via-purple-50/50 to-amber-50/60 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-amber-950/30 border-2 border-indigo-200 dark:border-indigo-800/80 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🎭</span>
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-black text-indigo-950 dark:text-indigo-200">
+                          AI দিয়ে সম্পূর্ণ ইন্টারঅ্যাক্টিভ সেশন ডিজাইন (Full Classroom Flow)
+                        </h4>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          শুধু কুইজ নয় — শুরু থেকে শেষ পর্যন্ত একটি আকর্ষণীয় স্মার্ট ক্লাস কাঠামো তৈরি করুন
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  <input
-                    type="checkbox"
-                    checked={includeWarmup}
-                    onChange={(e) => setIncludeWarmup(e.target.checked)}
-                    className="w-5 h-5 rounded-md text-amber-600 focus:ring-amber-500 cursor-pointer"
-                  />
+                  {/* Flow Components Checkbox / Chips */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* 1. Greeting */}
+                    <label className={`p-3 rounded-2xl border transition-all flex items-start gap-3 cursor-pointer ${includeGreeting ? "bg-white dark:bg-slate-900 border-indigo-500 shadow-sm ring-1 ring-indigo-400/40" : "bg-white/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800"}`}>
+                      <input
+                        type="checkbox"
+                        checked={includeGreeting}
+                        onChange={(e) => setIncludeGreeting(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 mt-0.5 cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <span>👋 শুরুর সম্ভাষণ স্লাইড</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">TEXT_SLIDE</span>
+                        </span>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          ক্লাসের শুরুতে আন্তরিক শুভেচ্ছা ও আজকের পাঠের মূল বিষয়বস্তু
+                        </p>
+                      </div>
+                    </label>
+
+                    {/* 2. Icebreaker Word Cloud */}
+                    <label className={`p-3 rounded-2xl border transition-all flex items-start gap-3 cursor-pointer ${includeIcebreaker ? "bg-white dark:bg-slate-900 border-fuchsia-500 shadow-sm ring-1 ring-fuchsia-400/40" : "bg-white/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800"}`}>
+                      <input
+                        type="checkbox"
+                        checked={includeIcebreaker}
+                        onChange={(e) => setIncludeIcebreaker(e.target.checked)}
+                        className="w-4 h-4 rounded text-fuchsia-600 focus:ring-fuchsia-500 mt-0.5 cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <span>☁️ আইসব্রেকার ওয়ার্ড ক্লাউড</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-fuchsia-100 dark:bg-fuchsia-900/60 text-fuchsia-700 dark:text-fuchsia-300">WORD_CLOUD</span>
+                        </span>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          আগের ক্লাস কেমন লেগেছে / আজ কেমন আছো?
+                        </p>
+                      </div>
+                    </label>
+
+                    {/* 3. Prep Check */}
+                    <label className={`p-3 rounded-2xl border transition-all flex items-start gap-3 cursor-pointer ${includePrepCheck ? "bg-white dark:bg-slate-900 border-purple-500 shadow-sm ring-1 ring-purple-400/40" : "bg-white/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800"}`}>
+                      <input
+                        type="checkbox"
+                        checked={includePrepCheck}
+                        onChange={(e) => setIncludePrepCheck(e.target.checked)}
+                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 mt-0.5 cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <span>🎯 ক্লাসের প্রস্তুতি চেক-ইন</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300">OPEN_ENDED</span>
+                        </span>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          আজকের বিষয়ের ওপর স্টুডেন্টদের পূর্বজ্ঞান ও প্রস্তুতি যাচাই
+                        </p>
+                      </div>
+                    </label>
+
+                    {/* 4. Closing Feedback */}
+                    <label className={`p-3 rounded-2xl border transition-all flex items-start gap-3 cursor-pointer ${includeClosingFeedback ? "bg-white dark:bg-slate-900 border-emerald-500 shadow-sm ring-1 ring-emerald-400/40" : "bg-white/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800"}`}>
+                      <input
+                        type="checkbox"
+                        checked={includeClosingFeedback}
+                        onChange={(e) => setIncludeClosingFeedback(e.target.checked)}
+                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 mt-0.5 cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <span>💬 সমাপনী ফিডব্যাক ও রিফ্লেকশন</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">FEEDBACK</span>
+                        </span>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          আজকের ক্লাস ও কুইজ কেমন লাগলো? ১টি শব্দে ফিডব্যাক
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* 5. Auto-Insert Leaderboard Slides Interval Selector */}
+                  <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-300 dark:border-amber-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                        <span>🏆 মাঝখানে ও শেষে লিডারবোর্ড স্লাইড অটো-ইনসার্ট</span>
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-200 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 font-bold">LEADERBOARD</span>
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[
+                        { id: "none", label: "বন্ধ (Manual)" },
+                        { id: "every_1", label: "প্রতি ১টি পর" },
+                        { id: "every_3", label: "প্রতি ৩টি পর" },
+                        { id: "every_5", label: "প্রতি ৫টি পর" },
+                      ].map((lvl) => (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          onClick={() => setLeaderboardInterval(lvl.id as any)}
+                          className={`py-1.5 px-2 rounded-xl text-[10px] font-black transition cursor-pointer border ${
+                            leaderboardInterval === lvl.id
+                              ? "bg-amber-500 text-slate-950 border-amber-500 shadow-xs"
+                              : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-300"
+                          }`}
+                        >
+                          {lvl.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 6. Custom Prompt Box */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                      <span>✍️ AI-কে বিশেষ নির্দেশনা দিন (Custom Session Directive):</span>
+                      <span className="text-[10px] text-slate-400 font-normal">ঐচ্ছিক (Optional)</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={customFlowPrompt}
+                      onChange={(e) => setCustomFlowPrompt(e.target.value)}
+                      placeholder="যেমন: প্রথমে স্বাগতম জানাও, তারপর তারা কেমন আছে জানতে চাও, এরপর ৫টি কুইজ দাও এবং শেষে আজকের ক্লাসের ফিডব্যাক নাও..."
+                      className="w-full px-3.5 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none leading-relaxed"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1117,6 +1324,8 @@ export default function SmartAiSlideGeneratorModal({
                             <option value="TRUE_FALSE">⚖️ সত্য/মিথ্যা</option>
                             <option value="WORD_CLOUD">☁️ ক্লাউড</option>
                             <option value="OPEN_ENDED">💭 মুক্ত মতামত</option>
+                            <option value="TEXT_SLIDE">📄 টেক্সট স্লাইড</option>
+                            <option value="LEADERBOARD">🏆 লিডারবোর্ড</option>
                           </select>
                         </div>
                       </div>
@@ -1428,6 +1637,35 @@ export default function SmartAiSlideGeneratorModal({
                             );
                           })}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Non-Graded & Special Slide Previews */}
+                    {item.type === "TEXT_SLIDE" && (
+                      <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-300 flex items-center gap-2">
+                        <span>👋</span>
+                        <span>প্রারম্ভিক সম্ভাষণ / কন্টেন্ট স্লাইড — টাইমার ছাড়া স্মার্টবোর্ডে তথ্য প্রদর্শিত হবে।</span>
+                      </div>
+                    )}
+
+                    {item.type === "WORD_CLOUD" && (
+                      <div className="p-3 bg-fuchsia-50/70 dark:bg-fuchsia-950/30 rounded-xl border border-fuchsia-200 dark:border-fuchsia-800 text-xs text-fuchsia-900 dark:text-fuchsia-300 flex items-center gap-2">
+                        <span>☁️</span>
+                        <span>লাইভ ওয়ার্ড ক্লাউড — শিক্ষার্থীরা তাদের মোবাইল ডিভাইস থেকে শব্দ সাবমিট করবে।</span>
+                      </div>
+                    )}
+
+                    {item.type === "OPEN_ENDED" && (
+                      <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 rounded-xl border border-purple-200 dark:border-purple-800 text-xs text-purple-900 dark:text-purple-300 flex items-center gap-2">
+                        <span>🎯</span>
+                        <span>উন্মুক্ত মতামত / প্রস্তুতি যাচাই — শিক্ষার্থীরা ফোন থেকে ১-২ বাক্যে উত্তর পাঠাবে।</span>
+                      </div>
+                    )}
+
+                    {item.type === "LEADERBOARD" && (
+                      <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 rounded-xl border border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2 font-bold">
+                        <span>🏆</span>
+                        <span>স্বয়ংক্রিয় লাইভ লিডারবোর্ড — হোস্ট এই স্লাইডে আসলে স্টুডেন্টদের ফোনে র‍্যাঙ্ক প্রদর্শিত হবে।</span>
                       </div>
                     )}
 

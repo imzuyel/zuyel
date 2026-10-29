@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuizSession } from "@/context/QuizSessionContext";
 import { GlowCard } from "@/components/quiz/ui/TechVisuals";
 import StudentPerformanceAnalyticsView from "@/components/quiz/StudentPerformanceAnalyticsView";
@@ -16,15 +16,34 @@ import {
   XCircle,
   HelpCircle,
   Sparkles,
-  Printer
+  Printer,
+  Star
 } from "lucide-react";
 import { motion } from "motion/react";
+import { triggerFireworks, triggerBlockCompletionCelebration } from "@/lib/confetti";
 
 export default function ResultPage() {
   const { studentStats, displayName, handleLeave, totalQuestions, quizDetails } = useQuizSession();
 
   const totalQ = totalQuestions || ((studentStats?.correctAnswers || 0) + (studentStats?.wrongAnswers || 0) + (studentStats?.unanswered || 0)) || 1;
   const accuracy = Math.round(((studentStats?.correctAnswers || 0) / totalQ) * 100);
+  const rank = studentStats?.rank || 1;
+  const starCount = accuracy >= 90 ? 5 : accuracy >= 70 ? 4 : accuracy >= 50 ? 3 : accuracy >= 30 ? 2 : 1;
+
+  // Motivational Bengali Badge based on rank & accuracy
+  const badgeInfo = rank <= 3 || accuracy >= 80 
+    ? { text: "🔥 কুইজ চ্যাম্পিয়ন!", color: "from-amber-500 to-yellow-500 text-slate-950 border-amber-300 shadow-amber-500/40" }
+    : accuracy >= 50 
+    ? { text: "🌟 অসাধারণ প্রচেষ্টা!", color: "from-cyan-500 to-indigo-500 text-white border-cyan-300 shadow-cyan-500/40" }
+    : { text: "💪 পরের ক্লাসে আরও ভালো করবে!", color: "from-orange-500 to-rose-500 text-white border-orange-300 shadow-orange-500/40" };
+
+  useEffect(() => {
+    triggerFireworks();
+    const timer = setTimeout(() => {
+      triggerBlockCompletionCelebration();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -64,11 +83,32 @@ export default function ResultPage() {
             transition={{ delay: 0.5, type: "spring" }}
             className="absolute -top-2 -right-2 bg-slate-950 border border-amber-400/60 text-amber-300 rounded-full px-3 py-1 text-xs font-black shadow-xl font-mono"
           >
-            #{studentStats?.rank || 1}
+            #{rank}
           </motion.div>
         </motion.div>
 
-        <motion.div variants={itemVariants} className="space-y-1.5">
+        <motion.div variants={itemVariants} className="space-y-2">
+          {/* Motivational Bengali Badge */}
+          <div className="flex items-center justify-center gap-2">
+            <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-linear-to-r border shadow-lg ${badgeInfo.color}`}>
+              {badgeInfo.text}
+            </span>
+          </div>
+
+          {/* Star Rating Display */}
+          <div className="flex items-center justify-center gap-1.5 pt-1">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <Star
+                key={star}
+                className={`w-6 h-6 transition-transform ${
+                  star <= starCount
+                    ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)] scale-110"
+                    : "text-slate-700 fill-slate-800"
+                }`}
+              />
+            ))}
+          </div>
+
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase tracking-widest">
             <Sparkles className="w-3.5 h-3.5" />
             <span>মূল্যায়ন সম্পন্ন হয়েছে</span>
@@ -79,6 +119,22 @@ export default function ResultPage() {
           <p className="text-slate-400 text-xs sm:text-sm font-medium max-w-xl mx-auto">
             {quizDetails?.title || "কারিগরি লাইভ কুইজ পরীক্ষা"} সফলভাবে সম্পন্ন হয়েছে। নিচে আপনার টপিকভিত্তিক দুর্বলতা ও এআই পারফরম্যান্স রিপোর্ট দেওয়া হলো।
           </p>
+
+          {/* Quick Summary Strip */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <div className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs">
+              <span className="text-slate-400 mr-1.5">পয়েন্ট:</span>
+              <span className="text-amber-400 font-black">{studentStats?.totalScore || 0} pts</span>
+            </div>
+            <div className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs">
+              <span className="text-slate-400 mr-1.5">সঠিক উত্তর:</span>
+              <span className="text-emerald-400 font-black">{studentStats?.correctAnswers || 0} / {totalQ}</span>
+            </div>
+            <div className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs">
+              <span className="text-slate-400 mr-1.5">নির্ভুলতা:</span>
+              <span className="text-cyan-400 font-black">{accuracy}%</span>
+            </div>
+          </div>
         </motion.div>
       </div>
 

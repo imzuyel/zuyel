@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
+import { invalidateSessionCache } from "@/lib/sessionCache";
 
 export async function POST(
   req: NextRequest,
@@ -74,6 +75,8 @@ export async function POST(
     const activeParticipants = institutionalDb.liveParticipants.filter(
       (p) => p.sessionId === sessionId && p.status === "JOINED"
     );
+
+    invalidateSessionCache(sessionId);
 
     return NextResponse.json({
       success: true,

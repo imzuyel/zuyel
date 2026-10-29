@@ -1320,3 +1320,99 @@
 ### Group 6: সিস্টেম ও নিরাপত্তা (`system`)
 - [ ] **Menu 6.1: AI পাইপলাইন সেটিংস (`/admin/ai-settings`)**
 - [ ] **Menu 6.2: আমার প্রোফাইল ও ক্রেডেনশিয়াল (`/admin/profile`)**
+
+
+## CRITICAL UPGRADE — PART 1 OF 2: DRAG-AND-DROP SLIDES, FULL-FLOW AI PRESENTATION GENERATOR, CUSTOM LEADERBOARD SLIDES & 20 AUTO-ROTATING TEMPLATES (COMPLETED)
+
+- [x] **TASK 1: Left Filmstrip Drag-and-Drop Reordering**
+  - Updated `components/quiz/UnifiedQuizMentimeterWorkspace.tsx` left Filmstrip thumbnails with HTML5 drag-and-drop (`draggable={true}`, `onDragStart`, `onDragOver`, `onDragLeave`, `onDrop`).
+  - Added visual drop indicators (`border-indigo-500 scale-105 shadow-xl ring-2 ring-indigo-400`).
+  - Implemented smooth instant array reordering via `handleDropSlide(fromIndex, toIndex)` and slide index resync.
+
+- [x] **TASK 2: Full-Flow AI Presentation Generator (Greeting + Warmup + Quiz + Closing)**
+  - Enhanced `components/quiz/SmartAiSlideGeneratorModal.tsx` with complete classroom flow generation controls:
+    - 🎬 স্বাগতম স্লাইড (`TEXT_SLIDE`): Greetings, class topic introduction, learning goals.
+    - 🧊 ওয়ার্ম-আপ ওয়ার্ড ক্লাউড (`WORD_CLOUD`): Icebreaker word cloud interaction.
+    - 💡 প্রি-চেক বা ওপেন-এন্ডেড আলোচনা (`OPEN_ENDED`): Prior knowledge check.
+    - 🏆 লিডারবোর্ড বিরতি (`LEADERBOARD`): Custom interval selector (every 3, 5, or end of quiz).
+    - 🎯 মূল গ্রেডেড কুইজ প্রশ্নাবলী (`MCQ`, `MATCHING`, `FILL_BLANKS`, `REORDER`, `TRUE_FALSE`).
+    - 🏁 সমাপনী মূল্যায়ন ও ফিডব্যাক স্লাইড (`WORD_CLOUD` / `OPEN_ENDED`).
+    - ✍️ শিক্ষকের বিশেষ নির্দেশনা প্রম্পট বক্স (`customFlowPrompt`).
+  - Enhanced preview review list to render edit controls for all slide types.
+
+- [x] **TASK 3: Custom LEADERBOARD Slide Type & Host-Only Leaderboard Gate**
+  - Integrated `LEADERBOARD` slide type in `UnifiedQuizMentimeterWorkspace.tsx`:
+    - Added to `SlideType`, `SLIDE_TYPES_REGISTRY`, and slide list.
+    - Added "🏆 স্পেশাল লিডারবোর্ড স্লাইড" to `+ নতুন স্লাইড` popover picker and top contextual toolbar dropdown.
+    - Added Settings Drawer 1-click mode toggle: "⚡ প্রতিটি প্রশ্নের পর অটোমেটিক লিডারবোর্ড দেখান" vs "🎯 শুধুমাত্র নির্ধারিত লিডারবোর্ড স্লাইডে দেখান".
+    - Rendered dedicated center-stage preview card.
+  - Implemented **Host-Only Leaderboard Gate** in `app/quiz/live/page.tsx`:
+    - Leaderboard view triggers on student devices ONLY when Host navigates to a `LEADERBOARD` slide or broadcasts `showLeaderboard: true`.
+    - Shows student rank, live score, and top 5 leaderboard list.
+    - Strictly no manual button or controls on student device to view or trigger leaderboard independently.
+  - Server & State Synchronization:
+    - Updated `app/api/live-quizzes/sessions/[id]/next/route.ts` to accept and persist `showLeaderboard`.
+    - Updated `app/api/live-quizzes/sessions/[id]/state/route.ts` to return `showLeaderboard` and `topPlayers`.
+    - Updated `context/QuizSessionContext.tsx` to poll and sync `showLeaderboard` and `topPlayers` to `activeSession`.
+
+- [x] **TASK 4: 20 Structural Templates Auto-Rotation (<UniversalQuizShowcaseEngine />)**
+  - Configured dynamic rotation `templateId={((currentSlideIndex || 0) % 20) + 1}` across all host and student viewing surfaces:
+    - `components/quiz/HostLiveFullscreenStage.tsx`: Renders graded quiz questions through `<UniversalQuizShowcaseEngine />` with rotating templates and live answer response breakdown for `MCQ`.
+    - `components/quiz/DualDeviceInteractivePreviewModal.tsx`: Fixed missing `useEffect` import, integrated `<UniversalQuizShowcaseEngine />` with rotating template id, and added `LEADERBOARD` podium rendering on projector and student phone simulator.
+    - `app/quiz/live/page.tsx`: Upgraded student view so all graded questions (`MCQ`, `MATCHING`, `FILL_BLANKS`, `REORDER`, `TRUE_FALSE`) render through `<UniversalQuizShowcaseEngine />` with dynamic template rotation instead of plain buttons.
+    - `components/quiz/LiveQuizArena.tsx`: Linked `templateId={previewTemplateId || (((previewCurrentQIndex || 0) % 20) + 1)}` for seamless 20-template rotation.
+
+
+## CRITICAL UPGRADE — PART 2 OF 2: 60-STUDENT ZERO-LAG CONCURRENCY ENGINE, LOW-NETWORK AUTO-RECONNECT ON PAGE RELOAD & GRAND FINALE CELEBRATION (COMPLETED)
+
+- [x] **TASK 1: 50–60+ Student Zero-Lag High-Concurrency Optimization**
+  - **Ultra-Fast In-Memory State Cache (`lib/sessionCache.ts` & `app/api/live-quizzes/sessions/[id]/state/route.ts`)**:
+    - Created lightweight memory cache store `globalThis.__liveSessionCache` with 600ms TTL.
+    - Provided instant 0ms cached response snapshots for general pollers and host queries (`!playerId || playerId === "HOST"`).
+    - Lightweight delta merge for individual student state queries (preserving correct personal answered flags without running full heavy DB aggregations).
+  - **Cache Invalidation on State Mutations**:
+    - Integrated `invalidateSessionCache(sessionId)` across `/next`, `/answers`, `/secure-submit`, `/ready`, and `/end-quiz`.
+  - **Adaptive Jitter Polling (`context/QuizSessionContext.tsx`)**:
+    - Replaced uniform timer polling with staggered adaptive jitter (`1200ms + Math.random() * 400ms`) to eliminate synchronized spike thundering herds from 60+ concurrent mobile devices.
+
+- [x] **TASK 2: Low-Network Resilience & Seamless Reload/Reconnect**
+  - **Persistent Session Storage**:
+    - Standardized `localStorage` persistence under `pgtsc_active_live_quiz` (with backward-compatible migration of legacy keys).
+  - **Ongoing Session Rejoin Support (`app/api/live-quizzes/join/route.ts`)**:
+    - Fixed active session lookup to allow reconnects into ongoing live quizzes (`!["COMPLETED", "CANCELLED", "EXPIRED"].includes(s.status)`), preventing accidental session rejections during active gameplay.
+    - Added guest deduplication and instant re-attachment for guests with matching names.
+    - Bypassed session locks and registration freezes for reconnecting students.
+  - **Tolerant Reconnect Endpoint (`app/api/live-quizzes/sessions/[id]/reconnect/route.ts`)**:
+    - Tolerant student recovery by player ID and session matching, even across temporary network drops.
+  - **Instant Auto-Resume on Page Reload (`context/QuizSessionContext.tsx`)**:
+    - Auto-recovers session state on page reload, restores question answered status (`playerAnswered: true`), previous answer payload, and streak counters.
+  - **Smart Low-Network Sticky Banner (`app/quiz/live/page.tsx`)**:
+    - Real-time `navigator.onLine` and `networkStatus` tracking.
+    - Sticky pulsating alert: `📡 ইন্টারনেট সংযোগ দুর্বল বা সাময়িকভাবে বিচ্ছিন্ন...` with instant `🔄 পেজ রিলোড ও পুনঃসংযোগ করুন` button.
+  - **Answer Submission Auto-Retry**:
+    - Integrated 3-attempt exponential backoff retry in `QuizSessionContext.tsx` `handleSubmitAnswer`.
+
+- [x] **TASK 3: Grand Finale & Personal Trophy Card**
+  - **Host Screen Grand Finale (`components/quiz/HostLiveFullscreenStage.tsx`)**:
+    - Triggered full-screen celebration fireworks (`triggerFireworks()`) on session completion.
+    - Royal celebration banner: `🎊 ধন্যবাদ ও অভিনন্দন! আজকের সেশন সফলভাবে সমাপ্ত হয়েছে!`
+    - Dynamic class overall accuracy badge: `🎯 ক্লাসের সার্বিক নির্ভুলতা (Overall Accuracy): {overallAccuracy}%`.
+    - 3D Gold/Silver/Bronze Podium, 4th–10th honorable ranking table, and full participant ranking list.
+    - Difficult questions radar ("⚠️ কঠিন প্রশ্ন রাডার") and warmup word cloud & feedback summary tabs.
+    - End session trigger signals `/api/live-quizzes/sessions/[id]/end-quiz` with status `COMPLETED` and cache invalidation.
+  - **Student Screen 3D Personal Achievement Card (`app/quiz/live/page.tsx` & `app/quiz/result/page.tsx`)**:
+    - Instantly displays when session transitions to `COMPLETED`.
+    - Triggers festive confetti fireworks and multi-stage block celebration animations.
+    - 3D Personal Trophy Card showcasing student avatar, rank badge (`#১`, `#৫`), total points, correct answers `X / Y`, and accuracy %.
+    - 5-Star Rating component (⭐⭐⭐⭐⭐) based on performance accuracy.
+    - Motivational Bengali performance badges:
+      - `🔥 কুইজ চ্যাম্পিয়ন!` (Rank 1–3 or Accuracy >= 80%)
+      - `🌟 অসাধারণ প্রচেষ্টা!` (Accuracy >= 50%)
+      - `💪 পরের ক্লাসে আরও ভালো করবে!` (Accuracy < 50%)
+    - Quick action buttons to view full analytical report or return home.
+
+- [x] **BUGFIX: React 19 Compiler Static Flag & Early Return Violation**
+  - **Issue**: `Internal React error: Expected static flag was missing` thrown at `<DualDeviceInteractivePreviewModal>` in `UnifiedQuizMentimeterWorkspace.tsx` due to `if (!isOpen || !slides || slides.length === 0) return null;` returning before hooks in `DualDeviceInteractivePreviewModal.tsx`.
+  - **Resolution**:
+    - Relocated all hooks in `DualDeviceInteractivePreviewModal.tsx` to run unconditionally at component top level with safe fallbacks, moving the render guard `if (!isOpen || safeSlides.length === 0) return null;` after all hooks.
+    - Added conditional render guards `{showDualDevicePreview && <DualDeviceInteractivePreviewModal ... />}` and `{showAiModal && <SmartAiSlideGeneratorModal ... />}` in `UnifiedQuizMentimeterWorkspace.tsx` to prevent fiber tree mismatch.

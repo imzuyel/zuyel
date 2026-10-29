@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useQuizSession } from "@/context/QuizSessionContext";
 import { QuizPlate } from "@/components/quiz/templates";
 import { useProctoredExam } from "@/hooks/useProctoredExam";
@@ -25,10 +26,16 @@ import {
   Cloud,
   Send,
   MessageSquare,
-  XCircle
+  XCircle,
+  RotateCcw,
+  Trophy,
+  Star,
+  LogOut,
+  Target
 } from "lucide-react";
 import UniversalQuizShowcaseEngine from "@/components/quiz/engine/UniversalQuizShowcaseEngine";
 import { motion, AnimatePresence } from "motion/react";
+import { triggerFireworks, triggerBlockCompletionCelebration } from "@/lib/confetti";
 
 export default function LiveQuizPage() {
   const { 
@@ -60,9 +67,25 @@ export default function LiveQuizPage() {
     handleSetReady
   } = useQuizSession();
 
+  const router = useRouter();
   const [localSelected, setLocalSelected] = useState<any>(null);
   const [wordInput, setWordInput] = useState("");
   const [openEndedInput, setOpenEndedInput] = useState("");
+
+  // Online / Offline connectivity listener
+  const [isOnline, setIsOnline] = useState(true);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsOnline(navigator.onLine);
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   // Reset inputs on slide change
   React.useEffect(() => {
@@ -70,6 +93,21 @@ export default function LiveQuizPage() {
     setWordInput("");
     setOpenEndedInput("");
   }, [currentQuestionIdx, currentQuestion?.id]);
+
+  // Grand Finale Completion Detection
+  const sessionStatus = activeSession?.status;
+  const isCompleted = currentPhase === "COMPLETED" || sessionStatus === "COMPLETED" || activeSession?.status === "COMPLETED";
+
+  // Trigger celebration on completion
+  useEffect(() => {
+    if (isCompleted) {
+      triggerFireworks();
+      const t = setTimeout(() => {
+        triggerBlockCompletionCelebration();
+      }, 1200);
+      return () => clearTimeout(t);
+    }
+  }, [isCompleted]);
 
   // Anti-Cheat Proctored Exam Hook
   const proctoring = useProctoredExam({
@@ -84,6 +122,162 @@ export default function LiveQuizPage() {
       }
     },
   });
+
+  // ==========================================
+  // GRAND FINALE: 3D PERSONAL ACHIEVEMENT TROPHY CARD (TASK 3)
+  // ==========================================
+  if (isCompleted) {
+    const totalQ = totalQuestions || ((studentStats?.correctAnswers || 0) + (studentStats?.wrongAnswers || 0)) || 1;
+    const correctCount = studentStats?.correctAnswers || 0;
+    const accuracy = Math.round((correctCount / totalQ) * 100);
+    const rank = studentStats?.rank || 1;
+    const starCount = accuracy >= 90 ? 5 : accuracy >= 70 ? 4 : accuracy >= 50 ? 3 : accuracy >= 30 ? 2 : 1;
+
+    const badgeInfo = rank <= 3 || accuracy >= 80 
+      ? { text: "🔥 কুইজ চ্যাম্পিয়ন!", color: "from-amber-500 to-yellow-500 text-slate-950 border-amber-300 shadow-amber-500/40" }
+      : accuracy >= 50 
+      ? { text: "🌟 অসাধারণ প্রচেষ্টা!", color: "from-cyan-500 to-indigo-500 text-white border-cyan-300 shadow-cyan-500/40" }
+      : { text: "💪 পরের ক্লাসে আরও ভালো করবে!", color: "from-orange-500 to-rose-500 text-white border-orange-300 shadow-orange-500/40" };
+
+    return (
+      <div className="w-full max-w-xl mx-auto px-4 py-8 flex flex-col items-center justify-center min-h-[75vh] text-center relative select-none">
+        {/* Smart Low-Network Sticky Banner if connection drops */}
+        {(!isOnline || networkStatus === "disconnected" || networkStatus === "reconnecting" || networkStatus === "failed") && (
+          <div className="fixed top-0 left-0 right-0 z-50 p-2.5 bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 text-white shadow-2xl flex items-center justify-between gap-3 px-4 backdrop-blur-md border-b-2 border-amber-300/40 animate-pulse">
+            <div className="flex items-center gap-2 text-xs font-black">
+              <Radio className="w-4 h-4 animate-ping text-white shrink-0" />
+              <span>📡 ইন্টারনেট সংযোগ দুর্বল বা সাময়িকভাবে বিচ্ছিন্ন...</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 rounded-xl bg-white text-slate-950 font-black text-xs hover:bg-slate-100 flex items-center gap-1 shadow cursor-pointer active:scale-95"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>🔄 পেজ রিলোড ও পুনঃসংযোগ করুন</span>
+            </button>
+          </div>
+        )}
+
+        {/* Ambient Pulsing Background Glow */}
+        <div className="absolute inset-0 bg-radial from-amber-500/25 via-indigo-600/15 to-transparent blur-3xl pointer-events-none animate-pulse" />
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.85, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.45, type: "spring", stiffness: 260 }}
+          className="relative z-10 w-full space-y-6 flex flex-col items-center"
+        >
+          {/* Royal Header Badge */}
+          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-linear-to-r from-amber-500/20 via-yellow-500/30 to-amber-500/20 border-2 border-amber-400/60 shadow-[0_0_30px_rgba(245,158,11,0.35)]">
+            <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+            <span className="text-xs font-black text-amber-300 uppercase tracking-widest">
+              গ্র্যান্ড ফাইনাল সেলিব্রেশন
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wide">
+              🎉 সেশন সফলভাবে সমাপ্ত হয়েছে!
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
+              চমৎকার অংশগ্রহণ! শিক্ষক লাইভ প্রেজেন্টেশন সমাপ্ত করেছেন। আপনার অর্জিত ব্যক্তিগত পারফরম্যান্স কার্ড নিচে দেওয়া হলো।
+            </p>
+          </div>
+
+          {/* 3D Personal Achievement Card */}
+          <div className="w-full rounded-3xl bg-linear-to-b from-slate-900/95 via-indigo-950/70 to-slate-950/95 border-2 border-amber-500/40 p-6 sm:p-8 shadow-[0_0_50px_rgba(245,158,11,0.2)] relative space-y-6">
+            {/* Student Avatar + Rank Badge */}
+            <div className="relative inline-block mx-auto">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-linear-to-tr from-amber-400 via-yellow-500 to-amber-600 border-4 border-amber-300 flex items-center justify-center mx-auto shadow-2xl shadow-amber-500/30 text-slate-950 text-4xl sm:text-5xl font-black">
+                {displayName?.[0]?.toUpperCase() || "S"}
+              </div>
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ delay: 0.3, type: "spring" }}
+                className="absolute -top-3 -right-3 bg-slate-950 border-2 border-amber-400 text-amber-300 rounded-full px-3.5 py-1 text-sm font-black shadow-xl font-mono flex items-center gap-1"
+              >
+                <span>{rank === 1 ? "👑" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : "#"}</span>
+                <span>{rank}</span>
+              </motion.div>
+            </div>
+
+            <div className="space-y-2 text-center">
+              <h2 className="text-xl sm:text-2xl font-black text-white">
+                {displayName}
+              </h2>
+
+              {/* Motivational Bengali Performance Badge */}
+              <div className="flex items-center justify-center">
+                <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-linear-to-r border shadow-lg ${badgeInfo.color}`}>
+                  {badgeInfo.text}
+                </span>
+              </div>
+
+              {/* 5-Star Rating */}
+              <div className="flex items-center justify-center gap-1.5 pt-1">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    className={`w-6 h-6 transition-transform ${
+                      star <= starCount
+                        ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)] scale-110"
+                        : "text-slate-700 fill-slate-800"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* 3D Stats Matrix */}
+            <div className="grid grid-cols-3 gap-3 pt-2">
+              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-center font-mono">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">মোট স্কোর</span>
+                <span className="text-lg sm:text-xl font-black text-amber-400">{studentStats?.totalScore || 0}</span>
+                <span className="text-[10px] text-slate-500 block">পয়েন্ট</span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-center font-mono">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">সঠিক উত্তর</span>
+                <span className="text-lg sm:text-xl font-black text-emerald-400">
+                  {studentStats?.correctAnswers || 0} / {totalQ}
+                </span>
+                <span className="text-[10px] text-slate-500 block">প্রশ্নের</span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-center font-mono">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">নির্ভুলতা</span>
+                <span className="text-lg sm:text-xl font-black text-cyan-400">{accuracy}%</span>
+                <span className="text-[10px] text-slate-500 block">অ্যাকুরেসি</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2.5 pt-3 border-t border-slate-800/80">
+              <button
+                type="button"
+                onClick={() => router.push("/quiz/result")}
+                className="w-full py-3.5 rounded-2xl bg-linear-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm shadow-xl flex items-center justify-center gap-2 cursor-pointer transition active:scale-98"
+              >
+                <Award className="w-4 h-4 text-amber-300" />
+                <span>📊 বিস্তারিত অ্যানালিটিক্স ও দুর্বলতা রিপোর্ট</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push("/")}
+                className="w-full py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                <span>হোমপেজে ফিরে যান (Exit)</span>
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   // If question is not loaded yet and not in countdown, show loader
   if (!currentQuestion && currentPhase !== "COUNTDOWN") {
@@ -271,10 +465,104 @@ export default function LiveQuizPage() {
 
   // Slide Category & Type classification
   const qType = (currentQuestion?.type || currentQuestion?.questionType || "MCQ").toUpperCase();
+  const isLeaderboardSlide = qType === "LEADERBOARD" || Boolean(activeSession?.showLeaderboard);
   const isContentSlide = qType === "TEXT_SLIDE" || qType === "IMAGE_COMPARE";
   const isOpenEnded = qType === "OPEN_ENDED" || qType === "LIVE_QA";
   const isWordCloud = qType === "WORD_CLOUD";
-  const isNonGraded = isContentSlide || isOpenEnded || isWordCloud;
+  const isNonGraded = isContentSlide || isOpenEnded || isWordCloud || isLeaderboardSlide;
+
+  // ==========================================
+  // HOST-ONLY LEADERBOARD GATE SCREEN (TASK 3)
+  // Strictly host-controlled: no student buttons, appears only when host navigates or broadcasts
+  // ==========================================
+  if (isLeaderboardSlide) {
+    const topPlayers = activeSession?.topPlayers || [];
+    return (
+      <div className="w-full max-w-xl mx-auto px-4 py-8 flex flex-col items-center justify-center min-h-[60vh] text-center relative">
+        <div className="absolute inset-0 bg-radial from-amber-500/20 via-indigo-600/10 to-transparent blur-3xl pointer-events-none animate-pulse" />
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.85, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.4, type: "spring", stiffness: 280 }}
+          className="relative z-10 w-full space-y-6 flex flex-col items-center"
+        >
+          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-linear-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border border-amber-400/50 shadow-[0_0_25px_rgba(245,158,11,0.35)]">
+            <Award className="w-5 h-5 text-amber-400 animate-bounce" />
+            <span className="text-xs font-black text-amber-300 uppercase tracking-widest">
+              🏆 লাইভ লিডারবোর্ড — শিক্ষক প্রদর্শন করছেন
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-wide">
+              চলতি সেশনের স্কোরবোর্ড
+            </h2>
+            <p className="text-xs text-slate-400">
+              শিক্ষক স্মার্টবোর্ড / প্রজেক্টরে পূর্ণাঙ্গ ফলাফল প্রদর্শন করছেন
+            </p>
+          </div>
+
+          {/* Student's Personal Rank Card */}
+          {studentStats && (
+            <div className="w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-950/80 to-purple-950/80 border-2 border-indigo-500/50 shadow-xl flex items-center justify-between">
+              <div className="flex items-center gap-3 text-left">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-black text-lg border border-indigo-400/40">
+                  {studentStats.rank ? `#${studentStats.rank}` : "🎖️"}
+                </div>
+                <div>
+                  <div className="text-sm font-black text-white">{displayName || "আপনার প্রোফাইল"}</div>
+                  <span className="text-[10px] text-indigo-300 font-bold">লাইভ পারফরম্যান্স</span>
+                </div>
+              </div>
+              <div className="text-right font-mono">
+                <span className="text-lg font-black text-amber-400">{studentStats.totalScore || 0}</span>
+                <span className="text-[10px] text-slate-400 block font-bold">পয়েন্ট</span>
+              </div>
+            </div>
+          )}
+
+          {/* Top 5 Leaderboard List */}
+          {topPlayers.length > 0 && (
+            <div className="w-full space-y-2">
+              <span className="text-xs font-black text-slate-400 uppercase tracking-wider block text-left px-1">
+                শীর্ষ প্রতিযোগীগণ:
+              </span>
+              <div className="space-y-2">
+                {topPlayers.slice(0, 5).map((p: any, idx: number) => {
+                  const isCurrentStudent = p.id === participantId || p.displayName === displayName;
+                  const medal = idx === 0 ? "👑" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`;
+                  return (
+                    <div
+                      key={p.id || idx}
+                      className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${
+                        isCurrentStudent
+                          ? "bg-amber-500/20 border-amber-400 text-white shadow-[0_0_15px_rgba(245,158,11,0.25)]"
+                          : "bg-slate-900/80 border-slate-800 text-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono font-black text-sm w-6 text-center">{medal}</span>
+                        <span className="font-bold text-xs sm:text-sm">{p.displayName}</span>
+                        {isCurrentStudent && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black">আপনি</span>
+                        )}
+                      </div>
+                      <span className="font-mono font-black text-xs text-amber-400">{p.totalScore || 0} pts</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="text-xs text-slate-500 font-bold">
+            পরবর্তী প্রশ্নের জন্য শিক্ষক স্লাইড পরিবর্তন করার অপেক্ষায়...
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   // ==========================================
   // STEPS 2, 3, 4 — QUESTION PREVIEW & ACTIVE GAMEPLAY
@@ -283,7 +571,25 @@ export default function LiveQuizPage() {
   const isOptionsRevealed = !isPreviewPhase && (currentPhase === "QUESTION_ACTIVE" || currentPhase === "QUESTION_ENDED");
 
   return (
-    <div className="space-y-6 w-full max-w-2xl px-2 mx-auto">
+    <div className="space-y-6 w-full max-w-2xl px-2 mx-auto relative">
+      {/* Smart Low-Network Sticky Warning Banner (Task 2) */}
+      {(!isOnline || networkStatus === "disconnected" || networkStatus === "reconnecting" || networkStatus === "failed") && (
+        <div className="fixed top-0 left-0 right-0 z-50 p-2.5 bg-gradient-to-r from-amber-600 via-rose-600 to-amber-600 text-white shadow-2xl flex items-center justify-between gap-3 px-4 backdrop-blur-md border-b-2 border-amber-300/40 animate-pulse">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-black">
+            <Radio className="w-4 h-4 animate-ping text-white shrink-0" />
+            <span>📡 ইন্টারনেট সংযোগ দুর্বল বা সাময়িকভাবে বিচ্ছিন্ন। অপেক্ষা করুন অথবা রিলোড চাপুন:</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-3 py-1 rounded-xl bg-white text-slate-950 font-black text-xs hover:bg-slate-100 flex items-center gap-1.5 shadow-lg cursor-pointer active:scale-95 shrink-0"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>🔄 পেজ রিলোড ও পুনঃসংযোগ করুন</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Proctoring Security HUD Row */}
       <div className="flex items-center justify-between gap-3">
         <ProctoringShieldHUD
@@ -613,116 +919,28 @@ export default function LiveQuizPage() {
               </div>
             </div>
           ) : (
-            /* 5. GRADED QUIZ: ALL 5 QUESTION TYPES RENDERED ACCORDING TO TYPE */
+            /* 5. GRADED QUIZ: ALL 5 QUESTION TYPES RENDERED VIA UNIVERSAL SHOWCASE ENGINE (20 ROTATING TEMPLATES) */
             <div className="w-full">
-              {qType === "MATCHING" || qType === "FILL_BLANKS" || qType === "REORDER" || qType === "TRUE_FALSE" ? (
-                <UniversalQuizShowcaseEngine
-                  question={currentQuestion}
-                  selectedAnswer={localSelected ?? selectedOption}
-                  onSelectAnswer={(ans) => {
-                    setLocalSelected(ans);
-                    handleSelect(ans);
-                  }}
-                  onConfirmAnswer={(ans) => {
-                    setLocalSelected(ans);
-                    handleSubmitAnswer(ans);
-                  }}
-                  isConfirmed={playerAnswered}
-                  isCorrect={lastAnswerFeedback?.isCorrect}
-                  disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
-                />
-              ) : (
-                /* MCQ (20 Structural Archetypes / Responsive Interactive Options) */
-                <div className="grid grid-cols-1 gap-3">
-                  <AnimatePresence mode="popLayout">
-                    {currentQuestion.options?.map((option: string, idx: number) => {
-                      const isSelected = (localSelected !== null && String(localSelected) === String(idx)) || 
-                        (selectedOption !== "" && selectedOption !== null && selectedOption !== undefined && String(selectedOption) === String(idx));
-                      const isConfirmed = playerAnswered && 
-                        (String(selectedOption) === String(idx) || String(selectedOption).trim().toLowerCase() === String(option).trim().toLowerCase());
-                      
-                      // Strict emerald green / rose red evaluation
-                      const isCorrectChoice = lastAnswerFeedback?.correctAnswer !== undefined && (
-                        String(lastAnswerFeedback.correctAnswer) === String(idx) ||
-                        String(lastAnswerFeedback.correctAnswer).trim().toLowerCase() === String(option).trim().toLowerCase()
-                      );
-
-                      let optionStyle = "bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900";
-                      let badgeStyle = "bg-slate-800 text-slate-400 group-hover:bg-slate-700 group-hover:text-white";
-
-                      if (playerAnswered) {
-                        if (lastAnswerFeedback?.isCorrect === true) {
-                          if (isConfirmed) {
-                            // Highlight ONLY the student's selected correct option in Emerald Green!
-                            optionStyle = "!bg-emerald-500/20 !border-emerald-500 !text-white shadow-[0_0_25px_rgba(16,185,129,0.4)]";
-                            badgeStyle = "!bg-emerald-500 !text-slate-950 font-black";
-                          } else {
-                            // Other options stay dimmed
-                            optionStyle = "opacity-35 bg-slate-950/40 border-slate-800/60 text-slate-500";
-                          }
-                        } else if (lastAnswerFeedback?.isCorrect === false) {
-                          if (isConfirmed) {
-                            // Highlight ONLY the student's selected wrong option in Rose Red!
-                            optionStyle = "!bg-rose-500/20 !border-rose-500 !text-white shadow-[0_0_25px_rgba(244,63,94,0.4)]";
-                            badgeStyle = "!bg-rose-500 !text-white font-black";
-                          } else if (isCorrectChoice) {
-                            // AND reveal the true correct answer in Emerald Green!
-                            optionStyle = "!bg-emerald-500/20 !border-emerald-500 !text-white shadow-[0_0_25px_rgba(16,185,129,0.4)] animate-pulse";
-                            badgeStyle = "!bg-emerald-500 !text-slate-950 font-black";
-                          } else {
-                            // Other unselected options stay neutral/dimmed
-                            optionStyle = "opacity-30 bg-slate-950/40 border-slate-800/40 text-slate-600";
-                          }
-                        } else {
-                          // Pending feedback
-                          if (isConfirmed) {
-                            optionStyle = "bg-cyan-500/20 border-cyan-500 text-white shadow-[0_0_25px_rgba(6,182,212,0.4)]";
-                            badgeStyle = "bg-cyan-400 text-slate-950 font-black";
-                          } else {
-                            optionStyle = "opacity-40 bg-slate-950/40 border-slate-800 text-slate-500";
-                          }
-                        }
-                      } else if (isSelected) {
-                        optionStyle = "bg-indigo-600/30 border-indigo-400 text-white shadow-[0_0_18px_rgba(99,102,241,0.3)]";
-                        badgeStyle = "bg-indigo-500 text-white";
-                      }
-
-                      return (
-                        <motion.button
-                          key={idx}
-                          initial={{ opacity: 0, x: -20, scale: 0.98 }}
-                          animate={{ opacity: 1, x: 0, scale: 1 }}
-                          transition={{ delay: idx * 0.08, duration: 0.25 }}
-                          disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
-                          onClick={() => handleSelect(idx)}
-                          className={`relative group w-full p-4 rounded-2xl border-2 text-left transition-all flex items-center gap-4 cursor-pointer overflow-hidden ${optionStyle}`}
-                        >
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-mono font-black text-lg shrink-0 transition-colors ${badgeStyle}`}>
-                            {String.fromCharCode(65 + idx)}
-                          </div>
-
-                          <span className="font-bold text-sm sm:text-base flex-1 leading-snug">{option}</span>
-                          
-                          {playerAnswered && isConfirmed && lastAnswerFeedback?.isCorrect === true && (
-                            <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
-                          )}
-                          {playerAnswered && isConfirmed && lastAnswerFeedback?.isCorrect === false && (
-                            <XCircle className="w-6 h-6 text-rose-400 shrink-0" />
-                          )}
-                          {playerAnswered && !isConfirmed && isCorrectChoice && lastAnswerFeedback?.isCorrect === false && (
-                            <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
-                          )}
-
-                          {/* Tech Lines Decoration on confirmed */}
-                          {isConfirmed && (
-                            <div className="absolute top-0 right-0 h-full w-2 bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
-                          )}
-                        </motion.button>
-                      );
-                    })}
-                  </AnimatePresence>
-                </div>
-              )}
+              <UniversalQuizShowcaseEngine
+                question={currentQuestion}
+                questionIndex={currentQuestionIdx}
+                totalQuestions={totalQuestions}
+                templateId={((currentQuestionIdx || 0) % 20) + 1}
+                selectedAnswer={localSelected ?? selectedOption}
+                onSelectAnswer={(ans) => {
+                  setLocalSelected(ans);
+                  handleSelect(ans);
+                }}
+                onConfirmAnswer={(ans) => {
+                  setLocalSelected(ans);
+                  handleSubmitAnswer(ans);
+                }}
+                isConfirmed={playerAnswered}
+                isCorrect={lastAnswerFeedback?.isCorrect}
+                disabled={playerAnswered || isSubmitting || !canSubmitAnswer}
+                autoRandomize={false}
+                showProofBadge={true}
+              />
             </div>
           )}
 
