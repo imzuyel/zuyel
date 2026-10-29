@@ -8,11 +8,11 @@ import { useProctoredExam } from "@/hooks/useProctoredExam";
 import ProctoringShieldHUD from "@/components/quiz/ProctoringShieldHUD";
 import ProctoringWarningOverlay from "@/components/quiz/ProctoringWarningOverlay";
 import FloatingReactionOverlay, { emitLiveReaction } from "@/components/quiz/FloatingReactionOverlay";
-import { 
-  Timer, 
-  CheckCircle2, 
-  AlertCircle, 
-  Loader2, 
+import {
+  Timer,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
   Check,
   Zap,
   Flame,
@@ -38,18 +38,18 @@ import { motion, AnimatePresence } from "motion/react";
 import { triggerFireworks, triggerBlockCompletionCelebration } from "@/lib/confetti";
 
 export default function LiveQuizPage() {
-  const { 
+  const {
     currentPhase,
     countdownSeconds,
     previewSeconds,
     canSubmitAnswer,
     currentPlate,
-    currentQuestion, 
-    currentQuestionIdx, 
-    totalQuestions, 
-    timeLeft, 
-    playerAnswered, 
-    isSubmitting, 
+    currentQuestion,
+    currentQuestionIdx,
+    totalQuestions,
+    timeLeft,
+    playerAnswered,
+    isSubmitting,
     handleSubmitAnswer,
     selectedOption,
     answeredCount,
@@ -133,11 +133,11 @@ export default function LiveQuizPage() {
     const rank = studentStats?.rank || 1;
     const starCount = accuracy >= 90 ? 5 : accuracy >= 70 ? 4 : accuracy >= 50 ? 3 : accuracy >= 30 ? 2 : 1;
 
-    const badgeInfo = rank <= 3 || accuracy >= 80 
+    const badgeInfo = rank <= 3 || accuracy >= 80
       ? { text: "🔥 কুইজ চ্যাম্পিয়ন!", color: "from-amber-500 to-yellow-500 text-slate-950 border-amber-300 shadow-amber-500/40" }
-      : accuracy >= 50 
-      ? { text: "🌟 অসাধারণ প্রচেষ্টা!", color: "from-cyan-500 to-indigo-500 text-white border-cyan-300 shadow-cyan-500/40" }
-      : { text: "💪 পরের ক্লাসে আরও ভালো করবে!", color: "from-orange-500 to-rose-500 text-white border-orange-300 shadow-orange-500/40" };
+      : accuracy >= 50
+        ? { text: "🌟 অসাধারণ প্রচেষ্টা!", color: "from-cyan-500 to-indigo-500 text-white border-cyan-300 shadow-cyan-500/40" }
+        : { text: "💪 পরের ক্লাসে আরও ভালো করবে!", color: "from-orange-500 to-rose-500 text-white border-orange-300 shadow-orange-500/40" };
 
     return (
       <div className="w-full max-w-xl mx-auto px-4 py-8 flex flex-col items-center justify-center min-h-[75vh] text-center relative select-none">
@@ -220,11 +220,10 @@ export default function LiveQuizPage() {
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star
                     key={star}
-                    className={`w-6 h-6 transition-transform ${
-                      star <= starCount
-                        ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)] scale-110"
-                        : "text-slate-700 fill-slate-800"
-                    }`}
+                    className={`w-6 h-6 transition-transform ${star <= starCount
+                      ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)] scale-110"
+                      : "text-slate-700 fill-slate-800"
+                      }`}
                   />
                 ))}
               </div>
@@ -355,11 +354,10 @@ export default function LiveQuizPage() {
             whileTap={!isReady ? { scale: 0.95 } : {}}
             disabled={isReady}
             onClick={handleSetReady}
-            className={`w-full max-w-sm py-4 rounded-2xl font-black text-base shadow-xl flex items-center justify-center gap-3 transition-transform cursor-pointer ${
-              isReady
-                ? "bg-emerald-950/80 border-2 border-emerald-400 text-emerald-300 shadow-emerald-500/20"
-                : "bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-amber-500/30 animate-pulse"
-            }`}
+            className={`w-full max-w-sm py-4 rounded-2xl font-black text-base shadow-xl flex items-center justify-center gap-3 transition-transform cursor-pointer ${isReady
+              ? "bg-emerald-950/80 border-2 border-emerald-400 text-emerald-300 shadow-emerald-500/20"
+              : "bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-amber-500/30 animate-pulse"
+              }`}
           >
             {isReady ? (
               <>
@@ -431,7 +429,7 @@ export default function LiveQuizPage() {
               transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
               className="absolute inset-0 rounded-full border-4 border-dashed border-cyan-500/50 shadow-[0_0_40px_rgba(6,182,212,0.4)]"
             />
-            
+
             {/* Inner Glowing Core */}
             <div className="absolute inset-3 rounded-full bg-linear-to-tr from-slate-950 via-slate-900 to-indigo-950 border-2 border-cyan-400/60 flex items-center justify-center shadow-2xl">
               <AnimatePresence mode="wait">
@@ -535,11 +533,10 @@ export default function LiveQuizPage() {
                   return (
                     <div
                       key={p.id || idx}
-                      className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${
-                        isCurrentStudent
-                          ? "bg-amber-500/20 border-amber-400 text-white shadow-[0_0_15px_rgba(245,158,11,0.25)]"
-                          : "bg-slate-900/80 border-slate-800 text-slate-300"
-                      }`}
+                      className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${isCurrentStudent
+                        ? "bg-amber-500/20 border-amber-400 text-white shadow-[0_0_15px_rgba(245,158,11,0.25)]"
+                        : "bg-slate-900/80 border-slate-800 text-slate-300"
+                        }`}
                     >
                       <div className="flex items-center gap-3">
                         <span className="font-mono font-black text-sm w-6 text-center">{medal}</span>
@@ -612,7 +609,7 @@ export default function LiveQuizPage() {
             <span className="text-slate-400">{Math.round(progress)}% সম্পন্ন</span>
           </div>
           <div className="h-2.5 w-full bg-slate-900 rounded-full border border-slate-800 overflow-hidden">
-            <motion.div 
+            <motion.div
               className="h-full bg-linear-to-r from-cyan-500 via-indigo-500 to-fuchsia-500"
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
@@ -648,16 +645,15 @@ export default function LiveQuizPage() {
             </div>
           </div>
         ) : (
-          <motion.div 
-            className={`shrink-0 w-16 h-16 rounded-2xl border-2 flex flex-col items-center justify-center font-mono font-black transition-colors ${
-              allVoted
-                ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.4)]"
-                : timeLeft <= 5 
-                ? "bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_25px_rgba(244,63,94,0.5)]" 
+          <motion.div
+            className={`shrink-0 w-16 h-16 rounded-2xl border-2 flex flex-col items-center justify-center font-mono font-black transition-colors ${allVoted
+              ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-[0_0_25px_rgba(16,185,129,0.4)]"
+              : timeLeft <= 5
+                ? "bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_25px_rgba(244,63,94,0.5)]"
                 : timeLeft <= 10
-                ? "bg-amber-500/15 border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
-                : "bg-slate-900 border-slate-800 text-cyan-400"
-            }`}
+                  ? "bg-amber-500/15 border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
+                  : "bg-slate-900 border-slate-800 text-cyan-400"
+              }`}
             animate={timeLeft <= 5 && !allVoted ? { scale: [1, 1.08, 1] } : {}}
             transition={{ repeat: Infinity, duration: 0.8 }}
           >
@@ -731,16 +727,16 @@ export default function LiveQuizPage() {
           </motion.div>
 
           {currentQuestion.imageUrl && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 aspect-video flex items-center justify-center relative group"
             >
-              <img 
-                src={currentQuestion.imageUrl} 
-                alt="Diagram" 
-                className="object-contain w-full h-full max-h-64" 
-                referrerPolicy="no-referrer" 
+              <img
+                src={currentQuestion.imageUrl}
+                alt="Diagram"
+                className="object-contain w-full h-full max-h-64"
+                referrerPolicy="no-referrer"
               />
             </motion.div>
           )}
@@ -826,7 +822,7 @@ export default function LiveQuizPage() {
                 </div>
               ) : (
                 <div className="p-6 rounded-3xl bg-gradient-to-br from-indigo-950/60 via-purple-950/50 to-fuchsia-950/60 border-2 border-fuchsia-500/50 text-center space-y-3 shadow-2xl backdrop-blur-xl">
-                  <motion.div 
+                  <motion.div
                     animate={{ y: [0, -6, 0] }}
                     transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                     className="w-14 h-14 rounded-2xl bg-fuchsia-500/25 border border-fuchsia-400/50 text-fuchsia-300 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(217,70,239,0.4)]"
@@ -834,7 +830,7 @@ export default function LiveQuizPage() {
                     <Cloud className="w-8 h-8" />
                   </motion.div>
                   <h4 className="text-base font-black text-white">ওয়ার্ড ক্লাউডে পাঠানো হয়েছে!</h4>
-                  <motion.div 
+                  <motion.div
                     initial={{ scale: 0.8 }}
                     animate={{ scale: 1 }}
                     className="inline-block px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-fuchsia-500/20 text-fuchsia-300 font-black text-xl border border-fuchsia-400/50 shadow-[0_0_25px_rgba(217,70,239,0.3)]"
@@ -953,11 +949,10 @@ export default function LiveQuizPage() {
                   whileTap={localSelected !== null && canSubmitAnswer ? { scale: 0.98 } : {}}
                   disabled={localSelected === null || isSubmitting || !canSubmitAnswer}
                   onClick={handleConfirm}
-                  className={`w-full h-14 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all shadow-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                    localSelected !== null && canSubmitAnswer
-                      ? "bg-linear-to-r from-emerald-400 via-teal-400 to-emerald-500 text-slate-950 shadow-emerald-500/30 hover:shadow-emerald-500/50" 
-                      : "bg-slate-800 text-slate-500 dark:text-slate-400"
-                  }`}
+                  className={`w-full h-14 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all shadow-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${localSelected !== null && canSubmitAnswer
+                    ? "bg-linear-to-r from-emerald-400 via-teal-400 to-emerald-500 text-slate-950 shadow-emerald-500/30 hover:shadow-emerald-500/50"
+                    : "bg-slate-800 text-slate-500 dark:text-slate-400"
+                    }`}
                 >
                   {isSubmitting ? (
                     <>
@@ -1025,19 +1020,18 @@ export default function LiveQuizPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className={`w-2.5 h-2.5 rounded-full ${
-            networkStatus === "connected" ? "bg-emerald-400 animate-pulse" : "bg-amber-400 animate-ping"
-          }`} />
+          <div className={`w-2.5 h-2.5 rounded-full ${networkStatus === "connected" ? "bg-emerald-400 animate-pulse" : "bg-amber-400 animate-ping"
+            }`} />
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             {networkStatus === "connected" ? "লাইভ সার্ভার সংযুক্ত" : "পুনঃসংযুক্ত হচ্ছে..."}
           </span>
         </div>
       </div>
-      
+
       {/* Motivation Overlay Toast */}
       <AnimatePresence>
         {activeMotivation && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
