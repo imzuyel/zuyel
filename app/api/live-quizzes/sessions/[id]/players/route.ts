@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getLiveSession } from "@/lib/liveSessionStore";
 import { institutionalDb } from "@/lib/database";
 
 export async function GET(
@@ -7,8 +8,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    
-    const session = institutionalDb.liveSessions.find(s => s.id === id);
+    const session = getLiveSession(id);
+
     if (!session) {
       return NextResponse.json(
         { success: false, message: "Live quiz session not found" },
@@ -16,13 +17,24 @@ export async function GET(
       );
     }
 
-    const participants = institutionalDb.liveParticipants.filter(
-      p => p.sessionId === id && p.status === "JOINED"
-    );
+    const playersList = Object.values(session.players || {}).map((p) => ({
+      id: p.id,
+      displayName: p.name,
+      name: p.name,
+      roll: p.roll,
+      avatar: p.avatar,
+      score: p.score,
+      totalScore: p.score,
+      isReady: p.isReady,
+      rank: p.rank,
+      status: "JOINED",
+    }));
 
     return NextResponse.json({
       success: true,
-      participants,
+      players: playersList,
+      participants: playersList,
+      totalCount: playersList.length,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -32,7 +44,6 @@ export async function GET(
   }
 }
 
-// POST for kicking/removing a player or a player leaving
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -40,34 +51,32 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { participantId, action } = body; // action: "kick" or "leave"
+    const { participantId, playerId: rawPlayerId, action } = body;
+    const targetId = participantId || rawPlayerId;
 
-    if (!participantId) {
+    if (!targetId) {
       return NextResponse.json(
         { success: false, message: "Participant ID is required" },
         { status: 400 }
       );
     }
 
-    const participantIndex = institutionalDb.liveParticipants.findIndex(
-      p => p.sessionId === id && p.id === participantId
-    );
-
-    if (participantIndex === -1) {
-      return NextResponse.json(
-        { success: false, message: "Participant not found in this session" },
-        { status: 404 }
-      );
+    const session = getLiveSession(id);
+    if (session && session.players[targetId]) {
+      delete session.players[targetId];
     }
 
-    const participant = institutionalDb.liveParticipants[participantIndex];
-    participant.status = "LEFT";
-    participant.updatedAt = new Date().toISOString();
+    const participant = institutionalDb.liveParticipants.find(
+      (p) => p.sessionId === id && p.id === targetId
+    );
+    if (participant) {
+      participant.status = "LEFT";
+      participant.updatedAt = new Date().toISOString();
+    }
 
     return NextResponse.json({
       success: true,
       message: action === "kick" ? "Player has been kicked by the host." : "Player has left the session.",
-      participant,
     });
   } catch (error: any) {
     return NextResponse.json(

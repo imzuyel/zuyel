@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
         .sort((a, b) => a.orderIndex - b.orderIndex);
       return {
         ...q,
+        presentationSlides: q.presentationSlides || [],
         questions,
       };
     });
@@ -156,14 +157,19 @@ export async function POST(req: NextRequest) {
           return {
             id: s.id || `slide-${sIdx + 1}`,
             type: sType,
+            slideType: sType,
             title: s.title ?? s.prompt ?? "",
             prompt: s.prompt ?? s.title ?? "",
             content: s.content || "",
             options: Array.isArray(s.options) ? s.options : [],
             correctAnswer: s.correctAnswer ?? 0,
             pairs: s.pairs || s.matchingPairs,
-            items: s.items || s.reorderSequence,
+            matchingPairs: s.matchingPairs || s.pairs,
+            items: s.items || s.reorderSequence || s.reorderItems,
+            reorderItems: s.reorderItems || s.items || s.reorderSequence,
             acceptedAnswers: s.acceptedAnswers || (s.blankAnswer ? [s.blankAnswer] : undefined),
+            blankAnswer: s.blankAnswer || (s.acceptedAnswers && s.acceptedAnswers[0]),
+            sentenceWithBlank: s.sentenceWithBlank,
             imageLeftUrl: s.imageLeftUrl || s.leftImage,
             imageRightUrl: s.imageRightUrl || s.rightImage,
             bulletPoints: s.bulletPoints,
@@ -173,6 +179,8 @@ export async function POST(req: NextRequest) {
             explanation: s.explanation || "",
             metadata: {
               ...(s.metadata || {}),
+              sentenceWithBlank: s.sentenceWithBlank,
+              blankAnswer: s.blankAnswer || (s.acceptedAnswers && s.acceptedAnswers[0]),
               imageLeftUrl: s.imageLeftUrl || s.leftImage,
               imageRightUrl: s.imageRightUrl || s.rightImage,
               bulletPoints: s.bulletPoints,

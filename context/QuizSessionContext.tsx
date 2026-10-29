@@ -105,6 +105,12 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
   const localTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef<number>(0);
   const currentPhaseRef = useRef<string>(currentPhase);
+  const serverTimestampsRef = useRef<{
+    countdownEndsAt?: number;
+    previewEndsAt?: number;
+    questionEndsAt?: number;
+    serverTimeOffset?: number;
+  }>({});
 
   useEffect(() => {
     currentPhaseRef.current = currentPhase;
@@ -135,26 +141,58 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     }
   }, [joined, sessionStatus, isQuizModeStarted, currentPhase, pathname, router, loading]);
 
-  // Smooth client-side local timer tick between server sync polls
+  const toTimestampMs = (val: any): number | undefined => {
+    if (!val) return undefined;
+    if (typeof val === "number" && Number.isFinite(val) && val > 0) return val;
+    if (typeof val === "string") {
+      const num = Number(val);
+      if (Number.isFinite(num) && num > 0) return num;
+      const parsed = new Date(val).getTime();
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return undefined;
+  };
+
+  const computeSafeRemaining = (targetTs?: any, serverOffsetMs = 0, fallback = 0): number => {
+    const target = toTimestampMs(targetTs);
+    if (!target || !Number.isFinite(target)) return fallback;
+    const diff = Math.ceil((target - (Date.now() + serverOffsetMs)) / 1000);
+    return Number.isFinite(diff) ? Math.max(0, diff) : fallback;
+  };
+
+  // Smooth client-side local timer tick between server sync polls with Server Timestamp sync
   useEffect(() => {
     if (!joined) return;
 
     localTickIntervalRef.current = setInterval(() => {
+      const offset = serverTimestampsRef.current.serverTimeOffset || 0;
+
       // Countdown phase decrement (3 -> 2 -> 1 -> 0)
-      setCountdownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      if (serverTimestampsRef.current.countdownEndsAt) {
+        const rem = computeSafeRemaining(serverTimestampsRef.current.countdownEndsAt, offset, 0);
+        setCountdownSeconds(Number.isFinite(rem) ? rem : 0);
+      } else {
+        setCountdownSeconds((prev) => (Number.isFinite(prev) && prev > 0 ? prev - 1 : 0));
+      }
 
       // Preview phase decrement
-      setPreviewSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      if (serverTimestampsRef.current.previewEndsAt) {
+        const rem = computeSafeRemaining(serverTimestampsRef.current.previewEndsAt, offset, 0);
+        setPreviewSeconds(Number.isFinite(rem) ? rem : 0);
+      } else {
+        setPreviewSeconds((prev) => (Number.isFinite(prev) && prev > 0 ? prev - 1 : 0));
+      }
 
       // Main question timer decrement - ONLY when in QUESTION_ACTIVE phase!
-      // Countdown and Question Preview NEVER count down the main question timer.
-      setTimeLeft((prev) => {
-        if (currentPhaseRef.current === "QUESTION_ACTIVE") {
-          return prev > 0 ? prev - 1 : 0;
+      if (currentPhaseRef.current === "QUESTION_ACTIVE") {
+        if (serverTimestampsRef.current.questionEndsAt) {
+          const rem = computeSafeRemaining(serverTimestampsRef.current.questionEndsAt, offset, 0);
+          setTimeLeft(Number.isFinite(rem) ? rem : 0);
+        } else {
+          setTimeLeft((prev) => (Number.isFinite(prev) && prev > 0 ? prev - 1 : 0));
         }
-        return prev;
-      });
-    }, 1000);
+      }
+    }, 250);
 
     return () => {
       if (localTickIntervalRef.current) clearInterval(localTickIntervalRef.current);
@@ -291,6 +329,41 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
           setNetworkStatus("connected");
           reconnectAttemptsRef.current = 0;
 
+          // Sync server-authoritative timestamps to eliminate clock drift across 60 phones
+          if (data.serverTimestamp || data.serverNow) {
+            const sNow = Number(data.serverTimestamp || data.serverNow);
+            if (Number.isFinite(sNow)) {
+              serverTimestampsRef.current.serverTimeOffset = sNow - Date.now();
+            }
+          }
+
+          if (data.stageEndsAt) {
+            const targetTs = toTimestampMs(data.stageEndsAt);
+            if (data.stage === "COUNTDOWN_321" || data.phase === "COUNTDOWN") {
+              serverTimestampsRef.current.countdownEndsAt = targetTs;
+            } else if (data.stage === "QUESTION_ONLY" || data.phase === "QUESTION_PREVIEW") {
+              serverTimestampsRef.current.previewEndsAt = targetTs;
+            } else if (data.stage === "ANSWERING_ACTIVE" || data.phase === "QUESTION_ACTIVE") {
+              serverTimestampsRef.current.questionEndsAt = targetTs;
+            }
+          }
+          if (data.countdownEndsAt) serverTimestampsRef.current.countdownEndsAt = toTimestampMs(data.countdownEndsAt);
+          if (data.previewEndsAt) serverTimestampsRef.current.previewEndsAt = toTimestampMs(data.previewEndsAt);
+          if (data.questionEndsAt) serverTimestampsRef.current.questionEndsAt = toTimestampMs(data.questionEndsAt);
+
+          if (data.countdownSeconds !== undefined) {
+            const c = Number(data.countdownSeconds);
+            setCountdownSeconds(Number.isFinite(c) ? Math.max(0, c) : 0);
+          }
+          if (data.previewSeconds !== undefined) {
+            const p = Number(data.previewSeconds);
+            setPreviewSeconds(Number.isFinite(p) ? Math.max(0, p) : 0);
+          }
+          if (data.mainTimerSeconds !== undefined || data.timeLeft !== undefined) {
+            const t = Number(data.mainTimerSeconds ?? data.timeLeft);
+            setTimeLeft(Number.isFinite(t) ? Math.max(0, t) : 0);
+          }
+
           if (data.status) setSessionStatus(data.status);
           if (data.plate) setCurrentPlate(data.plate);
           if (data.isQuizModeStarted !== undefined) setIsQuizModeStarted(data.isQuizModeStarted);
@@ -308,9 +381,18 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
             const sess = data.state.session || {};
             if (sess.status) setSessionStatus(sess.status);
             if (sess.phase) setCurrentPhase(sess.phase);
-            if (sess.countdownSeconds !== undefined) setCountdownSeconds(sess.countdownSeconds);
-            if (sess.previewSeconds !== undefined) setPreviewSeconds(sess.previewSeconds);
-            if (sess.mainTimerSeconds !== undefined) setTimeLeft(sess.mainTimerSeconds);
+            if (sess.countdownSeconds !== undefined) {
+              const c = Number(sess.countdownSeconds);
+              setCountdownSeconds(Number.isFinite(c) ? Math.max(0, c) : 0);
+            }
+            if (sess.previewSeconds !== undefined) {
+              const p = Number(sess.previewSeconds);
+              setPreviewSeconds(Number.isFinite(p) ? Math.max(0, p) : 0);
+            }
+            if (sess.mainTimerSeconds !== undefined) {
+              const t = Number(sess.mainTimerSeconds);
+              setTimeLeft(Number.isFinite(t) ? Math.max(0, t) : 0);
+            }
             if (sess.canSubmitAnswer !== undefined) setCanSubmitAnswer(sess.canSubmitAnswer);
             if (sess.totalQuestions) setTotalQuestions(sess.totalQuestions);
             if (data.state.answered !== undefined) setPlayerAnswered(data.state.answered);
@@ -318,9 +400,18 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
             if (data.state.currentQuestion) setCurrentQuestion(data.state.currentQuestion);
           } else if (data.sequenceState) {
             if (data.sequenceState.phase) setCurrentPhase(data.sequenceState.phase);
-            if (data.sequenceState.countdownSecondsRemaining !== undefined) setCountdownSeconds(data.sequenceState.countdownSecondsRemaining);
-            if (data.sequenceState.previewSecondsRemaining !== undefined) setPreviewSeconds(data.sequenceState.previewSecondsRemaining);
-            if (data.sequenceState.mainTimerSecondsRemaining !== undefined) setTimeLeft(data.sequenceState.mainTimerSecondsRemaining);
+            if (data.sequenceState.countdownSecondsRemaining !== undefined) {
+              const c = Number(data.sequenceState.countdownSecondsRemaining);
+              setCountdownSeconds(Number.isFinite(c) ? Math.max(0, c) : 0);
+            }
+            if (data.sequenceState.previewSecondsRemaining !== undefined) {
+              const p = Number(data.sequenceState.previewSecondsRemaining);
+              setPreviewSeconds(Number.isFinite(p) ? Math.max(0, p) : 0);
+            }
+            if (data.sequenceState.mainTimerSecondsRemaining !== undefined) {
+              const t = Number(data.sequenceState.mainTimerSecondsRemaining);
+              setTimeLeft(Number.isFinite(t) ? Math.max(0, t) : 0);
+            }
             if (data.sequenceState.canSubmitAnswer !== undefined) setCanSubmitAnswer(data.sequenceState.canSubmitAnswer);
           }
 
@@ -520,6 +611,7 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
             playerId: participantId,
             participantId,
             questionId: currentQuestion.id,
+            slideIndex: currentQuestionIdx,
             answerPayload: answer,
             answer: answer,
             timeTakenSeconds: timeTaken
@@ -530,6 +622,9 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
         if (data && data.success) {
           submittedSuccessfully = true;
           setPlayerAnswered(true);
+          if (typeof window !== "undefined" && typeof navigator !== "undefined" && navigator.vibrate) {
+            try { navigator.vibrate([30, 20, 30]); } catch {}
+          }
           if (data.isCorrect !== undefined || data.correctAnswer !== undefined) {
             setLastAnswerFeedback({
               isCorrect: data.isCorrect,
@@ -607,6 +702,9 @@ export function QuizSessionProvider({ children }: { children: React.ReactNode })
     if (!activeSession || !participantId) return;
     try {
       setIsReady(true);
+      if (typeof window !== "undefined" && typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate(40); } catch {}
+      }
       await fetch(`/api/live-quizzes/sessions/${activeSession.id}/ready`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

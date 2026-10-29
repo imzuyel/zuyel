@@ -49,6 +49,7 @@ import {
   BookOpen,
   GraduationCap,
   Zap,
+  Globe,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
@@ -244,6 +245,50 @@ export interface DeckItem {
   updatedAt: string;
 }
 
+/**
+ * Automatically compress and resize client-side uploaded images
+ * Keeps base64 strings under ~60KB for instant loading on 60 concurrent mobile devices.
+ */
+export async function compressImageFile(file: File, maxWidth = 800, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        try {
+          const webpData = canvas.toDataURL("image/webp", quality);
+          if (webpData.startsWith("data:image/webp")) {
+            resolve(webpData);
+            return;
+          }
+        } catch {}
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 // Starter Deck for Instant Verification
 const DEFAULT_STARTER_DECKS: DeckItem[] = [
   {
@@ -384,6 +429,7 @@ export default function UnifiedQuizMentimeterWorkspace({
   // DECK GALLERY STATE (View 1)
   const [decks, setDecks] = useState<DeckItem[]>(DEFAULT_STARTER_DECKS);
   const [isLoadingDecks, setIsLoadingDecks] = useState(false);
+  const [showAllSavedQuizzes, setShowAllSavedQuizzes] = useState(true);
   const [gallerySearch, setGallerySearch] = useState("");
   const [filterTrade, setFilterTrade] = useState<string>("all");
   const [filterClass, setFilterClass] = useState<string>("all");
@@ -416,7 +462,8 @@ export default function UnifiedQuizMentimeterWorkspace({
     showLeaderboard: true,
     leaderboardMode: "manual" as "manual" | "after_every" | "after_3" | "after_5",
     scheduledStartTime: "",
-    autoSmsMilestone: "every_5" as "off" | "every_3" | "every_5" | "every_10" | "end_quiz",
+    autoSmsMilestone: "every_3" as "off" | "every_3" | "every_5" | "every_10" | "end_quiz",
+    smsOnQuizEnd: true,
     smsRecipient: "both" as "student" | "guardian" | "both",
     smsFunnyMode: true,
     smsPraiseMode: true,
@@ -466,10 +513,29 @@ export default function UnifiedQuizMentimeterWorkspace({
   };
 
   // ---------------------------------------------------------------------------
-  // FETCH DECKS FROM /api/quizzes ON MOUNT
+  // FETCH DECKS WITH DUAL-PERSISTENCE (LOCALSTORAGE + /api/quizzes PRISMA BACKUP)
   // ---------------------------------------------------------------------------
+  const STORAGE_KEY_QUIZZES = "pgtsc_saved_quizzes_v2";
+  const STORAGE_KEY_DRAFT = "pgtsc_active_deck_draft";
+
   const fetchDecks = async () => {
     setIsLoadingDecks(true);
+    let localDecks: DeckItem[] = [];
+    try {
+      if (typeof window !== "undefined") {
+        const stored = localStorage.getItem(STORAGE_KEY_QUIZZES);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            localDecks = parsed;
+            setDecks(parsed);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to load local quiz backups:", e);
+    }
+
     try {
       const res = await fetch("/api/quizzes");
       if (res.ok) {
@@ -575,16 +641,51 @@ export default function UnifiedQuizMentimeterWorkspace({
             };
           });
 
-          // Merge with starter decks ensuring no empty gallery
-          setDecks(mapped);
+          // Dual-Persistence Merge: Merge server quizzes with local backup
+          const deckMap = new Map<string, DeckItem>();
+          DEFAULT_STARTER_DECKS.forEach((d) => deckMap.set(d.id, d));
+          localDecks.forEach((d) => deckMap.set(d.id, d));
+          mapped.forEach((d) => {
+            const existing = deckMap.get(d.id);
+            if (!existing || new Date(d.updatedAt || 0).getTime() >= new Date(existing.updatedAt || 0).getTime()) {
+              deckMap.set(d.id, d);
+            }
+          });
+          const merged = Array.from(deckMap.values());
+          setDecks(merged);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(merged));
+          }
         }
       }
     } catch (err) {
-      console.warn("Using fallback starter decks:", err);
+      console.warn("Using fallback starter decks and local storage:", err);
+      if (localDecks.length === 0) {
+        setDecks(DEFAULT_STARTER_DECKS);
+      }
     } finally {
       setIsLoadingDecks(false);
     }
   };
+
+  // Auto-Save Draft to localStorage whenever currentDeck slides change
+  useEffect(() => {
+    if (activeView !== "studio" || !currentDeck?.id) return;
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STORAGE_KEY_DRAFT, JSON.stringify(currentDeck));
+        const stored = localStorage.getItem(STORAGE_KEY_QUIZZES);
+        const list: DeckItem[] = stored ? JSON.parse(stored) : [];
+        const updated = list.map((d) => (d.id === currentDeck.id ? currentDeck : d));
+        if (!updated.some((d) => d.id === currentDeck.id)) {
+          updated.unshift(currentDeck);
+        }
+        localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(updated));
+      }
+    } catch (e) {
+      // safe fallback
+    }
+  }, [currentDeck, activeView]);
 
   useEffect(() => {
     fetchDecks();
@@ -1006,6 +1107,21 @@ export default function UnifiedQuizMentimeterWorkspace({
         body: JSON.stringify(payload),
       });
 
+      // Dual-Persistence Mirror: Save complete presentation to localStorage immediately
+      try {
+        if (typeof window !== "undefined") {
+          const stored = localStorage.getItem(STORAGE_KEY_QUIZZES);
+          const existing: DeckItem[] = stored ? JSON.parse(stored) : [];
+          const updated = existing.some((d) => d.id === deckToSave.id)
+            ? existing.map((d) => (d.id === deckToSave.id ? { ...deckToSave, updatedAt: new Date().toISOString() } : d))
+            : [{ ...deckToSave, updatedAt: new Date().toISOString() }, ...existing];
+          localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(updated));
+          localStorage.setItem(STORAGE_KEY_DRAFT, JSON.stringify(deckToSave));
+        }
+      } catch (e) {
+        console.warn("Local storage mirror save failed:", e);
+      }
+
       const data = await res.json();
       if (data.success) {
         if (notify) showToast("✨ প্রেজেন্টেশন ও কুইজ সফলভাবে ডাটাবেজে সেভ হয়েছে!", "success");
@@ -1017,6 +1133,10 @@ export default function UnifiedQuizMentimeterWorkspace({
       }
     } catch (err) {
       if (notify) showToast("সেভ সম্পন্ন হয়েছে (লোকাল মোড)", "info");
+      // Fallback save in local state
+      setDecks((prev) =>
+        prev.map((d) => (d.id === deckToSave.id ? { ...deckToSave, updatedAt: new Date().toISOString() } : d))
+      );
     } finally {
       setIsSavingDeck(false);
     }
@@ -1279,36 +1399,39 @@ export default function UnifiedQuizMentimeterWorkspace({
   // Filtered decks for Gallery (View 1) with Class, Trade, and Subject cascade matching
   const filteredDecks = useMemo(() => {
     return decks.filter((d) => {
-      // 1. Class filter
-      if (filterClass !== "all") {
-        const dNum = parseClassNumeric(d.classId);
-        const fNum = parseClassNumeric(filterClass);
-        if (dNum > 0 && fNum > 0) {
-          if (dNum !== fNum) return false;
-        } else if (String(d.classId) !== String(filterClass)) {
-          return false;
+      // If "Show All Saved Quizzes" is active, bypass strict academic filters!
+      if (!showAllSavedQuizzes) {
+        // 1. Class filter
+        if (filterClass !== "all") {
+          const dNum = parseClassNumeric(d.classId);
+          const fNum = parseClassNumeric(filterClass);
+          if (dNum > 0 && fNum > 0) {
+            if (dNum !== fNum) return false;
+          } else if (String(d.classId) !== String(filterClass)) {
+            return false;
+          }
         }
-      }
 
-      // 2. Trade filter
-      if (filterTrade !== "all") {
-        const trdObj = ALL_TRADES.find((t) => String(t.id) === filterTrade || t.code === filterTrade);
-        const tradeFilterName = trdObj ? trdObj.name.toLowerCase() : filterTrade.toLowerCase();
-        const deckTradeName = (d.trade || "").toLowerCase();
-        const tradeMatch =
-          String(d.tradeId) === String(filterTrade) ||
-          deckTradeName === tradeFilterName ||
-          (trdObj && deckTradeName === trdObj.nameBangla.toLowerCase());
-        if (!tradeMatch) return false;
-      }
+        // 2. Trade filter
+        if (filterTrade !== "all") {
+          const trdObj = ALL_TRADES.find((t) => String(t.id) === filterTrade || t.code === filterTrade);
+          const tradeFilterName = trdObj ? trdObj.name.toLowerCase() : filterTrade.toLowerCase();
+          const deckTradeName = (d.trade || "").toLowerCase();
+          const tradeMatch =
+            String(d.tradeId) === String(filterTrade) ||
+            deckTradeName === tradeFilterName ||
+            (trdObj && deckTradeName === trdObj.nameBangla.toLowerCase());
+          if (!tradeMatch) return false;
+        }
 
-      // 3. Subject filter
-      if (filterSubject !== "all") {
-        const subjectMatch =
-          String(d.subjectId) === String(filterSubject) ||
-          d.subjectCode === filterSubject ||
-          (d.subjectName && d.subjectName.toLowerCase() === filterSubject.toLowerCase());
-        if (!subjectMatch) return false;
+        // 3. Subject filter
+        if (filterSubject !== "all") {
+          const subjectMatch =
+            String(d.subjectId) === String(filterSubject) ||
+            d.subjectCode === filterSubject ||
+            (d.subjectName && d.subjectName.toLowerCase() === filterSubject.toLowerCase());
+          if (!subjectMatch) return false;
+        }
       }
 
       // 4. Search query
@@ -1325,7 +1448,7 @@ export default function UnifiedQuizMentimeterWorkspace({
       }
       return true;
     });
-  }, [decks, filterTrade, filterClass, filterSubject, gallerySearch]);
+  }, [decks, showAllSavedQuizzes, filterTrade, filterClass, filterSubject, gallerySearch]);
 
   return (
     <div className="w-full h-full font-sans select-none text-slate-800 dark:text-slate-100">
@@ -1414,6 +1537,21 @@ export default function UnifiedQuizMentimeterWorkspace({
 
             {/* 3-Step Academic Cascading Filter Bar (Task 1) */}
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              {/* Show All Saved Quizzes Pill Toggle (Fix 1) */}
+              <button
+                type="button"
+                onClick={() => setShowAllSavedQuizzes(!showAllSavedQuizzes)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                  showAllSavedQuizzes
+                    ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-indigo-500/30 ring-2 ring-indigo-400"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-white"
+                }`}
+                title={showAllSavedQuizzes ? "সকল সংরক্ষিত কুইজ দেখানো হচ্ছে" : "শ্রেণি অনুসারে ফিল্টার সক্রিয়"}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>🌐 সবগুলো দেখুন ({decks.length})</span>
+              </button>
+
               {/* Step 1: Class Selector */}
               <div className="flex items-center gap-1">
                 <span className="text-[11px] font-bold text-slate-400">শ্রেণি:</span>
@@ -1738,11 +1876,11 @@ export default function UnifiedQuizMentimeterWorkspace({
           </header>
 
           {/* 2-COLUMN MAIN BODY (Slim Filmstrip + Giant Center Stage) */}
-          <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
             {/* -----------------------------------------------------------------
-                LEFT SLIM FILMSTRIP (w-48 lg:w-52 shrink-0 border-r p-3)
+                LEFT SLIM FILMSTRIP (Hidden on mobile <768px, replaced by bottom bar)
                 ----------------------------------------------------------------- */}
-            <aside className="w-48 lg:w-52 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex flex-col gap-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+            <aside className="hidden md:flex w-48 lg:w-52 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex-col gap-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
               {/* Top Filmstrip Action Buttons */}
               <div className="grid grid-cols-2 gap-1.5 relative">
                 <div className="relative">
@@ -2980,14 +3118,87 @@ export default function UnifiedQuizMentimeterWorkspace({
 
                   {/* TYPE: Image Compare */}
                   {currentSlide.type === "IMAGE_COMPARE" && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-6 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px]">
-                        <ImageIcon className="w-8 h-8 text-slate-400" />
-                        <span className="text-xs font-bold text-slate-500">বাম পাশের ইমেজ বা চিত্র</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Left Image Box */}
+                      <div className="p-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px] relative overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                        {currentSlide.imageLeftUrl ? (
+                          <div className="relative w-full h-full flex flex-col items-center">
+                            <img
+                              src={currentSlide.imageLeftUrl}
+                              alt="Left comparison"
+                              className="max-h-36 rounded-xl object-contain shadow-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateCurrentSlide({ imageLeftUrl: undefined })}
+                              className="mt-2 text-rose-500 hover:text-rose-600 text-xs font-bold underline cursor-pointer"
+                            >
+                              🗑️ ছবি মুছুন
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <ImageIcon className="w-8 h-8 text-slate-400" />
+                            <span className="text-xs font-bold text-slate-500">বাম পাশের চিত্র (ডায়াগ্রাম ১)</span>
+                            <label className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
+                              📷 ছবি আপলোড করুন
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const compressed = await compressImageFile(file);
+                                    updateCurrentSlide({ imageLeftUrl: compressed });
+                                    showToast("ছবি অটো-কম্প্রেস করে যুক্ত হয়েছে!", "success");
+                                  }
+                                }}
+                              />
+                            </label>
+                          </>
+                        )}
                       </div>
-                      <div className="p-6 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px]">
-                        <ImageIcon className="w-8 h-8 text-slate-400" />
-                        <span className="text-xs font-bold text-slate-500">ডান পাশের ইমেজ বা চিত্র</span>
+
+                      {/* Right Image Box */}
+                      <div className="p-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px] relative overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                        {currentSlide.imageRightUrl ? (
+                          <div className="relative w-full h-full flex flex-col items-center">
+                            <img
+                              src={currentSlide.imageRightUrl}
+                              alt="Right comparison"
+                              className="max-h-36 rounded-xl object-contain shadow-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateCurrentSlide({ imageRightUrl: undefined })}
+                              className="mt-2 text-rose-500 hover:text-rose-600 text-xs font-bold underline cursor-pointer"
+                            >
+                              🗑️ ছবি মুছুন
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <ImageIcon className="w-8 h-8 text-slate-400" />
+                            <span className="text-xs font-bold text-slate-500">ডান পাশের চিত্র (ডায়াগ্রাম ২)</span>
+                            <label className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
+                              📷 ছবি আপলোড করুন
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const compressed = await compressImageFile(file);
+                                    updateCurrentSlide({ imageRightUrl: compressed });
+                                    showToast("ছবি অটো-কম্প্রেস করে যুক্ত হয়েছে!", "success");
+                                  }
+                                }}
+                              />
+                            </label>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -3042,6 +3253,44 @@ export default function UnifiedQuizMentimeterWorkspace({
                 </div>
               </div>
             </main>
+
+            {/* Mobile Horizontal Bottom Slide Bar (< 768px) */}
+            <div className="flex md:hidden w-full bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-2 items-center gap-2 overflow-x-auto shrink-0 z-30 shadow-md">
+              <button
+                type="button"
+                onClick={() => setShowNewSlidePopover(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ স্লাইড</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAiModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-[11px] font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer"
+              >
+                <Wand2 className="w-3.5 h-3.5" />
+                <span>AI</span>
+              </button>
+              {currentDeck.slides.map((s, idx) => {
+                const isSelected = s.id === currentSlideId;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setCurrentSlideId(s.id)}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition flex items-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? "bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    <span className="font-mono font-black">{idx + 1}.</span>
+                    <span className="max-w-[80px] truncate">{s.title || "স্লাইড"}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* ===================================================================

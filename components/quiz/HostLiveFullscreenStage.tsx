@@ -33,6 +33,10 @@ import {
   HelpCircle,
   FileSpreadsheet,
   PieChart,
+  Mail,
+  Volume2,
+  VolumeX,
+  Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PresentationSlide, isGradedQuiz } from "./UnifiedQuizMentimeterWorkspace";
@@ -40,6 +44,26 @@ import UniversalQuizShowcaseEngine from "./engine/UniversalQuizShowcaseEngine";
 import FloatingReactionOverlay from "./FloatingReactionOverlay";
 import { COLORFUL_STUDENT_AVATARS, RenderColorfulAvatar, getAvatarById } from "./avatarData";
 import { triggerFireworks } from "@/lib/confetti";
+import {
+  playJoinPop,
+  playCountdownBeep,
+  playTimerTick,
+  playRevealChord,
+  playPodiumFanfare,
+  isSoundMuted,
+  toggleSound,
+} from "@/lib/quizSoundEffects";
+
+const WORD_CLOUD_GRADIENTS = [
+  "from-rose-500 to-pink-600 shadow-rose-500/40 text-white",
+  "from-indigo-500 to-violet-600 shadow-indigo-500/40 text-white",
+  "from-emerald-500 to-teal-600 shadow-emerald-500/40 text-white",
+  "from-amber-500 to-orange-600 shadow-amber-500/40 text-white",
+  "from-fuchsia-500 to-purple-600 shadow-fuchsia-500/40 text-white",
+  "from-cyan-500 to-blue-600 shadow-cyan-500/40 text-white",
+  "from-violet-500 to-purple-600 shadow-violet-500/40 text-white",
+  "from-teal-500 to-emerald-600 shadow-teal-500/40 text-white",
+];
 
 interface HostLiveFullscreenStageProps {
   className?: string;
@@ -86,12 +110,15 @@ export default function HostLiveFullscreenStage({
 
   // Auto-SMS Dispatched floating toast (Task 2)
   const [smsToast, setSmsToast] = useState<{ studentName: string; type: string } | null>(null);
+  const [smsLogs, setSmsLogs] = useState<Array<{ id: string; studentName: string; type: string; message: string; timestamp: string }>>([]);
+  const [showSmsDropdown, setShowSmsDropdown] = useState(false);
 
   // Post-Session Smart Report & Podium Modal (Task 4)
   const [isFinalPodiumOpen, setIsFinalPodiumOpen] = useState(false);
   const [reportTab, setReportTab] = useState<"podium" | "most_missed" | "warmup">("podium");
   const [reviewQuestion, setReviewQuestion] = useState<any | null>(null);
   const [isSendingFinalSms, setIsSendingFinalSms] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(isSoundMuted());
 
   // Live polling state
   const [players, setPlayers] = useState<any[]>([]);
@@ -153,6 +180,7 @@ export default function HostLiveFullscreenStage({
             if (prevPlayerIdsRef.current.length > 0) {
               const newArrivals = pData.players.filter((p: any) => !prevPlayerIdsRef.current.includes(p.id));
               if (newArrivals.length > 0) {
+                playJoinPop();
                 newArrivals.forEach((np: any) => {
                   const popId = `join-${np.id}-${Date.now()}`;
                   setJoinPopups((prev) => [
@@ -183,12 +211,42 @@ export default function HostLiveFullscreenStage({
         if (stateRes.ok) {
           const sData = await stateRes.json();
           if (isMounted) {
-            if (sData.phase) setServerPhase(sData.phase);
+            if (Array.isArray(sData.players)) {
+              setPlayers(sData.players);
+            }
+
+            // High-precision stage synchronization
+            if (sData.stage) {
+              if (sData.stage === "COUNTDOWN_321") {
+                setServerPhase("COUNTDOWN");
+              } else if (sData.stage === "ANSWERING_ACTIVE") {
+                setServerPhase("QUESTION_ACTIVE");
+              } else if (sData.stage === "READY_CHECK" || sData.stage === "WELCOME_WAITING") {
+                setServerPhase("READY");
+              } else if (sData.stage === "QUESTION_ONLY") {
+                setServerPhase("QUESTION_PREVIEW");
+              } else if (sData.stage === "RESULT_REVEAL" || sData.stage === "LEADERBOARD_VIEW") {
+                setServerPhase("QUESTION_ENDED");
+                setIsAnswerRevealed(true);
+              } else if (sData.stage === "ENDED") {
+                setServerPhase("COMPLETED");
+              }
+            } else if (sData.phase) {
+              setServerPhase(sData.phase);
+            }
+
             if (sData.readyPlayers) setReadyPlayers(sData.readyPlayers);
             if (sData.readyCount !== undefined) setReadyCount(sData.readyCount);
-            if (sData.countdownSeconds !== undefined) setCountdownSeconds(sData.countdownSeconds);
-            if (sData.previewSeconds !== undefined) setPreviewSeconds(sData.previewSeconds);
-            if (sData.mainTimerSeconds !== undefined) setTimerSecondsLeft(sData.mainTimerSeconds);
+
+            const safeCd = Number(sData.countdownSeconds);
+            setCountdownSeconds(Number.isFinite(safeCd) ? Math.max(0, safeCd) : 0);
+
+            const safePrev = Number(sData.previewSeconds);
+            setPreviewSeconds(Number.isFinite(safePrev) ? Math.max(0, safePrev) : 0);
+
+            const safeTimer = Number(sData.mainTimerSeconds ?? sData.timeLeft);
+            setTimerSecondsLeft(Number.isFinite(safeTimer) ? Math.max(0, safeTimer) : 0);
+
             if (sData.optionStats) setLiveOptionStats(sData.optionStats);
             if (sData.correctCount !== undefined) setServerCorrectCount(sData.correctCount);
             if (sData.wrongCount !== undefined) setServerWrongCount(sData.wrongCount);
@@ -204,6 +262,21 @@ export default function HostLiveFullscreenStage({
             }
             if (sData.lastSmsDispatched && sData.lastSmsDispatched.sent) {
               setSmsToast(sData.lastSmsDispatched);
+              setSmsLogs((prev) => {
+                if (prev.some((l) => l.studentName === sData.lastSmsDispatched.studentName && l.type === sData.lastSmsDispatched.type)) {
+                  return prev;
+                }
+                return [
+                  {
+                    id: `sms-${Date.now()}`,
+                    studentName: sData.lastSmsDispatched.studentName || "শিক্ষার্থী",
+                    type: sData.lastSmsDispatched.type || "PRAISE",
+                    message: sData.lastSmsDispatched.message || "স্বয়ংক্রিয় SMS সফলভাবে পাঠানো হয়েছে।",
+                    timestamp: new Date().toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" }),
+                  },
+                  ...prev,
+                ];
+              });
               setTimeout(() => setSmsToast(null), 5000);
             }
           }
@@ -211,7 +284,7 @@ export default function HostLiveFullscreenStage({
       } catch {
         // safe polling catch
       }
-    }, 1200);
+    }, 1000);
 
     return () => {
       isMounted = false;
@@ -239,9 +312,12 @@ export default function HostLiveFullscreenStage({
   // Responses for the current slide
   const currentSlideResponses = useMemo(() => {
     return answers.filter(
-      (a) => a.questionId === currentSlide.id || a.slideId === currentSlide.id
+      (a) =>
+        String(a.questionId) === String(currentSlide?.id) ||
+        String(a.slideId) === String(currentSlide?.id) ||
+        (a.slideIndex !== undefined && Number(a.slideIndex) === Number(currentSlideIndex))
     );
-  }, [answers, currentSlide.id]);
+  }, [answers, currentSlide, currentSlideIndex]);
 
   // All Voted Detection in Fullscreen Stage
   const isAllVoted = useMemo(() => {
@@ -255,10 +331,30 @@ export default function HostLiveFullscreenStage({
     }
   }, [isAllVoted, isAnswerRevealed]);
 
+  // Classroom Web Audio sound effect triggers
+  useEffect(() => {
+    if (countdownSeconds > 0) {
+      playCountdownBeep(countdownSeconds);
+    }
+  }, [countdownSeconds]);
+
+  useEffect(() => {
+    if (serverPhase === "QUESTION_ACTIVE" && timerSecondsLeft > 0 && timerSecondsLeft <= 5) {
+      playTimerTick(timerSecondsLeft <= 3);
+    }
+  }, [timerSecondsLeft, serverPhase]);
+
+  useEffect(() => {
+    if (isAnswerRevealed) {
+      playRevealChord();
+    }
+  }, [isAnswerRevealed]);
+
   // Grand Finale Completion Handler (Task 3)
   const handleEndAndShowPodium = async () => {
     setIsFinalPodiumOpen(true);
     triggerFireworks();
+    playPodiumFanfare();
     try {
       await fetch(`/api/live-quizzes/sessions/${sessionId}/end-quiz`, {
         method: "POST",
@@ -270,17 +366,58 @@ export default function HostLiveFullscreenStage({
     }
   };
 
-  // FIX 4 & 5: Teacher Trigger for Question Start from READY_CHECK stage
-  const handleStartQuestion = async () => {
-    setIsStartingQuestion(true);
+  // Local failsafe timer during COUNTDOWN so Host NEVER gets stuck on "প্রস্তুতি হচ্ছে..."!
+  useEffect(() => {
+    if (serverPhase !== "COUNTDOWN" && countdownSeconds <= 0) return;
+
+    const startTs = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTs;
+      if (elapsed >= 3100) {
+        clearInterval(interval);
+        // Fallback transition directly to QUESTION_ACTIVE
+        setServerPhase("QUESTION_ACTIVE");
+        setCountdownSeconds(0);
+        fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "SKIP_COUNTDOWN", slideIndex: currentSlideIndex }),
+        }).catch(() => {});
+      } else {
+        const rem = Math.max(0, Math.ceil((3000 - elapsed) / 1000));
+        setCountdownSeconds(Number.isFinite(rem) ? rem : 0);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [serverPhase, countdownSeconds, sessionId, currentSlideIndex]);
+
+  // Direct 1-Click Host override to skip countdown
+  const handleSkipCountdown = async () => {
+    setServerPhase("QUESTION_ACTIVE");
+    setCountdownSeconds(0);
     try {
       await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start_question" }),
+        body: JSON.stringify({ action: "SKIP_COUNTDOWN", slideIndex: currentSlideIndex }),
       });
-      setServerPhase("COUNTDOWN");
-      setCountdownSeconds(3);
+    } catch (e) {
+      console.error("Failed to skip countdown:", e);
+    }
+  };
+
+  // FIX 4 & 5: Teacher Trigger for Question Start from READY_CHECK stage
+  const handleStartQuestion = async () => {
+    setIsStartingQuestion(true);
+    setServerPhase("COUNTDOWN");
+    setCountdownSeconds(3);
+    try {
+      await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "START_SLIDE", slideIndex: currentSlideIndex }),
+      });
     } catch (e) {
       console.error("Failed to start question:", e);
     } finally {
@@ -635,6 +772,65 @@ export default function HostLiveFullscreenStage({
             <span>📨 {currentSlideResponses.length}টি উত্তর এসেছে</span>
           </div>
 
+          {/* Collapsible Auto-SMS Pill */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowSmsDropdown(!showSmsDropdown)}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Mail className="w-3.5 h-3.5 text-amber-400" />
+              <span>📩 অটো-SMS ({smsLogs.length})</span>
+            </button>
+
+            {showSmsDropdown && (
+              <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 p-3 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 text-left space-y-2 max-h-64 overflow-y-auto">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                  <span className="text-xs font-black text-amber-400 flex items-center gap-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>প্রেরিত অটো-SMS লগ</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSmsDropdown(false)}
+                    className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {smsLogs.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic py-2 text-center">এখনো কোনো অটো-SMS প্রেরণ হয়নি</p>
+                ) : (
+                  smsLogs.map((log) => (
+                    <div key={log.id} className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-white">{log.studentName}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          log.type === "PRAISE" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"
+                        }`}>
+                          {log.type === "PRAISE" ? "প্রশংসা" : "উৎসাহ"}
+                        </span>
+                      </div>
+                      <p className="text-slate-300 line-clamp-2">{log.message}</p>
+                      <span className="text-[9px] text-slate-500 font-mono block text-right">{log.timestamp}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Sound Synthesizer Toggle */}
+          <button
+            type="button"
+            onClick={() => setSoundMuted(toggleSound())}
+            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer flex items-center gap-1.5"
+            title={soundMuted ? "সাউন্ড অন করুন" : "সাউন্ড মিউট করুন"}
+          >
+            {soundMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />}
+            <span className="hidden sm:inline text-xs font-bold">{soundMuted ? "মিউট" : "সাউন্ড"}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleToggleFullscreen}
@@ -889,7 +1085,7 @@ export default function HostLiveFullscreenStage({
                     }`}
                   >
                     <Clock className="w-4 h-4 text-cyan-400" />
-                    <span>{timerSecondsLeft}s</span>
+                    <span>{Number.isFinite(timerSecondsLeft) ? timerSecondsLeft : 0}s</span>
                   </div>
                 )}
               </div>
@@ -978,16 +1174,28 @@ export default function HostLiveFullscreenStage({
                 )}
               </div>
 
-              {/* Ranks 4 to 10 Horizontal Pill Row */}
+              {/* All Other Participants (#4 to last) */}
               {topPlayers.length > 3 && (
-                <div className="flex flex-wrap justify-center gap-2 max-w-3xl mx-auto pt-2">
-                  {topPlayers.slice(3, 8).map((p, idx) => (
-                    <div key={p.id || idx} className="px-4 py-2 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center gap-2 text-xs font-bold">
-                      <span className="text-slate-400">#{idx + 4}</span>
-                      <span className="text-white">{p.displayName}</span>
-                      <span className="text-cyan-400 font-mono">({p.totalScore || 0} pts)</span>
-                    </div>
-                  ))}
+                <div className="space-y-2 pt-4 border-t border-slate-800 text-left max-w-4xl mx-auto w-full">
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">
+                    📋 অন্যান্য প্রতিযোগীগণ ({topPlayers.slice(3).length} জন):
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                    {topPlayers.slice(3).map((p, idx) => (
+                      <div key={p.id || idx} className="p-2.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs font-bold">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-6 h-6 rounded-md bg-slate-800 text-slate-400 flex items-center justify-center font-mono font-black text-[11px] shrink-0">
+                            #{idx + 4}
+                          </span>
+                          <RenderColorfulAvatar avatarId={p.avatar} size="xs" />
+                          <span className="text-white truncate">{p.displayName}</span>
+                        </div>
+                        <div className="text-right font-mono shrink-0">
+                          <span className="text-amber-400 font-black">{p.totalScore || 0} pts</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1030,50 +1238,52 @@ export default function HostLiveFullscreenStage({
 
           {/* 3. WORD_CLOUD */}
           {currentSlide.type === "WORD_CLOUD" && (
-            <div className="p-8 rounded-3xl bg-slate-950/70 border-2 border-indigo-500/30 min-h-[280px] flex flex-wrap items-center justify-center gap-4 sm:gap-8 backdrop-blur-xl shadow-2xl">
-              {wordCloudWords.map((w, idx) => {
-                const sizeClass =
-                  w.ratio > 0.8
-                    ? "text-4xl sm:text-6xl font-black"
-                    : w.ratio > 0.5
-                    ? "text-2xl sm:text-4xl font-extrabold"
-                    : "text-lg sm:text-2xl font-bold";
-                const colorClass = [
-                  "text-cyan-400 drop-shadow-[0_0_15px_rgba(6,182,212,0.4)]",
-                  "text-rose-400 drop-shadow-[0_0_15px_rgba(244,63,94,0.4)]",
-                  "text-amber-300 drop-shadow-[0_0_15px_rgba(252,211,77,0.4)]",
-                  "text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.4)]",
-                  "text-fuchsia-400 drop-shadow-[0_0_15px_rgba(217,70,239,0.4)]",
-                  "text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.4)]",
-                ][idx % 6];
-                const rotateClass = ["-rotate-3", "rotate-0", "rotate-3", "rotate-0", "-rotate-6", "rotate-6"][idx % 6];
+            <div className="p-8 rounded-3xl bg-slate-950/70 border-2 border-indigo-500/30 min-h-[280px] flex flex-wrap items-center justify-center gap-4 sm:gap-6 backdrop-blur-xl shadow-2xl">
+              {wordCloudWords.length === 0 ? (
+                <div className="text-center text-slate-500 space-y-1">
+                  <p className="text-sm font-bold text-slate-400">ওয়ার্ড ক্লাউডে কোনো শব্দ আসেনি</p>
+                  <p className="text-xs">শিক্ষার্থীদের মোবাইল থেকে শব্দ জমা দেওয়ার নির্দেশ দিন</p>
+                </div>
+              ) : (
+                wordCloudWords.map((w, idx) => {
+                  const grad = WORD_CLOUD_GRADIENTS[idx % WORD_CLOUD_GRADIENTS.length];
+                  const scaleClass =
+                    w.ratio > 0.8
+                      ? "scale-120 text-2xl sm:text-4xl font-black shadow-2xl"
+                      : w.ratio > 0.5
+                      ? "scale-110 text-xl sm:text-2xl font-extrabold shadow-xl"
+                      : "scale-100 text-base sm:text-lg font-bold shadow-md";
 
-                return (
-                  <motion.div
-                    key={`${w.word}-${idx}`}
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ 
-                      scale: 1, 
-                      opacity: 1,
-                      y: [0, (idx % 2 === 0 ? -6 : 6), 0]
-                    }}
-                    transition={{ 
-                      y: { duration: 2.2 + (idx % 3) * 0.4, repeat: Infinity, ease: "easeInOut" },
-                      type: "spring", stiffness: 280, damping: 22, delay: idx * 0.04 
-                    }}
-                    className={`px-4 sm:px-6 py-2.5 rounded-2xl bg-slate-900/80 border border-slate-700/60 shadow-xl ${rotateClass} transition-transform hover:scale-115 cursor-default flex items-center gap-2`}
-                  >
-                    <span className={`${sizeClass} ${colorClass}`}>
-                      {w.word}
-                    </span>
-                    {w.count > 1 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 font-mono font-black border border-indigo-400/40">
-                        x{w.count}
-                      </span>
-                    )}
-                  </motion.div>
-                );
-              })}
+                  return (
+                    <motion.div
+                      key={`${w.word}-${idx}`}
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{
+                        scale: 1,
+                        opacity: 1,
+                        y: [0, idx % 2 === 0 ? -6 : 6, 0],
+                        rotate: [idx % 2 === 0 ? -2 : 2, idx % 2 === 0 ? 2 : -2, idx % 2 === 0 ? -2 : 2],
+                      }}
+                      transition={{
+                        y: { duration: 2.2 + (idx % 3) * 0.4, repeat: Infinity, ease: "easeInOut" },
+                        rotate: { duration: 3 + (idx % 2) * 0.5, repeat: Infinity, ease: "easeInOut" },
+                        type: "spring",
+                        stiffness: 280,
+                        damping: 22,
+                        delay: idx * 0.04,
+                      }}
+                      className={`px-5 sm:px-7 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r shadow-lg ${grad} ${scaleClass} flex items-center gap-2.5`}
+                    >
+                      <span>{w.word}</span>
+                      {w.count > 1 && (
+                        <span className="text-xs px-2.5 py-0.5 rounded-full bg-black/35 font-mono font-black backdrop-blur-sm">
+                          ×{w.count}
+                        </span>
+                      )}
+                    </motion.div>
+                  );
+                })
+              )}
             </div>
           )}
 
@@ -1195,6 +1405,17 @@ export default function HostLiveFullscreenStage({
                         </>
                       )}
                     </motion.button>
+
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={handleSkipCountdown}
+                      className="mt-3 px-6 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-black text-xs sm:text-sm flex items-center justify-center gap-2 mx-auto cursor-pointer transition shadow-lg"
+                    >
+                      <Zap className="w-4 h-4 text-amber-400" />
+                      <span>⚡ এখনই প্রশ্ন দেখান (Skip Countdown)</span>
+                    </motion.button>
                   </div>
                 </div>
               )}
@@ -1210,11 +1431,23 @@ export default function HostLiveFullscreenStage({
                     transition={{ type: "spring", stiffness: 350, damping: 20 }}
                     className="w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-600 flex items-center justify-center mx-auto text-6xl sm:text-8xl font-black text-white shadow-[0_0_60px_rgba(6,182,212,0.6)] border-4 border-white/30"
                   >
-                    <span>{countdownSeconds > 0 ? countdownSeconds : "GO!"}</span>
+                    <span>{countdownSeconds > 0 ? (Number.isFinite(countdownSeconds) ? countdownSeconds : 3) : "GO!"}</span>
                   </motion.div>
                   <p className="text-lg font-black text-cyan-300 tracking-wider uppercase animate-pulse">
                     প্রস্তুত হও! কাউন্টডাউন চলছে...
                   </p>
+                  <div className="pt-2">
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={handleSkipCountdown}
+                      className="px-6 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-300 font-black text-xs sm:text-sm flex items-center justify-center gap-2 mx-auto cursor-pointer transition shadow-lg"
+                    >
+                      <Zap className="w-4 h-4 text-cyan-400" />
+                      <span>⚡ সরাসরি প্রশ্ন শুরু করুন (Skip Countdown)</span>
+                    </motion.button>
+                  </div>
                 </div>
               )}
 
@@ -1223,7 +1456,7 @@ export default function HostLiveFullscreenStage({
                 <div className="py-12 px-6 sm:px-12 rounded-3xl bg-slate-950/80 border-2 border-indigo-500/40 text-center space-y-8 backdrop-blur-2xl shadow-2xl">
                   <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-500/20 text-indigo-300 font-black text-xs sm:text-sm border border-indigo-500/40 uppercase tracking-widest">
                     <Eye className="w-4 h-4 text-indigo-400 animate-pulse" />
-                    <span>📖 প্রশ্নটি মনোযোগ দিয়ে পড়ো... ({previewSeconds}s)</span>
+                    <span>📖 প্রশ্নটি মনোযোগ দিয়ে পড়ো... ({Number.isFinite(previewSeconds) ? previewSeconds : 0}s)</span>
                   </div>
 
                   <h2 className="text-3xl sm:text-5xl font-black text-white leading-snug max-w-4xl mx-auto">
@@ -1253,7 +1486,7 @@ export default function HostLiveFullscreenStage({
                   <div className="flex items-center justify-between px-2">
                     <div className="flex items-center gap-2 font-mono text-sm font-bold text-slate-400">
                       <Clock className="w-4 h-4 text-cyan-400 animate-spin" />
-                      <span>টাইম বাকি: <strong className="text-white text-base">{timerSecondsLeft}s</strong></span>
+                      <span>টাইম বাকি: <strong className="text-white text-base">{Number.isFinite(timerSecondsLeft) ? timerSecondsLeft : 0}s</strong></span>
                     </div>
                     <div className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30">
                       📨 {currentSlideResponses.length} / {players.length} জন উত্তর জমা দিয়েছেন
@@ -1746,6 +1979,7 @@ export default function HostLiveFullscreenStage({
                       <span className="w-6 h-6 rounded-md bg-slate-800 text-slate-400 flex items-center justify-center font-mono">
                         {idx + 4}
                       </span>
+                      <RenderColorfulAvatar avatarId={p.avatar} size="xs" />
                       <span className="text-white">{p.displayName}</span>
                     </div>
                     <span className="font-mono text-indigo-400">{p.totalScore || 0} pts</span>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, LiveParticipant } from "@/lib/database";
 import { ReconnectService, SecurityService } from "@/lib/reconnectService";
 import { checkEligibility } from "@/lib/eligibilityEngine";
+import { getLiveSession, addOrUpdatePlayer } from "@/lib/liveSessionStore";
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,9 +39,31 @@ export async function POST(req: NextRequest) {
     const rawCode = (sessionCode || "").toString().trim();
     const digitsOnly = rawCode.replace(/\D/g, "");
 
+    const liveRecord = getLiveSession(rawCode);
+
     let session = institutionalDb.liveSessions.find(
       s => (s.sessionCode === rawCode || s.pinCode === rawCode || (digitsOnly.length >= 4 && (s.sessionCode === digitsOnly || s.pinCode === digitsOnly))) && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(s.status)
     );
+
+    if (!session && liveRecord) {
+      session = {
+        id: liveRecord.id,
+        sessionCode: liveRecord.code,
+        pinCode: liveRecord.code,
+        quizId: liveRecord.quizId || "quiz-1",
+        hostUserId: liveRecord.hostUserId || 3,
+        status: liveRecord.status === "ENDED" ? "COMPLETED" : "LOBBY",
+        currentQuestionIndex: liveRecord.currentSlideIndex,
+        isLocked: liveRecord.isLocked || false,
+        joinToken: liveRecord.joinToken || `join-${Date.now()}`,
+        maxPlayers: 100,
+        competitionMode: "individual",
+        isTeamLocked: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as any;
+      institutionalDb.liveSessions.push(session!);
+    }
 
     // AI Studio preview fallback: automatically instantiate mock session if testing in preview
     if (!session && digitsOnly.length >= 4) {
@@ -155,6 +178,11 @@ export async function POST(req: NextRequest) {
 
         // Regenerate reconnect token
         const reconnectToken = ReconnectService.generateTokens(session.id, existingParticipant.id);
+        addOrUpdatePlayer(session.id, {
+          id: existingParticipant.id,
+          name: existingParticipant.displayName,
+          avatar: existingParticipant.avatar,
+        });
 
         SecurityService.logAudit(
           session.id,
@@ -249,6 +277,14 @@ export async function POST(req: NextRequest) {
     }
 
     institutionalDb.liveParticipants.push(newParticipant);
+
+    // Sync to high-concurrency LiveSessionRecord store
+    addOrUpdatePlayer(session.id, {
+      id: newParticipant.id,
+      name: newParticipant.displayName,
+      roll: studentId || (displayName.match(/রোল[:\s]*(\d+)/i)?.[1] ?? "—"),
+      avatar: newParticipant.avatar,
+    });
 
     // Generate reconnect token
     const reconnectToken = ReconnectService.generateTokens(session.id, newParticipant.id);

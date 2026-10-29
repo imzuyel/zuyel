@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { institutionalDb } from "@/lib/database";
+import { getLiveSession, setPlayerReady, addOrUpdatePlayer, saveLiveSession } from "@/lib/liveSessionStore";
 import { invalidateSessionCache } from "@/lib/sessionCache";
 
 export async function POST(
@@ -18,7 +18,7 @@ export async function POST(
       );
     }
 
-    const session = institutionalDb.liveSessions.find((s) => s.id === sessionId);
+    const session = getLiveSession(sessionId);
     if (!session) {
       return NextResponse.json(
         { success: false, message: "Live quiz session not found" },
@@ -26,64 +26,36 @@ export async function POST(
       );
     }
 
-    // Initialize readyPlayers array if absent
-    if (!(session as any).readyPlayers) {
-      (session as any).readyPlayers = [];
-    }
-
-    const participant = institutionalDb.liveParticipants.find(
-      (p) => p.sessionId === sessionId && p.id === playerId
-    );
-
-    const displayName = studentName || participant?.displayName || `শিক্ষার্থী ${playerId.slice(-4)}`;
-    const studentAvatar = avatar || (participant as any)?.avatar || "🚀";
-    const studentRoll = roll || participant?.studentId || (displayName.match(/রোল[:\s]*(\d+)/i)?.[1] ?? "—");
-
-    const readyList: any[] = (session as any).readyPlayers;
-    const existingIndex = readyList.findIndex((item) => item.playerId === playerId);
-
-    if (isReady) {
-      if (existingIndex >= 0) {
-        readyList[existingIndex] = {
-          playerId,
-          name: displayName,
-          roll: studentRoll,
-          avatar: studentAvatar,
-          readyAt: new Date().toISOString(),
-        };
-      } else {
-        readyList.push({
-          playerId,
-          name: displayName,
-          roll: studentRoll,
-          avatar: studentAvatar,
-          readyAt: new Date().toISOString(),
-        });
-      }
-      if (participant) {
-        (participant as any).isReady = true;
-      }
+    // Register player if not in session.players
+    if (!session.players[playerId]) {
+      addOrUpdatePlayer(sessionId, {
+        id: playerId,
+        name: studentName || `শিক্ষার্থী ${playerId.slice(-4)}`,
+        roll: roll || "—",
+        avatar: avatar || "🚀",
+        isReady: Boolean(isReady),
+      });
     } else {
-      if (existingIndex >= 0) {
-        readyList.splice(existingIndex, 1);
-      }
-      if (participant) {
-        (participant as any).isReady = false;
-      }
+      setPlayerReady(sessionId, playerId, Boolean(isReady));
     }
 
-    const activeParticipants = institutionalDb.liveParticipants.filter(
-      (p) => p.sessionId === sessionId && p.status === "JOINED"
-    );
+    const readyPlayers = Object.values(session.players).filter((p) => p.isReady);
+    const totalPlayers = Object.keys(session.players).length;
 
     invalidateSessionCache(sessionId);
 
     return NextResponse.json({
       success: true,
       isReady: Boolean(isReady),
-      readyCount: readyList.length,
-      totalPlayers: activeParticipants.length,
-      readyPlayers: readyList,
+      readyCount: readyPlayers.length,
+      totalPlayers,
+      readyPlayers: readyPlayers.map((p) => ({
+        playerId: p.id,
+        id: p.id,
+        name: p.name,
+        roll: p.roll,
+        avatar: p.avatar,
+      })),
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -99,7 +71,7 @@ export async function GET(
 ) {
   try {
     const { id: sessionId } = await params;
-    const session = institutionalDb.liveSessions.find((s) => s.id === sessionId);
+    const session = getLiveSession(sessionId);
 
     if (!session) {
       return NextResponse.json(
@@ -108,16 +80,20 @@ export async function GET(
       );
     }
 
-    const activeParticipants = institutionalDb.liveParticipants.filter(
-      (p) => p.sessionId === sessionId && p.status === "JOINED"
-    );
-    const readyPlayers = (session as any).readyPlayers || [];
+    const readyPlayers = Object.values(session.players).filter((p) => p.isReady);
+    const totalPlayers = Object.keys(session.players).length;
 
     return NextResponse.json({
       success: true,
       readyCount: readyPlayers.length,
-      totalPlayers: activeParticipants.length,
-      readyPlayers,
+      totalPlayers,
+      readyPlayers: readyPlayers.map((p) => ({
+        playerId: p.id,
+        id: p.id,
+        name: p.name,
+        roll: p.roll,
+        avatar: p.avatar,
+      })),
     });
   } catch (error: any) {
     return NextResponse.json(

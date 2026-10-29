@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Volume2,
   VolumeX,
@@ -37,6 +37,13 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import FloatingReactionOverlay, { emitLiveReaction } from "./FloatingReactionOverlay";
 import { RenderStudentAvatar } from "@/components/common/SouthAsianStudentAvatar";
+import {
+  playCountdownBeep,
+  playTimerTick,
+  playRevealChord,
+  playPodiumFanfare,
+} from "@/lib/quizSoundEffects";
+import HostLiveFullscreenStage from "./HostLiveFullscreenStage";
 
 export interface PresenterQuestion {
   id: number | string;
@@ -83,6 +90,10 @@ export interface PresenterSlide {
 
 interface HostLivePresenterProps {
   mode: "presentation" | "quiz";
+  sessionId?: string;
+  sessionCode?: string;
+  deckTitle?: string;
+  slides?: any[];
   slide?: PresenterSlide;
   slideIndex?: number;
   totalSlides?: number;
@@ -176,6 +187,10 @@ const KAHOOT_STYLES = [
 
 export default function HostLivePresenter({
   mode,
+  sessionId,
+  sessionCode,
+  deckTitle,
+  slides,
   slide,
   slideIndex = 0,
   totalSlides = 0,
@@ -204,11 +219,51 @@ export default function HostLivePresenter({
   onToggleFullscreen,
   isFullscreen = false
 }: HostLivePresenterProps) {
+  // If backend live session is present, delegate directly to unified Mentimeter-grade HostLiveFullscreenStage
+  if (sessionId) {
+    const stageSlides = slides && slides.length > 0 ? slides : [
+      {
+        id: slide?.id || String(question?.id) || "slide-1",
+        type: (slide?.type || question?.questionType || question?.type || "MCQ") as any,
+        title: slide?.questionText || question?.question || "লাইভ উপস্থাপনা",
+        content: slide?.questionText || question?.question || "",
+        options: slide?.options || question?.options || [],
+        correctAnswer: question?.correctAnswer !== undefined ? question.correctAnswer : 0,
+        explanation: slide?.explanation || question?.explanation || "",
+        timeLimit: question?.timeLimit || timeLeft || 30,
+        points: 1000,
+      }
+    ];
+
+    return (
+      <HostLiveFullscreenStage
+        sessionId={sessionId}
+        sessionCode={sessionCode || "LIVE"}
+        deckTitle={deckTitle || slide?.metadata?.topic || "লাইভ উপস্থাপনা"}
+        slides={stageSlides}
+        onClose={onEndQuiz}
+      />
+    );
+  }
+
   // All Voted Detection: instant timer freeze and reveal
   const isAllVotedActive = Boolean(allVoted || (totalPlayers > 0 && submittedCount >= totalPlayers));
   const effectiveAnswerRevealed = isAnswerRevealed || isAllVotedActive;
-  const effectiveTimeLeft = isAllVotedActive ? 0 : timeLeft;
+  const effectiveTimeLeft = isAllVotedActive ? 0 : (Number.isFinite(Number(timeLeft)) ? Math.max(0, Number(timeLeft)) : 0);
   const effectiveReadyCount = Math.max(readyCount, readyPlayers.length);
+
+  // Sound Synthesizer Hooks for Standalone Presenter Mode
+  useEffect(() => {
+    if (effectiveAnswerRevealed && soundEnabled) {
+      playRevealChord();
+    }
+  }, [effectiveAnswerRevealed, soundEnabled]);
+
+  useEffect(() => {
+    if (phase === "QUESTION_ACTIVE" && effectiveTimeLeft > 0 && effectiveTimeLeft <= 5 && soundEnabled) {
+      playTimerTick(effectiveTimeLeft <= 3);
+    }
+  }, [effectiveTimeLeft, phase, soundEnabled]);
 
   // Local phase fallback if phase prop is not provided
   const [localPhase, setLocalPhase] = useState<"READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED">("QUESTION_ACTIVE");
@@ -251,6 +306,7 @@ export default function HostLivePresenter({
     setIsStartingQuiz(true);
     setLocalPhase("COUNTDOWN");
     setCountdownValue(3);
+    if (soundEnabled) playCountdownBeep(3);
     const timer = setInterval(() => {
       setCountdownValue((prev) => {
         if (prev === null || prev <= 1) {
@@ -276,6 +332,7 @@ export default function HostLivePresenter({
 
           return 0;
         }
+        if (soundEnabled) playCountdownBeep(prev - 1);
         return prev - 1;
       });
     }, 1000);
@@ -523,7 +580,7 @@ export default function HostLivePresenter({
                 }`}>
                   <Clock className="w-4 h-4 text-cyan-400" />
                   <span className="font-mono text-xl sm:text-2xl font-black tracking-tight">
-                    {effectiveAnswerRevealed ? "সময় সমাপ্ত" : `${effectiveTimeLeft}s`}
+                    {effectiveAnswerRevealed ? "সময় সমাপ্ত" : `${Number.isFinite(effectiveTimeLeft) ? effectiveTimeLeft : 0}s`}
                   </span>
                 </div>
               )}

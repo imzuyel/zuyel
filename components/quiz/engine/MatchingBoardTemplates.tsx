@@ -30,6 +30,11 @@ const PAIR_COLORS = [
   { stroke: "#3B82F6", bg: "bg-blue-500", text: "text-blue-400", border: "border-blue-500" },
 ];
 
+function toBanglaDigits(num: number | string): string {
+  const bn = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
+  return String(num).replace(/[0-9]/g, (d) => bn[parseInt(d)]);
+}
+
 interface SvgLineCanvasProps {
   lineCoords: { x1: number; y1: number; x2: number; y2: number; color: string }[];
 }
@@ -178,9 +183,21 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
   useEffect(() => {
     updateLines();
     window.addEventListener("resize", updateLines);
+    window.addEventListener("scroll", updateLines, true);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      ro = new ResizeObserver(() => {
+        updateLines();
+      });
+      ro.observe(containerRef.current);
+    }
+
     const t = setTimeout(updateLines, 100);
     return () => {
       window.removeEventListener("resize", updateLines);
+      window.removeEventListener("scroll", updateLines, true);
+      if (ro) ro.disconnect();
       clearTimeout(t);
     };
   }, [matches, shuffledRightItems, isConfirmed]);
@@ -188,6 +205,9 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
   // Handle Match Pairing (Click-to-pair)
   const handleLeftClick = (leftIdx: number) => {
     if (disabled || isConfirmed) return;
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(25); } catch {}
+    }
     if (activeLeftSelected === leftIdx) {
       setActiveLeftSelected(null);
     } else {
@@ -198,6 +218,9 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
   const handleRightClick = (rightIdx: number) => {
     if (disabled || isConfirmed) return;
     if (activeLeftSelected !== null) {
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate(40); } catch {}
+      }
       // Connect activeLeftSelected to rightIdx
       const updated = { ...matches };
       // Remove any existing connection to this right item
@@ -295,9 +318,9 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
         <SvgLineCanvas lineCoords={lineCoords} />
 
         {/* Columns Grid */}
-        <div className="relative z-10 grid grid-cols-2 gap-8 sm:gap-16 items-start">
+        <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-8 md:gap-16 items-start">
           {/* Left Column (A, B, C...) */}
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <span className="text-[11px] font-black uppercase tracking-wider text-cyan-400 block px-1">
               বাম কলাম (Left Column)
             </span>
@@ -327,19 +350,19 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
                 <div
                   key={leftIdx}
                   onClick={() => handleLeftClick(leftIdx)}
-                  className={`relative p-3.5 sm:p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                  className={`relative p-2.5 sm:p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between gap-2 sm:gap-3 ${
                     universalContainer
                       ? universalContainer
                       : isSelected
-                      ? "!bg-indigo-500/20 !border-indigo-400 ring-2 ring-indigo-400 scale-[1.02]"
+                      ? "!bg-cyan-500/20 !border-cyan-400 ring-4 ring-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.4)] scale-[1.02]"
                       : isMatched
                       ? "bg-slate-900/90 border-slate-700 hover:border-cyan-500/60"
                       : "bg-slate-900/60 border-slate-800 hover:border-slate-700"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
                     <span
-                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl font-black text-xs flex items-center justify-center shrink-0 ${
+                      className={`w-6 h-6 sm:w-8 sm:h-8 rounded-xl font-black text-xs flex items-center justify-center shrink-0 ${
                         statusIcon === "correct"
                           ? "!bg-emerald-500 text-white"
                           : statusIcon === "incorrect"
@@ -360,6 +383,16 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
                     <span className="text-xs sm:text-sm font-bold text-white break-words leading-snug">
                       {pair.left}
                     </span>
+                    {isMatched && (
+                      <span className={`text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-md ${pairColor.bg} text-slate-950 shrink-0 font-mono shadow-sm ml-auto mr-0.5`}>
+                        জোড়া {toBanglaDigits(leftIdx + 1)}
+                      </span>
+                    )}
+                    {isSelected && (
+                      <span className="text-[9px] text-cyan-300 font-bold animate-pulse shrink-0 ml-auto mr-0.5">
+                        👉 ডানপাশে ট্যাপ করুন
+                      </span>
+                    )}
                   </div>
 
                   {/* Connector Port Dot on Right Edge */}
@@ -367,7 +400,7 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
                     ref={(el) => {
                       leftPortRefs.current[leftIdx] = el;
                     }}
-                    className={`w-4 h-4 rounded-full border-2 transition-transform shrink-0 ${
+                    className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border-2 transition-transform shrink-0 ${
                       statusIcon === "correct"
                         ? "border-emerald-500 bg-emerald-400 scale-125"
                         : statusIcon === "incorrect"
@@ -385,7 +418,7 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
           </div>
 
           {/* Right Column (1, 2, 3...) */}
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <span className="text-[11px] font-black uppercase tracking-wider text-purple-400 block px-1 text-right">
               ডান কলাম (Right Column)
             </span>
@@ -418,7 +451,7 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
                 <div
                   key={rightItem.id}
                   onClick={() => handleRightClick(rightIdx)}
-                  className={`relative p-3.5 sm:p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                  className={`relative p-2.5 sm:p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between gap-2 sm:gap-3 ${
                     universalContainer
                       ? universalContainer
                       : isMatched
@@ -431,7 +464,7 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
                     ref={(el) => {
                       rightPortRefs.current[rightIdx] = el;
                     }}
-                    className={`w-4 h-4 rounded-full border-2 transition-transform shrink-0 ${
+                    className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border-2 transition-transform shrink-0 ${
                       statusIcon === "correct"
                         ? "border-emerald-500 bg-emerald-400 scale-125"
                         : statusIcon === "incorrect"
@@ -442,12 +475,17 @@ export const MatchingBoardTemplates = React.memo(function MatchingBoardTemplates
                     }`}
                   />
 
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1 justify-end text-right">
+                  <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 justify-end text-right">
+                    {isMatched && pairColor && leftIdx !== null && (
+                      <span className={`text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-md ${pairColor.bg} text-slate-950 shrink-0 font-mono shadow-sm mr-auto ml-0.5`}>
+                        জোড়া {toBanglaDigits(leftIdx + 1)}
+                      </span>
+                    )}
                     <span className="text-xs sm:text-sm font-bold text-white break-words leading-snug">
                       {rightItem.text}
                     </span>
                     <span
-                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl font-black text-xs flex items-center justify-center shrink-0 ${
+                      className={`w-6 h-6 sm:w-8 sm:h-8 rounded-xl font-black text-xs flex items-center justify-center shrink-0 ${
                         statusIcon === "correct"
                           ? "!bg-emerald-500 text-white"
                           : statusIcon === "incorrect"

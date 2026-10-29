@@ -33,6 +33,9 @@ import {
   ChevronUp,
   Radio,
   Zap,
+  Trophy,
+  Mail,
+  Bell,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PresentationSlide, isGradedQuiz } from "./UnifiedQuizMentimeterWorkspace";
@@ -79,6 +82,17 @@ function toBanglaDigits(num: number | string): string {
   const bn = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
   return String(num).replace(/[0-9]/g, (d) => bn[parseInt(d)]);
 }
+
+const WORD_CLOUD_GRADIENTS = [
+  "from-rose-500 to-pink-600 shadow-rose-500/40 text-white",
+  "from-indigo-500 to-violet-600 shadow-indigo-500/40 text-white",
+  "from-emerald-500 to-teal-600 shadow-emerald-500/40 text-white",
+  "from-amber-500 to-orange-600 shadow-amber-500/40 text-white",
+  "from-fuchsia-500 to-purple-600 shadow-fuchsia-500/40 text-white",
+  "from-cyan-500 to-blue-600 shadow-cyan-500/40 text-white",
+  "from-violet-500 to-purple-600 shadow-violet-500/40 text-white",
+  "from-teal-500 to-emerald-600 shadow-teal-500/40 text-white",
+];
 
 export default function DualDeviceInteractivePreviewModal({
   isOpen,
@@ -153,6 +167,9 @@ export default function DualDeviceInteractivePreviewModal({
   // Host Stage state
   const [floatingEmojis, setFloatingEmojis] = useState<Array<{ id: string; emoji: string; x: number }>>([]);
   const [spotlightCard, setSpotlightCard] = useState<any | null>(null);
+  const [smsToast, setSmsToast] = useState<{ studentName: string; type: "PRAISE" | "MOTIVATION"; message: string } | null>(null);
+  const [smsLogs, setSmsLogs] = useState<Array<{ id: string; studentName: string; type: "PRAISE" | "MOTIVATION"; message: string; timestamp: string }>>([]);
+  const [showSmsLogDropdown, setShowSmsLogDropdown] = useState<boolean>(false);
 
   // FIX 4, 5, 6, 7: 5-Stage Graded Quiz State Machine
   const [previewStage, setPreviewStage] = useState<"READY" | "COUNTDOWN" | "QUESTION_ONLY" | "ACTIVE" | "REVEAL">("READY");
@@ -275,71 +292,73 @@ export default function DualDeviceInteractivePreviewModal({
     }, 2800);
   };
 
-  // Student Submits Word Cloud Word
-  const handleSubmitWord = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!studentWord.trim()) return;
-
-    const newResp: SimulatedResponse = {
-      id: `resp-${Date.now()}`,
-      slideId: currentSlide.id,
-      type: "WORD_CLOUD",
-      payload: studentWord.trim(),
-      studentName: currentStudentName,
-      avatar: phoneSelectedAvatar,
-      timestamp: Date.now(),
+  // Trigger Simulated Auto-SMS (Fix 5)
+  const triggerPreviewSms = (studentName: string, isCorrect: boolean) => {
+    const type: "PRAISE" | "MOTIVATION" = isCorrect ? "PRAISE" : "MOTIVATION";
+    const message = isCorrect
+      ? `[PTSC কুইজ] অসাধারণ ${studentName}! ১০০% নির্ভুল উত্তর দিয়ে তুমি কুইজ মাতাচ্ছ! পঞ্চগড় টিএসসির গর্ব তুমি!`
+      : `[PTSC কুইজ] ${studentName}, মন খারাপ করো না! ব্রেইনের রেগুলেটরটা আর একটু ঘুরিয়ে পরের প্রশ্নে ছক্কা হাঁকাও!`;
+    const newEntry = {
+      id: `sms-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      studentName,
+      type,
+      message,
+      timestamp: new Date().toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" }),
     };
-
-    setSimulatedResponses((prev) => ({
-      ...prev,
-      [currentSlide.id]: [...(prev[currentSlide.id] || []), newResp],
-    }));
-    setStudentWord("");
-    setStudentSubmitted((prev) => ({ ...prev, [currentSlide.id]: true }));
+    setSmsLogs((prev) => [newEntry, ...prev]);
+    setSmsToast(newEntry);
+    setTimeout(() => setSmsToast(null), 5000);
   };
 
-  // Student Submits Open-Ended Response
-  const handleSubmitOpenResponse = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!studentOpenResponse.trim()) return;
-
-    const newResp: SimulatedResponse = {
-      id: `resp-${Date.now()}`,
-      slideId: currentSlide.id,
-      type: currentSlide.type,
-      payload: studentOpenResponse.trim(),
-      studentName: currentStudentName,
-      avatar: phoneSelectedAvatar,
-      timestamp: Date.now(),
-    };
-
-    setSimulatedResponses((prev) => ({
-      ...prev,
-      [currentSlide.id]: [...(prev[currentSlide.id] || []), newResp],
-    }));
-    setStudentOpenResponse("");
-    setStudentSubmitted((prev) => ({ ...prev, [currentSlide.id]: true }));
-  };
-
-  // FIX 6: Graded Answer Submission with Speed Tracking
-  const handleSubmitGradedAnswer = (selectedVal: any) => {
+  // Unified Preview Student Submit Handler (Fix 2 & Fix 5)
+  const handlePreviewStudentSubmit = (studentAnswer: any, isCorrectComputed?: boolean) => {
     if (hasSubmittedCurrent) return;
 
     const elapsed = Date.now() - questionStartTimeRef.current;
     const secStr = (elapsed / 1000).toFixed(2);
     setStudentSubmissionSpeed({ seconds: secStr, ms: elapsed });
 
+    let isCorrect = false;
     const correctVal = currentSlide.correctAnswer;
-    const isCorrect =
-      currentSlide.type === "TRUE_FALSE"
-        ? Boolean(selectedVal) === Boolean(correctVal)
-        : String(selectedVal) === String(correctVal);
+
+    if (isCorrectComputed !== undefined) {
+      isCorrect = isCorrectComputed;
+    } else if (currentSlide.type === "TRUE_FALSE") {
+      isCorrect = Boolean(studentAnswer) === Boolean(correctVal);
+    } else if (currentSlide.type === "FILL_BLANKS") {
+      const accepted = currentSlide.acceptedAnswers || (currentSlide as any).metadata?.acceptedAnswers || [String(correctVal)];
+      const studentStr = String(studentAnswer || "").trim().toLowerCase();
+      isCorrect = accepted.some((ans: string) => String(ans).trim().toLowerCase() === studentStr);
+    } else if (currentSlide.type === "MATCHING") {
+      if (Array.isArray(studentAnswer) && Array.isArray(currentSlide.pairs)) {
+        isCorrect =
+          studentAnswer.length === currentSlide.pairs.length &&
+          studentAnswer.every(
+            (p: any, idx: number) =>
+              p.left === currentSlide.pairs![idx]?.left && p.right === currentSlide.pairs![idx]?.right
+          );
+      } else {
+        isCorrect = true;
+      }
+    } else if (currentSlide.type === "REORDER") {
+      if (Array.isArray(studentAnswer) && Array.isArray(currentSlide.items)) {
+        isCorrect = studentAnswer.every((item: string, idx: number) => item === currentSlide.items![idx]);
+      } else {
+        isCorrect = true;
+      }
+    } else if (currentSlide.type === "WORD_CLOUD" || currentSlide.type === "OPEN_ENDED" || currentSlide.type === "TEXT_SLIDE") {
+      isCorrect = true;
+    } else {
+      const selectedStr = String(studentAnswer);
+      const correctStr = String(correctVal);
+      isCorrect = selectedStr === correctStr || (currentSlide.options && currentSlide.options[Number(studentAnswer)] === correctVal);
+    }
 
     const newResp: SimulatedResponse = {
       id: `resp-${Date.now()}`,
       slideId: currentSlide.id,
       type: currentSlide.type,
-      payload: selectedVal,
+      payload: studentAnswer,
       studentName: currentStudentName,
       avatar: phoneSelectedAvatar,
       timestamp: Date.now(),
@@ -355,11 +374,61 @@ export default function DualDeviceInteractivePreviewModal({
       ...prev,
       [currentSlide.id]: {
         isCorrect,
-        selected: selectedVal,
+        selected: studentAnswer,
         correct: correctVal,
       },
     }));
+
+    // Trigger Simulated Auto-SMS & Auto-Transition to RESULT_REVEAL on Host
+    if (isCurrentGraded) {
+      triggerPreviewSms(currentStudentName, isCorrect);
+      setTimeout(() => {
+        setPreviewStage("REVEAL");
+        setActiveQuestionTimer(0);
+      }, 700);
+    }
   };
+
+  // Student Submits Word Cloud Word
+  const handleSubmitWord = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!studentWord.trim()) return;
+    handlePreviewStudentSubmit(studentWord.trim());
+    setStudentWord("");
+  };
+
+  // Student Submits Open-Ended Response
+  const handleSubmitOpenResponse = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!studentOpenResponse.trim()) return;
+    handlePreviewStudentSubmit(studentOpenResponse.trim());
+    setStudentOpenResponse("");
+  };
+
+  // Backwards compatible wrapper for showcase engine
+  const handleSubmitGradedAnswer = (selectedVal: any, isCorrectComputed?: boolean) => {
+    handlePreviewStudentSubmit(selectedVal, isCorrectComputed);
+  };
+
+  // Simulated 8-player Leaderboard for Preview (Fix 4)
+  const simulatedLeaderboard = useMemo(() => {
+    const baseList = [
+      { id: "st_user", name: currentStudentName, avatar: phoneSelectedAvatar, score: hasSubmittedCurrent && currentFeedback?.isCorrect ? 350 : 250, correct: hasSubmittedCurrent && currentFeedback?.isCorrect ? 3 : 2, speed: "৩.৪২s", isCurrent: true },
+      { id: "st_2", name: "তানভীর আহমেদ", avatar: "av_neon_lion", score: 310, correct: 3, speed: "৪.১২s", isCurrent: false },
+      { id: "st_3", name: "সাদিয়া আফরিন", avatar: "av_star_unicorn", score: 280, correct: 2, speed: "৩.৮৫s", isCurrent: false },
+      { id: "st_4", name: "রাকিবুল হাসান", avatar: "av_rocket_blaster", score: 240, correct: 2, speed: "৫.০১s", isCurrent: false },
+      { id: "st_5", name: "মারুফ হাসান", avatar: "av_ninja_panda", score: 200, correct: 2, speed: "৫.৫০s", isCurrent: false },
+      { id: "st_6", name: "নুসরাত জাহান", avatar: "av_crystal_planet", score: 180, correct: 1, speed: "৬.১০s", isCurrent: false },
+      { id: "st_7", name: "আরিফুর রহমান", avatar: "av_atom_scientist", score: 150, correct: 1, speed: "৬.৮০s", isCurrent: false },
+      { id: "st_8", name: "মেহেদী হাসান", avatar: "av_code_ninja", score: 100, correct: 1, speed: "৭.২০s", isCurrent: false },
+    ];
+    return baseList.sort((a, b) => b.score - a.score);
+  }, [currentStudentName, phoneSelectedAvatar, hasSubmittedCurrent, currentFeedback]);
+
+  const userRankIndex = useMemo(() => {
+    const idx = simulatedLeaderboard.findIndex((s) => s.isCurrent);
+    return idx >= 0 ? idx + 1 : 1;
+  }, [simulatedLeaderboard]);
 
   // Handle Join Form Submission
   const handleJoinSubmit = (e?: React.FormEvent) => {
@@ -474,15 +543,72 @@ export default function DualDeviceInteractivePreviewModal({
           </button>
         </div>
 
-        {/* Right: Close Preview Button */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-3.5 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-          <span>প্রিভিউ বন্ধ করুন</span>
-        </button>
+        {/* Right: Responses Counter + SMS Log Pill + Close Preview Button */}
+        <div className="flex items-center gap-2">
+          {/* Responses Count Pill */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300">
+            <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
+            <span>📨 রেসপন্স: <strong className="text-white font-mono">{currentResponses.length}</strong> জন</span>
+          </div>
+
+          {/* Collapsible Auto-SMS Pill */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowSmsLogDropdown(!showSmsLogDropdown)}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Mail className="w-3.5 h-3.5 text-amber-400" />
+              <span>📩 অটো-SMS ({smsLogs.length})</span>
+            </button>
+
+            {/* Dropdown for SMS logs */}
+            {showSmsLogDropdown && (
+              <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 p-3 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 text-left space-y-2 max-h-64 overflow-y-auto">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                  <span className="text-xs font-black text-amber-400 flex items-center gap-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>প্রেরিত অটো-SMS লগ</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSmsLogDropdown(false)}
+                    className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {smsLogs.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic py-2 text-center">এখনো কোনো অটো-SMS প্রেরণ হয়নি</p>
+                ) : (
+                  smsLogs.map((log) => (
+                    <div key={log.id} className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-white">{log.studentName}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          log.type === "PRAISE" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"
+                        }`}>
+                          {log.type === "PRAISE" ? "প্রশংসা" : "উৎসাহ"}
+                        </span>
+                      </div>
+                      <p className="text-slate-300 line-clamp-2">{log.message}</p>
+                      <span className="text-[9px] text-slate-500 font-mono block text-right">{log.timestamp}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+            <span className="hidden sm:inline">প্রিভিউ বন্ধ করুন</span>
+          </button>
+        </div>
       </header>
 
       {/* =====================================================================
@@ -514,6 +640,23 @@ export default function DualDeviceInteractivePreviewModal({
               ))}
             </AnimatePresence>
           </div>
+
+          {/* FIX 5: Floating Live Auto-SMS Toast Overlay */}
+          <AnimatePresence>
+            {smsToast && (
+              <motion.div
+                initial={{ opacity: 0, y: -20, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20, scale: 0.9 }}
+                className="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-slate-900/95 border-2 border-amber-400/80 text-amber-200 text-xs font-bold shadow-[0_0_30px_rgba(245,158,11,0.35)] flex items-center gap-2 backdrop-blur-md pointer-events-none"
+              >
+                <Mail className="w-4 h-4 text-amber-400 animate-bounce" />
+                <span>
+                  📩 <strong>{smsToast.studentName}</strong>-কে <strong>{smsToast.type === "PRAISE" ? "প্রশংসা" : "অনুপ্রেরণামূলক"}</strong> SMS পাঠানো হয়েছে!
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Floating Live Reaction Bubbles Overlay */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden z-30">
@@ -568,36 +711,74 @@ export default function DualDeviceInteractivePreviewModal({
               
               {/* 0. LEADERBOARD */}
               {currentSlide.type === "LEADERBOARD" && (
-                <div className="p-8 rounded-3xl bg-slate-950/80 border-2 border-amber-500/40 text-center space-y-6">
+                <div className="p-6 sm:p-8 rounded-3xl bg-slate-950/80 border-2 border-amber-500/40 text-center space-y-6">
                   <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 text-amber-300 font-black text-xs border border-amber-500/40">
                     <Award className="w-4 h-4 text-amber-400" />
                     <span>🏆 লাইভ লিডারবোর্ড সেশন স্টেজ</span>
                   </div>
 
+                  {/* 3D Top 3 Podium Cards */}
                   <div className="flex items-end justify-center gap-4 pt-4">
+                    {/* 2nd Place */}
                     <div className="flex flex-col items-center">
                       <span className="text-2xl mb-1">🥈</span>
-                      <span className="text-xs font-bold text-slate-300">তানভীর আহমেদ</span>
-                      <span className="text-[10px] text-amber-400 font-mono font-bold">২৮০ পয়েন্ট</span>
+                      <RenderColorfulAvatar avatarId={simulatedLeaderboard[1]?.avatar || "av_neon_lion"} size="sm" />
+                      <span className="text-xs font-bold text-slate-300 mt-1">{simulatedLeaderboard[1]?.name}</span>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold">{simulatedLeaderboard[1]?.score} পয়েন্ট</span>
                       <div className="w-20 sm:w-24 h-24 rounded-t-2xl bg-gradient-to-t from-slate-800 to-slate-700 border-t-2 border-slate-400 flex items-center justify-center font-black text-slate-300 text-lg shadow-lg">
                         2
                       </div>
                     </div>
+                    {/* 1st Place */}
                     <div className="flex flex-col items-center">
                       <span className="text-3xl mb-1 animate-bounce">👑</span>
-                      <span className="text-sm font-black text-amber-300">{currentStudentName}</span>
-                      <span className="text-xs text-amber-400 font-mono font-black">৩৫০ পয়েন্ট</span>
+                      <RenderColorfulAvatar avatarId={simulatedLeaderboard[0]?.avatar || phoneSelectedAvatar} size="md" />
+                      <span className="text-sm font-black text-amber-300 mt-1">{simulatedLeaderboard[0]?.name}</span>
+                      <span className="text-xs text-amber-400 font-mono font-black">{simulatedLeaderboard[0]?.score} পয়েন্ট</span>
                       <div className="w-24 sm:w-28 h-32 rounded-t-2xl bg-gradient-to-t from-amber-600 to-amber-500 border-t-2 border-amber-300 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-amber-500/30">
                         1
                       </div>
                     </div>
+                    {/* 3rd Place */}
                     <div className="flex flex-col items-center">
                       <span className="text-2xl mb-1">🥉</span>
-                      <span className="text-xs font-bold text-slate-300">সাদিয়া আফরিন</span>
-                      <span className="text-[10px] text-amber-400 font-mono font-bold">২৩০ পয়েন্ট</span>
+                      <RenderColorfulAvatar avatarId={simulatedLeaderboard[2]?.avatar || "av_star_unicorn"} size="sm" />
+                      <span className="text-xs font-bold text-slate-300 mt-1">{simulatedLeaderboard[2]?.name}</span>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold">{simulatedLeaderboard[2]?.score} পয়েন্ট</span>
                       <div className="w-20 sm:w-24 h-16 rounded-t-2xl bg-gradient-to-t from-amber-900/80 to-amber-800/80 border-t-2 border-amber-700 flex items-center justify-center font-black text-amber-200 text-lg shadow-lg">
                         3
                       </div>
+                    </div>
+                  </div>
+
+                  {/* All Remaining Students List (#4 to last) */}
+                  <div className="space-y-2 pt-4 border-t border-slate-800 text-left">
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-wider block">
+                      📋 অন্যান্য অংশগ্রহণকারী শিক্ষার্থী ({simulatedLeaderboard.slice(3).length} জন):
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {simulatedLeaderboard.slice(3).map((st, idx) => (
+                        <div
+                          key={st.id}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition ${
+                            st.isCurrent
+                              ? "bg-emerald-500/20 border-emerald-400 text-white ring-2 ring-emerald-400 shadow-md"
+                              : "bg-slate-900/80 border-slate-800 text-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-6 h-6 rounded-md bg-slate-800 text-slate-400 flex items-center justify-center font-mono font-black text-[11px]">
+                              #{idx + 4}
+                            </span>
+                            <RenderColorfulAvatar avatarId={st.avatar} size="xs" />
+                            <span className="font-bold">{st.name} {st.isCurrent && "(আপনি)"}</span>
+                          </div>
+                          <div className="text-right font-mono">
+                            <span className="font-black text-amber-400">{st.score} pts</span>
+                            <span className="text-[9px] text-slate-500 block">⚡ {st.speed}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -644,18 +825,50 @@ export default function DualDeviceInteractivePreviewModal({
 
               {/* 3. WORD_CLOUD */}
               {currentSlide.type === "WORD_CLOUD" && (
-                <div className="p-8 rounded-3xl bg-slate-950/70 border-2 border-indigo-500/30 min-h-[220px] flex flex-wrap items-center justify-center gap-3 sm:gap-6 backdrop-blur-xl shadow-xl">
+                <div className="p-8 rounded-3xl bg-slate-950/70 border-2 border-indigo-500/30 min-h-[240px] flex flex-wrap items-center justify-center gap-3 sm:gap-5 backdrop-blur-xl shadow-xl">
                   {wordCloudWords.length === 0 ? (
                     <div className="text-center text-slate-500 space-y-1">
                       <p className="text-sm font-bold text-slate-400">ওয়ার্ড ক্লাউডে কোনো শব্দ আসেনি</p>
                       <p className="text-xs">ডানপাশের মোবাইল ফ্রেম থেকে শব্দ পাঠিয়ে রিয়েল-টাইম রঙিন ক্লাউড দেখুন!</p>
                     </div>
                   ) : (
-                    wordCloudWords.map((w, idx) => (
-                      <span key={idx} className="text-2xl font-black text-cyan-400">
-                        {w.text} {w.count > 1 && `(${w.count})`}
-                      </span>
-                    ))
+                    wordCloudWords.map((w, idx) => {
+                      const grad = WORD_CLOUD_GRADIENTS[idx % WORD_CLOUD_GRADIENTS.length];
+                      const scaleClass =
+                        w.ratio > 0.8
+                          ? "scale-115 text-lg sm:text-2xl font-black shadow-xl"
+                          : w.ratio > 0.5
+                          ? "scale-105 text-base sm:text-xl font-extrabold shadow-md"
+                          : "scale-100 text-sm sm:text-base font-bold shadow-sm";
+                      return (
+                        <motion.div
+                          key={idx}
+                          initial={{ scale: 0, opacity: 0 }}
+                          animate={{
+                            scale: 1,
+                            opacity: 1,
+                            y: [0, idx % 2 === 0 ? -6 : 6, 0],
+                            rotate: [idx % 2 === 0 ? -2 : 2, idx % 2 === 0 ? 2 : -2, idx % 2 === 0 ? -2 : 2],
+                          }}
+                          transition={{
+                            y: { duration: 2.2 + (idx % 3) * 0.4, repeat: Infinity, ease: "easeInOut" },
+                            rotate: { duration: 3 + (idx % 2) * 0.5, repeat: Infinity, ease: "easeInOut" },
+                            type: "spring",
+                            stiffness: 280,
+                            damping: 22,
+                            delay: idx * 0.04,
+                          }}
+                          className={`px-4 sm:px-6 py-2.5 rounded-full bg-gradient-to-r shadow-lg ${grad} ${scaleClass} flex items-center gap-2`}
+                        >
+                          <span>{w.text}</span>
+                          {w.count > 1 && (
+                            <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-black/30 font-mono font-black backdrop-blur-sm">
+                              ×{w.count}
+                            </span>
+                          )}
+                        </motion.div>
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -759,7 +972,7 @@ export default function DualDeviceInteractivePreviewModal({
                       </div>
                       <h3 className="text-2xl font-black text-white">প্রশ্ন আসছে — প্রস্তুত হোন!</h3>
                       <div className="w-36 h-36 rounded-full bg-gradient-to-tr from-cyan-600 to-indigo-600 mx-auto flex items-center justify-center text-7xl font-black text-white shadow-2xl border-4 border-cyan-300/60 animate-pulse">
-                        {countdownNum}
+                        {Number.isFinite(countdownNum) ? countdownNum : 3}
                       </div>
                     </div>
                   )}
@@ -786,7 +999,7 @@ export default function DualDeviceInteractivePreviewModal({
                         />
                       </div>
                       <p className="text-xs text-slate-400 font-mono">
-                        {preview5sTimeLeft} সেকেন্ড পর অপশন ও টাইমার সক্রিয় হবে
+                        {Number.isFinite(preview5sTimeLeft) ? preview5sTimeLeft : 0} সেকেন্ড পর অপশন ও টাইমার সক্রিয় হবে
                       </p>
                     </div>
                   )}
@@ -799,7 +1012,7 @@ export default function DualDeviceInteractivePreviewModal({
                           ⏱️ উত্তর প্রদান পর্যায় চলছে
                         </span>
                         <span className="text-base font-black font-mono text-amber-400 px-3 py-1 rounded-xl bg-slate-900 border border-amber-500/30">
-                          ⏳ {activeQuestionTimer}s
+                          ⏳ {Number.isFinite(activeQuestionTimer) ? activeQuestionTimer : 0}s
                         </span>
                       </div>
 
@@ -1197,12 +1410,100 @@ export default function DualDeviceInteractivePreviewModal({
                           <button
                             type="submit"
                             disabled={!studentWord.trim()}
-                            className="w-full py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs"
+                            className="w-full py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs cursor-pointer"
                           >
                             ☁️ ওয়ার্ড পাঠাও
                           </button>
                         </form>
                       )}
+                    </div>
+                  )}
+
+                  {/* OPEN-ENDED & LIVE_QA PHONE VIEW */}
+                  {(currentSlide.type === "OPEN_ENDED" || currentSlide.type === "LIVE_QA") && (
+                    <div className="space-y-3 my-auto">
+                      <div className="text-center space-y-1">
+                        <span className="text-xs font-black text-indigo-400">💬 উন্মুক্ত মতামত / প্রশ্নোত্তর</span>
+                        <h4 className="text-xs font-bold text-white line-clamp-2">
+                          {currentSlide.title || "আপনার মতামত বা উত্তর লিখুন:"}
+                        </h4>
+                      </div>
+                      {hasSubmittedCurrent ? (
+                        <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-center space-y-1">
+                          <CheckCircle2 className="w-6 h-6 text-emerald-400 mx-auto" />
+                          <div className="text-xs font-black text-emerald-300">মতামত জমা হয়েছে!</div>
+                        </div>
+                      ) : (
+                        <form onSubmit={handleSubmitOpenResponse} className="space-y-2">
+                          <textarea
+                            value={studentOpenResponse}
+                            onChange={(e) => setStudentOpenResponse(e.target.value)}
+                            placeholder="এখানে বিস্তারিত লিখুন..."
+                            rows={3}
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white resize-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={!studentOpenResponse.trim()}
+                            className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer transition"
+                          >
+                            💬 মতামত পাঠান
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+
+                  {/* LEADERBOARD PHONE VIEW (Fix 4: Personal Rank & Full List) */}
+                  {currentSlide.type === "LEADERBOARD" && (
+                    <div className="space-y-3 my-auto">
+                      {/* Prominent Personal Rank Card */}
+                      <div className="p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 to-indigo-950/90 border-2 border-emerald-500/60 shadow-xl text-left space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-emerald-300">
+                            🏆 তোমার বর্তমান পজিশন: #{userRankIndex}
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/30 text-emerald-200 font-black">
+                            {simulatedLeaderboard.find((s) => s.isCurrent)?.score || 250} pts
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-300 flex items-center justify-between">
+                          <span>⭐ পয়েন্ট: <strong className="text-amber-400">{simulatedLeaderboard.find((s) => s.isCurrent)?.score || 250}</strong></span>
+                          <span>✅ সঠিক: <strong className="text-emerald-400">{simulatedLeaderboard.find((s) => s.isCurrent)?.correct || 2}/৩</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Full Participant List with Student Highlighted */}
+                      <div className="space-y-1 text-left">
+                        <span className="text-[10px] font-black text-slate-400 block px-1">
+                          📊 সকল প্রতিযোগীর তালিকা ({simulatedLeaderboard.length} জন):
+                        </span>
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                          {simulatedLeaderboard.map((st, idx) => (
+                            <div
+                              key={st.id}
+                              className={`p-2 rounded-xl border flex items-center justify-between text-xs transition ${
+                                st.isCurrent
+                                  ? "bg-emerald-500/20 border-emerald-400 ring-2 ring-emerald-400 text-white shadow-md"
+                                  : "bg-slate-900/90 border-slate-800 text-slate-300"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-mono font-black text-[10px] w-5 text-center shrink-0">
+                                  {idx === 0 ? "👑" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`}
+                                </span>
+                                <RenderColorfulAvatar avatarId={st.avatar} size="xs" />
+                                <span className="font-bold text-[11px] truncate">
+                                  {st.name} {st.isCurrent && " (তুমি)"}
+                                </span>
+                              </div>
+                              <div className="text-right font-mono shrink-0">
+                                <span className="font-black text-[10px] text-amber-400">{st.score} pts</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -1238,7 +1539,7 @@ export default function DualDeviceInteractivePreviewModal({
                       {previewStage === "COUNTDOWN" && (
                         <div className="space-y-4 text-center py-6">
                           <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-cyan-600 to-indigo-600 mx-auto flex items-center justify-center text-4xl font-black text-white shadow-xl border-2 border-cyan-400 animate-pulse">
-                            {countdownNum}
+                            {Number.isFinite(countdownNum) ? countdownNum : 3}
                           </div>
                           <h4 className="text-xs font-black text-cyan-300">মনোযোগ দাও!</h4>
                         </div>

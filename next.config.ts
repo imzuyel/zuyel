@@ -1,4 +1,4 @@
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
     '*.cloud.run',
     'localhost:3000',
     '127.0.0.1:3000',
+    '*.loca.lt',
+    'afraid-corners-raise.loca.lt',
   ],
   eslint: {
     ignoreDuringBuilds: true,
@@ -62,7 +64,7 @@ const nextConfig: NextConfig = {
     ],
   },
   transpilePackages: ['motion'],
-  webpack: (config, {dev}) => {
+  webpack: (config, { dev }) => {
     if (!dev) {
       config.cache = false;
     }

@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { institutionalDb } from "@/lib/database";
-import { SecurityService, SessionRecoveryService } from "@/lib/reconnectService";
-import { getAssignedPlate } from "@/lib/quizPlateEngine";
-import { getSessionQuestions } from "@/lib/liveQuizHelper";
-import { getSessionCache, setSessionCache, invalidateSessionCache } from "@/lib/sessionCache";
-
-export { invalidateSessionCache };
+import { getLiveSession, evaluateAndAdvanceSessionStage, LiveSessionRecord, saveLiveSession } from "@/lib/liveSessionStore";
+import { SecurityService } from "@/lib/reconnectService";
 
 export async function GET(
   req: NextRequest,
@@ -17,316 +12,206 @@ export async function GET(
     const playerId = searchParams.get("playerId") || searchParams.get("participantId");
 
     const ipAddress = req.headers.get("x-forwarded-for") || "127.0.0.1";
-    if (SecurityService.isRateLimited(`state-${ipAddress}`, 120, 60000)) {
+    if (SecurityService.isRateLimited(`state-${ipAddress}`, 240, 60000)) {
       return NextResponse.json(
         { success: false, message: "Too many state sync requests" },
         { status: 429 }
       );
     }
 
-    // -----------------------------------------------------------------------
-    // ULTRA-FAST IN-MEMORY CACHE (600ms TTL) FOR 50-60+ CONCURRENT STUDENTS
-    // -----------------------------------------------------------------------
-    let common = getSessionCache(sessionId);
-
-    if (!common) {
-      const session = institutionalDb.liveSessions.find((s) => s.id === sessionId);
-      if (!session) {
-        return NextResponse.json(
-          { success: false, message: "Live quiz session not found" },
-          { status: 404 }
-        );
-      }
-
-      const questions = getSessionQuestions(session.quizId);
-      const hostCurrentQuestion = questions[session.currentQuestionIndex || 0] || null;
-      const currentQId = hostCurrentQuestion?.id;
-
-      const now = new Date();
-      const countdownEndsAt = (session as any).countdownEndsAt ? new Date((session as any).countdownEndsAt) : null;
-      const previewEndsAt = (session as any).previewEndsAt ? new Date((session as any).previewEndsAt) : null;
-      const questionEndsAt = session.questionEndsAt ? new Date(session.questionEndsAt) : null;
-
-      const activeParticipants = institutionalDb.liveParticipants.filter(
-        (p) => p.sessionId === sessionId && p.status === "JOINED"
-      );
-      const readyPlayers = (session as any).readyPlayers || [];
-      const currentSlideResponses = institutionalDb.liveAnswers
-        .filter((a) => a.sessionId === sessionId && (currentQId ? a.questionId === currentQId : true))
-        .map((a) => {
-          const p = institutionalDb.liveParticipants.find((part) => part.id === a.playerId);
-          return {
-            id: a.id,
-            playerId: a.playerId,
-            studentName: p?.displayName || "শিক্ষার্থী",
-            avatar: (p as any)?.avatar || "🚀",
-            response: typeof a.answerPayload === "string" ? a.answerPayload : JSON.stringify(a.answerPayload),
-            answerPayload: a.answerPayload,
-            isCorrect: a.isCorrect,
-            responseTimeMs: a.responseTimeMs || 1000,
-            submittedAt: a.submittedAt,
-          };
-        });
-
-      // Check All-Voted Condition: all active joined participants have submitted
-      const allVoted = Boolean((session as any).allVoted) || (activeParticipants.length > 0 && currentSlideResponses.length >= activeParticipants.length);
-      if (allVoted) {
-        (session as any).allVoted = true;
-        (session as any).isAnswerRevealed = true;
-      }
-
-      let phase: "LOBBY" | "READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED" | "COMPLETED" = "LOBBY";
-      let countdownSecondsRemaining = 0;
-      let previewSecondsRemaining = 0;
-      let mainTimerSecondsRemaining = 0;
-      let canSubmitAnswer = false;
-      let isAnswerRevealed = Boolean((session as any).isAnswerRevealed);
-
-      if (session.status === "COMPLETED") {
-        phase = "COMPLETED";
-      } else if (session.status === "LOBBY" || (!session.isQuizModeStarted && session.currentQuestionIndex === 0 && (session.status as string) !== "READY")) {
-        phase = "LOBBY";
-      } else if ((session.status as string) === "READY") {
-        // Mandatory FIX 4: Waiting in READY_CHECK stage until teacher triggers question start
-        phase = "READY";
-      } else if (countdownEndsAt && now < countdownEndsAt) {
-        // Synchronized 3-2-1 Countdown (3 seconds)
-        phase = "COUNTDOWN";
-        countdownSecondsRemaining = Math.max(1, Math.ceil((countdownEndsAt.getTime() - now.getTime()) / 1000));
-      } else if (previewEndsAt && now < previewEndsAt) {
-        // Synchronized Question Only (5 seconds, NO options)
-        phase = "QUESTION_PREVIEW";
-        previewSecondsRemaining = Math.max(0.1, Number(((previewEndsAt.getTime() - now.getTime()) / 1000).toFixed(1)));
-      } else if (allVoted || (questionEndsAt && now >= questionEndsAt)) {
-        // Result Reveal: All students submitted or timer reached 00:00!
-        phase = "QUESTION_ENDED";
-        mainTimerSecondsRemaining = 0;
-        isAnswerRevealed = true;
-      } else {
-        // Options revealed, answering active!
-        phase = "QUESTION_ACTIVE";
-        canSubmitAnswer = true;
-        mainTimerSecondsRemaining = questionEndsAt ? Math.max(0, Math.ceil((questionEndsAt.getTime() - now.getTime()) / 1000)) : 30;
-      }
-
-      // Calculate option statistics for MCQ
-      const optionsCount = (hostCurrentQuestion?.options?.length) || 4;
-      const optionStats = new Array(optionsCount).fill(0);
-      currentSlideResponses.forEach((ans) => {
-        const p = ans.answerPayload;
-        if (typeof p === "number" && p >= 0 && p < optionsCount) {
-          optionStats[p] += 1;
-        } else if (typeof p === "string") {
-          const num = parseInt(p);
-          if (!isNaN(num) && num >= 0 && num < optionsCount) {
-            optionStats[num] += 1;
-          }
-        }
-      });
-
-      // Calculate correct vs wrong breakdown for Host Chart
-      const correctCount = currentSlideResponses.filter((r) => r.isCorrect === true).length;
-      const wrongCount = currentSlideResponses.filter((r) => r.isCorrect === false).length;
-      const timedOutCount = Math.max(0, activeParticipants.length - currentSlideResponses.length);
-
-      const sequenceState = {
-        phase,
-        countdownSecondsRemaining,
-        previewSecondsRemaining,
-        mainTimerSecondsRemaining,
-        canSubmitAnswer,
-        allVoted,
-        isAnswerRevealed,
-      };
-
-      const topPlayers = [...activeParticipants]
-        .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))
-        .slice(0, 10)
-        .map((p) => ({
-          id: p.id,
-          displayName: p.displayName,
-          totalScore: p.totalScore || 0,
-          avatar: (p as any).avatar || "🚀",
-          correctAnswers: p.correctAnswers || 0,
-        }));
-
-      common = {
-        session,
-        hostCurrentQuestion,
-        currentQId,
-        phase,
-        sequenceState,
-        countdownSecondsRemaining,
-        previewSecondsRemaining,
-        mainTimerSecondsRemaining,
-        allVoted,
-        isAnswerRevealed,
-        canSubmitAnswer,
-        activeParticipants,
-        readyPlayers,
-        currentSlideResponses,
-        optionStats,
-        correctCount,
-        wrongCount,
-        timedOutCount,
-        topPlayers,
-        isQuizModeStarted: session.isQuizModeStarted || false,
-        scheduledStartTime: (session as any).scheduledStartTime || null,
-        activePreQuizActivity: session.activePreQuizActivity || null,
-        lastSmsDispatched: (session as any).lastSmsDispatched || null,
-        showLeaderboard: Boolean((session as any).showLeaderboard || hostCurrentQuestion?.type === "LEADERBOARD"),
-        correctAnswer: isAnswerRevealed ? (hostCurrentQuestion?.correctAnswer ?? (hostCurrentQuestion as any)?.questionData?.correctAnswer) : undefined,
-      };
-
-      // Cache snapshot for 600ms
-      setSessionCache(sessionId, common, 600);
-    }
-
-    // Handle Host / General state polling (Instant 0ms from cache)
-    if (!playerId || playerId === "HOST") {
-      return NextResponse.json({
-        success: true,
-        sessionStatus: common.session.status,
-        phase: common.phase,
-        sequenceState: common.sequenceState,
-        countdownSeconds: common.countdownSecondsRemaining,
-        previewSeconds: common.previewSecondsRemaining,
-        mainTimerSeconds: common.mainTimerSecondsRemaining,
-        timeLeft: common.mainTimerSecondsRemaining,
-        currentQuestionIndex: common.session.currentQuestionIndex || 0,
-        currentSlide: common.hostCurrentQuestion,
-        currentQuestion: common.hostCurrentQuestion,
-        currentSlideResponses: common.currentSlideResponses,
-        responsesCount: common.currentSlideResponses.length,
-        submittedCount: common.currentSlideResponses.length,
-        answeredCount: common.currentSlideResponses.length,
-        totalPlayers: common.activeParticipants.length,
-        activePlayersCount: common.activeParticipants.length,
-        playerCount: common.activeParticipants.length,
-        readyPlayers: common.readyPlayers,
-        readyCount: common.readyPlayers.length,
-        allVoted: common.allVoted,
-        isAnswerRevealed: common.isAnswerRevealed,
-        optionStats: common.optionStats,
-        correctCount: common.correctCount,
-        wrongCount: common.wrongCount,
-        timedOutCount: common.timedOutCount,
-        isQuizModeStarted: common.isQuizModeStarted,
-        scheduledStartTime: common.scheduledStartTime,
-        activePreQuizActivity: common.activePreQuizActivity,
-        lastSmsDispatched: common.lastSmsDispatched,
-        showLeaderboard: common.showLeaderboard,
-        topPlayers: common.topPlayers,
-        correctAnswer: common.correctAnswer,
-        explanation: common.hostCurrentQuestion?.explanation,
-      });
-    }
-
-    const state = SessionRecoveryService.recoverParticipantState(sessionId, playerId);
-    if (!state) {
+    // 1. Single Source of Truth lookup from high-concurrency engine
+    const session = getLiveSession(sessionId);
+    if (!session) {
       return NextResponse.json(
-        { success: false, message: "Participant state could not be recovered" },
+        { success: false, message: "Live quiz session not found" },
         { status: 404 }
       );
     }
 
-    // Get plate template for current question
-    const activeParticipantIds = common.activeParticipants.map((p: any) => p.id);
-    const plate = getAssignedPlate(sessionId, playerId, state.session.currentQuestionIndex, activeParticipantIds);
+    // 2. CRITICAL AUTO-STAGE ADVANCEMENT (Task 2)
+    // Evaluates stage timers & auto-advances so neither Host nor Students ever get stuck!
+    evaluateAndAdvanceSessionStage(session);
 
-    // Retrieve active motivation message ONLY if competitive quiz mode has started
-    let motivationMessage = null;
-    const participant = institutionalDb.liveParticipants.find(
-      (p) => p.id === playerId && p.sessionId === sessionId
+    const now = Date.now();
+    const stageEndsAt = Number(session.stageEndsAt) || (now + 3000);
+    const stageStartedAt = Number(session.stageStartedAt) || now;
+    const remainingSeconds = Math.max(0, Math.ceil((stageEndsAt - now) / 1000));
+
+    const currentSlideIndex = Math.min(
+      Math.max(0, session.currentSlideIndex || 0),
+      Math.max(0, session.slides.length - 1)
     );
-    if (common.session.isQuizModeStarted && participant && participant.motivationMessage && !participant.motivationMessage.shown) {
-      motivationMessage = {
-        category: participant.motivationMessage.category,
-        message: participant.motivationMessage.message,
-        questionIndex: participant.motivationMessage.questionIndex,
-        durationMs: 8000,
-      };
-      participant.motivationMessage.shown = true;
+    const currentSlide = session.slides[currentSlideIndex] || session.slides[0];
+    const currentQId = currentSlide?.id;
+
+    const slideAnswers = session.answers[String(currentSlideIndex)] || {};
+    const answersList = Object.values(slideAnswers);
+    const submittedCount = answersList.length;
+
+    const allPlayersList = Object.values(session.players || {});
+    const totalPlayers = allPlayersList.length;
+    const readyPlayers = allPlayersList.filter((p) => p.isReady);
+    const readyCount = readyPlayers.length;
+
+    // Calculate options distribution for charts
+    const optionsCount = Array.isArray(currentSlide?.options) ? currentSlide.options.length : 4;
+    const optionStats = new Array(optionsCount).fill(0);
+    answersList.forEach((ans) => {
+      const p = ans.answerPayload;
+      if (typeof p === "number" && p >= 0 && p < optionsCount) {
+        optionStats[p] += 1;
+      } else if (typeof p === "string") {
+        const num = parseInt(p, 10);
+        if (!isNaN(num) && num >= 0 && num < optionsCount) {
+          optionStats[num] += 1;
+        }
+      }
+    });
+
+    const correctCount = answersList.filter((a) => a.isCorrect === true).length;
+    const wrongCount = answersList.filter((a) => a.isCorrect === false).length;
+    const timedOutCount = Math.max(0, totalPlayers - submittedCount);
+
+    // Compute top players leaderboard
+    const sortedPlayers = [...allPlayersList].sort((a, b) => (b.score || 0) - (a.score || 0));
+    sortedPlayers.forEach((p, idx) => {
+      p.rank = idx + 1;
+    });
+
+    const topPlayers = sortedPlayers.slice(0, 10).map((p) => ({
+      id: p.id,
+      displayName: p.name,
+      name: p.name,
+      roll: p.roll,
+      totalScore: p.score || 0,
+      score: p.score || 0,
+      avatar: p.avatar || "🚀",
+      rank: p.rank || 1,
+      streak: p.streak || 0,
+    }));
+
+    // Map stage to legacy phase for backward compatibility with older components
+    let phase: "LOBBY" | "READY" | "COUNTDOWN" | "QUESTION_PREVIEW" | "QUESTION_ACTIVE" | "QUESTION_ENDED" | "COMPLETED" = "READY";
+    if (session.status === "ENDED" || session.stage === "ENDED") {
+      phase = "COMPLETED";
+    } else if (session.stage === "WELCOME_WAITING" || session.stage === "WARMUP_ACTIVE") {
+      phase = "LOBBY";
+    } else if (session.stage === "READY_CHECK") {
+      phase = "READY";
+    } else if (session.stage === "COUNTDOWN_321") {
+      phase = "COUNTDOWN";
+    } else if (session.stage === "QUESTION_ONLY") {
+      phase = "QUESTION_PREVIEW";
+    } else if (session.stage === "ANSWERING_ACTIVE") {
+      phase = "QUESTION_ACTIVE";
+    } else if (session.stage === "RESULT_REVEAL" || session.stage === "LEADERBOARD_VIEW") {
+      phase = "QUESTION_ENDED";
     }
 
-    // Check if this student already answered current slide
-    let hasAnsweredCurrent = false;
-    let studentAnswerPayload: any = null;
-    let studentAnswerData: any = null;
+    const isAnswerRevealed =
+      session.stage === "RESULT_REVEAL" ||
+      session.stage === "LEADERBOARD_VIEW" ||
+      session.stage === "ENDED";
 
-    if (common.currentQId) {
-      const studentAns = institutionalDb.liveAnswers.find(
-        (a) => a.sessionId === sessionId && a.playerId === playerId && a.questionId === common.currentQId
-      );
-      if (studentAns) {
-        hasAnsweredCurrent = true;
-        studentAnswerPayload = studentAns.answerPayload;
-        studentAnswerData = {
-          answerPayload: studentAns.answerPayload,
-          isCorrect: studentAns.isCorrect,
-          responseTimeMs: studentAns.responseTimeMs,
-          totalPoints: studentAns.totalPoints,
-        };
-        state.answered = true;
-        state.originalAnswer = studentAnswerData;
+    // Player-specific state
+    let studentAns = null;
+    let hasAnsweredCurrent = false;
+    let myRank = 1;
+    let myScore = 0;
+    let studentPlayer = null;
+
+    if (playerId && playerId !== "HOST") {
+      // Touch player lastSeenAt
+      if (session.players[playerId]) {
+        session.players[playerId].lastSeenAt = now;
+        studentPlayer = session.players[playerId];
+      }
+      studentAns = slideAnswers[playerId] || null;
+      hasAnsweredCurrent = Boolean(studentAns);
+
+      const foundIndex = sortedPlayers.findIndex((p) => p.id === playerId);
+      if (foundIndex >= 0) {
+        myRank = foundIndex + 1;
+        myScore = sortedPlayers[foundIndex].score || 0;
       }
     }
 
-    // Attach sequence state to recovered state session
-    if (state.session) {
-      (state.session as any).phase = common.phase;
-      (state.session as any).countdownSeconds = common.countdownSecondsRemaining;
-      (state.session as any).previewSeconds = common.previewSecondsRemaining;
-      (state.session as any).mainTimerSeconds = common.mainTimerSecondsRemaining;
-      (state.session as any).canSubmitAnswer = common.canSubmitAnswer;
-      (state.session as any).allVoted = common.allVoted;
-      (state.session as any).isAnswerRevealed = common.isAnswerRevealed;
-    }
-
-    // Question snapshot to return to student
-    const resolvedQuestion = state.currentQuestion || common.hostCurrentQuestion;
+    const canSubmitAnswer = session.stage === "ANSWERING_ACTIVE" && !hasAnsweredCurrent;
 
     return NextResponse.json({
       success: true,
-      state,
-      plate,
-      phase: common.phase,
-      sequenceState: common.sequenceState,
-      countdownSeconds: common.countdownSecondsRemaining,
-      previewSeconds: common.previewSecondsRemaining,
-      mainTimerSeconds: common.mainTimerSecondsRemaining,
-      timeLeft: common.mainTimerSecondsRemaining,
-      canSubmitAnswer: common.canSubmitAnswer && !hasAnsweredCurrent,
-      allVoted: common.allVoted,
-      isAnswerRevealed: common.isAnswerRevealed,
-      showLeaderboard: common.showLeaderboard,
-      topPlayers: common.topPlayers,
-      currentSlide: resolvedQuestion,
-      currentQuestion: resolvedQuestion,
-      currentSlideResponses: common.currentSlideResponses,
-      responsesCount: common.currentSlideResponses.length,
-      submittedCount: common.currentSlideResponses.length,
-      answeredCount: common.currentSlideResponses.length,
-      playerCount: common.activeParticipants.length,
-      activePlayersCount: common.activeParticipants.length,
-      totalPlayers: common.activeParticipants.length,
-      readyPlayers: common.readyPlayers,
-      readyCount: common.readyPlayers.length,
+      serverNow: now,
+      serverTimestamp: now,
+      sessionStatus: session.status,
+      status: session.status,
+      stage: session.stage,
+      phase,
+      currentSlideIndex,
+      currentQuestionIndex: currentSlideIndex,
+      totalSlides: session.slides.length,
+      totalQuestions: session.slides.length,
+      stageStartedAt,
+      stageEndsAt,
+      remainingSeconds,
+      countdownSeconds: session.stage === "COUNTDOWN_321" ? remainingSeconds : 0,
+      previewSeconds: session.stage === "QUESTION_ONLY" ? remainingSeconds : 0,
+      mainTimerSeconds: session.stage === "ANSWERING_ACTIVE" ? remainingSeconds : 0,
+      timeLeft: session.stage === "ANSWERING_ACTIVE" ? remainingSeconds : 0,
+      canSubmitAnswer,
       playerAnswered: hasAnsweredCurrent,
-      selectedOption: studentAnswerPayload,
-      studentAnswerData,
-      responseTimeMs: studentAnswerData?.responseTimeMs,
-      optionStats: common.optionStats,
-      isQuizModeStarted: common.isQuizModeStarted,
-      scheduledStartTime: common.scheduledStartTime,
-      activePreQuizActivity: common.activePreQuizActivity,
-      motivationMessage,
-      correctAnswer: common.isAnswerRevealed ? common.correctAnswer : undefined,
-      explanation: common.isAnswerRevealed ? common.hostCurrentQuestion?.explanation : undefined,
+      studentAnswerData: studentAns,
+      selectedOption: studentAns?.answerPayload ?? null,
+      currentSlide,
+      currentQuestion: currentSlide,
+      currentQId,
+      slides: session.slides,
+      totalPlayers,
+      playerCount: totalPlayers,
+      activePlayersCount: totalPlayers,
+      readyPlayers: readyPlayers.map((p) => ({
+        playerId: p.id,
+        id: p.id,
+        name: p.name,
+        roll: p.roll,
+        avatar: p.avatar,
+      })),
+      readyCount,
+      submittedCount,
+      responsesCount: submittedCount,
+      answeredCount: submittedCount,
+      allVoted: totalPlayers > 0 && submittedCount >= totalPlayers,
+      isAnswerRevealed,
+      correctAnswer: isAnswerRevealed ? (currentSlide?.correctAnswer ?? 0) : undefined,
+      explanation: isAnswerRevealed ? (currentSlide?.explanation || "") : undefined,
+      optionStats,
+      correctCount,
+      wrongCount,
+      timedOutCount,
+      topPlayers,
+      myRank,
+      myScore,
+      studentStats: studentPlayer
+        ? {
+            score: studentPlayer.score,
+            rank: myRank,
+            streak: studentPlayer.streak,
+            correctAnswers: answersList.filter((a) => a.playerId === playerId && a.isCorrect).length,
+          }
+        : null,
+      session: {
+        id: session.id,
+        code: session.code,
+        title: session.title,
+        status: session.status,
+        stage: session.stage,
+        currentSlideIndex,
+        stageStartedAt,
+        stageEndsAt,
+      },
     });
   } catch (error: any) {
     return NextResponse.json(
-      { success: false, message: error.message || "Failed to fetch recovered state" },
+      { success: false, message: error.message || "Failed to fetch session state" },
       { status: 500 }
     );
   }
