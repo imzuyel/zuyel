@@ -473,6 +473,7 @@ export default function AdminPage() {
               {activeTab === "bangla_docs" && <BanglaDocumentGenerator />}
               {activeTab === "id_cards" && <StudentIdCardStudio />}
               {activeTab === "fee_collection" && <FeeCollectionStudio />}
+              {activeTab === "weak_topic_analytics" && <ClassWeakTopicAnalytics />}
               {activeTab === "ai_presentation_studio" && <AiPresentationStudio />}
               {(activeTab === "course_content_builder" || activeTab === "prepare_class") && (
                 <CourseContentBuilderAdmin

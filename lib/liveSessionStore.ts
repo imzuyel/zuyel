@@ -609,3 +609,119 @@ export function computeSafeRemainingSeconds(
   const diff = Math.ceil((target - (Date.now() + serverOffsetMs)) / 1000);
   return Number.isFinite(diff) ? Math.max(0, diff) : fallbackSeconds;
 }
+
+// ============================================================================
+// MYSQL & HYBRID PERSISTENCE ARCHIVER (archiveLiveSessionToDb)
+// Automatically archives completed quiz sessions to both local disk & MySQL
+// ============================================================================
+
+export async function archiveLiveSessionToDb(sessionId: string): Promise<any> {
+  const session = getLiveSession(sessionId);
+  if (!session) return null;
+
+  const now = Date.now();
+  session.stage = "ENDED";
+  session.status = "ENDED";
+  session.updatedAt = now;
+  saveLiveSession(session);
+
+  const playersList = Object.values(session.players || {});
+  const sortedPlayers = [...playersList].sort((a, b) => (b.score || 0) - (a.score || 0));
+  sortedPlayers.forEach((p, idx) => {
+    p.rank = idx + 1;
+  });
+
+  const totalQuestions = session.slides?.length || 0;
+  const totalParticipants = sortedPlayers.length;
+  const avgScore =
+    totalParticipants > 0
+      ? Math.round(sortedPlayers.reduce((acc, p) => acc + (p.score || 0), 0) / totalParticipants)
+      : 0;
+
+  // Question-by-question analytics
+  const questionAnalytics = (session.slides || []).map((slide, idx) => {
+    const slideAnswers = Object.values(session.answers[String(idx)] || {});
+    const correctCount = slideAnswers.filter((a) => a.isCorrect).length;
+    const answeredCount = slideAnswers.length;
+    const accuracy = answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0;
+    return {
+      slideIndex: idx,
+      questionText: slide.questionText || slide.title || slide.question || `প্রশ্ন ${idx + 1}`,
+      questionType: slide.type || slide.questionType || "MCQ",
+      answeredCount,
+      correctCount,
+      accuracy,
+    };
+  });
+
+  const quizResultRecord = {
+    id: `result_${session.id}`,
+    quizId: session.quizId || session.id,
+    sessionId: session.id,
+    sessionCode: session.code,
+    title: session.title || "লাইভ কুইজ সেশন",
+    className: session.className || "দশম শ্রেণি",
+    trade: session.trade || "কম্পিউটার ও আইটি",
+    subject: session.subject || "সাধারণ বিষয়",
+    totalParticipants,
+    totalQuestions,
+    avgScore,
+    completedAt: new Date(now).toISOString(),
+    topPerformers: sortedPlayers.slice(0, 10).map((p) => ({
+      id: p.id,
+      name: p.name,
+      roll: p.roll,
+      score: p.score,
+      avatar: p.avatar,
+      rank: p.rank,
+    })),
+    questionAnalytics,
+    rawParticipants: sortedPlayers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      roll: p.roll,
+      score: p.score,
+      avatar: p.avatar,
+      rank: p.rank,
+    })),
+  };
+
+  try {
+    const { getHybridStore, saveHybridStore } = await import("./hybridStorageEngine");
+    const { prisma: prismaClient, isPrismaAvailable } = await import("./prisma");
+    const store = getHybridStore();
+    if (!store.quizResults) {
+      store.quizResults = [];
+    }
+    const existingIdx = store.quizResults.findIndex(
+      (r: any) => r.sessionId === session.id || r.id === quizResultRecord.id
+    );
+    if (existingIdx >= 0) {
+      store.quizResults[existingIdx] = quizResultRecord;
+    } else {
+      store.quizResults.unshift(quizResultRecord);
+    }
+    saveHybridStore(store);
+
+    if (isPrismaAvailable() && prismaClient) {
+      try {
+        if (prismaClient.liveSession) {
+          await prismaClient.liveSession.updateMany({
+            where: { pin: session.code },
+            data: {
+              status: "COMPLETED",
+              endedAt: new Date(),
+              participantsJson: JSON.stringify(sortedPlayers),
+            },
+          });
+        }
+      } catch (e) {
+        console.warn("[archiveLiveSessionToDb] Prisma liveSession update warning:", e);
+      }
+    }
+  } catch (err) {
+    console.error("[liveSessionStore] archiveLiveSessionToDb error:", err);
+  }
+
+  return quizResultRecord;
+}

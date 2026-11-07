@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
 import { safePrismaQuery, isPrismaAvailable } from "@/lib/prisma";
+import { resolveStudentIdentity } from "@/lib/studentEntityResolver";
 
 export async function POST(
   req: NextRequest,
@@ -14,10 +15,14 @@ export async function POST(
     const studentName = body.studentName;
     const timeSpentSeconds = Math.max(1, Number(body.timeSpentSeconds) || 60);
 
+    // Resolve student identity against master database
+    const resolved = resolveStudentIdentity({ roll: studentRoll, name: studentName });
+    const canonicalName = resolved.isResolved && resolved.canonicalName ? resolved.canonicalName : (studentName || "Student");
+
     const result = chapterLearningStore.completeBlogPart(
       id,
       studentRoll,
-      studentName,
+      canonicalName,
       timeSpentSeconds
     );
 

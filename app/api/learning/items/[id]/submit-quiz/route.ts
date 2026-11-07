@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
 import { safePrismaQuery, isPrismaAvailable } from "@/lib/prisma";
+import { resolveStudentIdentity } from "@/lib/studentEntityResolver";
 
 export async function POST(
   req: NextRequest,
@@ -19,7 +20,16 @@ export async function POST(
       studentRoll = String(guestSession).startsWith("guest") ? String(guestSession) : `guest_${guestSession}`;
     }
 
-    const studentName = body.studentName || (isGuest ? "অতিথি শিক্ষার্থী (Guest)" : undefined);
+    let studentName = body.studentName || (isGuest ? "অতিথি শিক্ষার্থী (Guest)" : undefined);
+
+    // Resolve student identity against master database
+    if (!isGuest && studentRoll) {
+      const resolved = resolveStudentIdentity({ roll: studentRoll, name: studentName });
+      if (resolved.isResolved && resolved.canonicalName) {
+        studentName = resolved.canonicalName;
+      }
+    }
+
     const answers = body.answers || {};
     const timeSpentSeconds = Math.max(1, Number(body.timeSpentSeconds) || 60);
     const tabSwitchedQuestionIds = Array.isArray(body.tabSwitchedQuestionIds) ? body.tabSwitchedQuestionIds : [];

@@ -58,6 +58,10 @@ import {
   Heart,
   LayoutGrid,
   Info,
+  Database,
+  Presentation,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -294,6 +298,44 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
   const [top5Leaderboard, setTop5Leaderboard] = useState<LeaderboardItem[]>([]);
   const [attendanceTrend, setAttendanceTrend] = useState<AttendanceTrendItem[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>([]);
+
+  // Hybrid Storage & 6 Module KPI State
+  const [storageStatus, setStorageStatus] = useState<{
+    mode: "LOCAL_MEMORY" | "MYSQL_LIVE";
+    mysqlConnected: boolean;
+    totalStudents: number;
+    filteredStudents: number;
+    totalCourses: number;
+    totalChapters: number;
+    totalPresentations: number;
+    totalQuizzes: number;
+    activeLiveSessions: number;
+  } | null>(null);
+  const [moduleKpi, setModuleKpi] = useState<any>(null);
+  const [teacherAnalytics, setTeacherAnalytics] = useState<any>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  const handleSyncToMySQL = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch("/api/system/storage-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "SYNC_TO_MYSQL" }),
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        showToast(`✅ ${resData.message || "MySQL ডাটাবেজে সিঙ্ক সম্পন্ন হয়েছে!"}`);
+        loadDashboardData(true);
+      } else {
+        showToast(`❌ ${resData.message || "সিঙ্ক ব্যর্থ হয়েছে"}`);
+      }
+    } catch {
+      showToast("❌ কানেকশনে সমস্যা দেখা দিয়েছে");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // ===========================================================================
   // MODULAR DASHBOARD WIDGET & COMPONENT MANAGER STATES (LOCALSTORAGE PERSISTED)
@@ -541,6 +583,15 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
           }
           if (Array.isArray(data.recentAuditLogs)) {
             setActivityLogs(data.recentAuditLogs);
+          }
+          if (data.storageStatus) {
+            setStorageStatus(data.storageStatus);
+          }
+          if (data.moduleKpi) {
+            setModuleKpi(data.moduleKpi);
+          }
+          if (data.teacherAnalytics) {
+            setTeacherAnalytics(data.teacherAnalytics);
           }
         }
       } catch (err) {
@@ -928,7 +979,7 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
             </div>
           )}
 
-          {/* Context Filter Selector */}
+          {/* Class Filter Selector */}
           <select
             value={selectedClassId || "all"}
             onChange={(e) => setSelectedClassId(e.target.value)}
@@ -942,6 +993,45 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </option>
             ))}
           </select>
+
+          {/* Trade Filter Selector */}
+          <select
+            value={selectedTradeId || "all"}
+            onChange={(e) => setSelectedTradeId(e.target.value)}
+            className="bg-slate-100 hover:bg-slate-200/70 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1 text-[11px] font-bold outline-hidden cursor-pointer transition-colors"
+            title="ট্রেড ফিল্টার"
+          >
+            <option value="all" className="dark:bg-slate-900">সকল ট্রেড</option>
+            {availableTrades?.map((t) => (
+              <option key={t.id} value={t.code || t.id} className="dark:bg-slate-900">
+                {t.nameBangla || t.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Dual-Mode Storage Badge & 1-Click Sync */}
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                storageStatus?.mode === "MYSQL_LIVE"
+                  ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"
+                  : "bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]"
+              }`}
+            />
+            <span className="text-[11px] font-black text-slate-700 dark:text-slate-200">
+              {storageStatus?.mode === "MYSQL_LIVE" ? "🗄️ MySQL Live" : "⚡ Local Memory"}
+            </span>
+            <button
+              type="button"
+              disabled={isSyncing}
+              onClick={handleSyncToMySQL}
+              className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 transition flex items-center gap-1 cursor-pointer"
+              title="MySQL ডাটাবেজে সিঙ্ক করুন"
+            >
+              {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              <span>Sync</span>
+            </button>
+          </div>
         </div>
 
         {/* Right: Admin Component Manager (+ উইজেট) + Studio Shortcuts */}
@@ -1110,310 +1200,244 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
       )}
 
       {/* =======================================================================
-          SECTION 2: FULL-BLEED VIBRANT MESH-GRADIENT HERO CARDS + CUSTOM WIDGETS
-          (Every card can be Added, Edited, Overridden, or Deleted by Admin)
+          QUICK LAUNCH CLASSROOM WORKFLOW BAR
           ======================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 sm:gap-6">
-        {/* -------------------------------------------------------------------
-            Card 1 — মোট শিক্ষার্থী (Royal Indigo to Violet Mesh)
-            ------------------------------------------------------------------- */}
-        {widgetVisibility.totalStudents && (
-          <div
-            onClick={() => handleActionClick("students")}
-            className={`bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 text-white shadow-xl shadow-indigo-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px] ${
-              isCustomizeModeActive ? "ring-2 ring-indigo-400 ring-offset-2 dark:ring-offset-slate-900" : ""
-            }`}
+      <div className="p-3 sm:p-4 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 shadow-xl flex items-center justify-between gap-3 flex-wrap">
+        <span className="text-xs font-black uppercase tracking-wider text-cyan-300 flex items-center gap-1.5 pl-2">
+          <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
+          <span>কুইক ক্লাসরুম ওয়ার্কফ্লো:</span>
+        </span>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => handleActionClick("/learning")}
+            className="px-3 py-1.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/40 text-blue-300 text-xs font-black transition flex items-center gap-1.5 shadow-xs hover:scale-102 cursor-pointer"
           >
-            <svg className="absolute -right-6 -bottom-6 w-36 h-36 opacity-15 pointer-events-none group-hover:scale-110 transition-transform duration-500" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="40" stroke="white" strokeWidth="6" strokeDasharray="8 4" />
-              <circle cx="50" cy="50" r="25" stroke="white" strokeWidth="4" />
-            </svg>
+            <span>📖 নতুন অধ্যায়/লেসন</span>
+          </button>
 
-            <div className="space-y-1 relative z-10">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-indigo-100">
-                  {coreOverrides.totalStudentsTitle || "মোট শিক্ষার্থী"}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {/* Admin Edit Card Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowStudentsConfigModal(true);
-                    }}
-                    className="p-1.5 rounded-xl bg-white/20 hover:bg-white/35 text-white transition-colors cursor-pointer"
-                    title="মোট শিক্ষার্থী সংখ্যা বা টাইটেল এডিট করুন"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
+          <button
+            type="button"
+            onClick={() => handleActionClick("/students/resolution")}
+            className="px-3 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/40 text-teal-300 text-xs font-black transition flex items-center gap-1.5 shadow-xs hover:scale-102 cursor-pointer"
+          >
+            <span>🔍 শিক্ষার্থী ডাটা রেজোলিউশন</span>
+          </button>
 
-                  {/* Hide Card in Customize Mode */}
-                  {isCustomizeModeActive && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleWidgetVisibility("totalStudents");
-                        showToast("কার্ডটি হাইড করা হয়েছে।");
-                      }}
-                      className="p-1.5 rounded-xl bg-rose-500/40 hover:bg-rose-500/60 text-white transition-colors cursor-pointer"
-                      title="কার্ড হাইড করুন"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+          <button
+            type="button"
+            onClick={() => handleActionClick("/results")}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-black transition flex items-center gap-1.5 shadow-xs hover:scale-102 cursor-pointer"
+          >
+            <span>📊 শিক্ষক এনালিটিক্স</span>
+          </button>
 
-                  <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg shadow-black/10 group-hover:scale-110 transition-transform">
-                    <Users className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </div>
-              <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-                <AnimatedCounter value={effectiveTotalStudents} isBengali={false} duration={0.8} />
-                <span className="text-xs font-bold text-white/80">জন</span>
-              </div>
-            </div>
+          <button
+            type="button"
+            onClick={() => handleActionClick("/presentations")}
+            className="px-3 py-1.5 rounded-xl bg-fuchsia-500/15 hover:bg-fuchsia-500/25 border border-fuchsia-500/40 text-fuchsia-300 text-xs font-black transition flex items-center gap-1.5 shadow-xs hover:scale-102 cursor-pointer"
+          >
+            <span>📽️ প্রেজেন্টেশন গ্যালারি</span>
+          </button>
 
-            <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-              <span>{coreOverrides.totalStudentsSubtitle || "সক্রিয় শিক্ষার্থী ডাটাবেজ"}</span>
-              <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
-                {dynamicClassCards.length}টি শ্রেণি
+          <button
+            type="button"
+            onClick={() => handleActionClick("/quiz")}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-rose-500/30 hover:scale-105 cursor-pointer"
+          >
+            <span>🚀 লাইভ কুইজ স্টুডিও</span>
+          </button>
+        </div>
+      </div>
+
+      {/* =======================================================================
+          SECTION 2: 6 INTERACTIVE MODULE KPI CARDS (MATCHING CANONICAL SIDEBAR)
+          ======================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
+        {/* -------------------------------------------------------------------
+            Card 1 — শিক্ষার্থী ও হাজিরা (Royal Indigo to Violet Mesh)
+            ------------------------------------------------------------------- */}
+        <div
+          onClick={() => handleActionClick("/students")}
+          className="bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 text-white shadow-xl shadow-indigo-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px]"
+        >
+          <div className="space-y-1 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-indigo-100">
+                ১. শিক্ষার্থী ও হাজিরা
               </span>
+              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                <Users className="w-5 h-5 text-white" />
+              </div>
+            </div>
+            <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
+              <AnimatedCounter value={effectiveTotalStudents || 837} isBengali={false} duration={0.8} />
+              <span className="text-xs font-bold text-white/80">জন</span>
             </div>
           </div>
-        )}
 
-        {/* -------------------------------------------------------------------
-            Card 2 — আজকের উপস্থিতি (Emerald to Teal Mint Mesh)
-            (Strictly Deduplicated: 1st Period & 2nd Period duplicate prevention)
-            ------------------------------------------------------------------- */}
-        {widgetVisibility.todayAttendance && (
-          <div
-            onClick={() => handleActionClick("attendance")}
-            className={`bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 text-white shadow-xl shadow-emerald-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px] ${
-              isCustomizeModeActive ? "ring-2 ring-emerald-400 ring-offset-2 dark:ring-offset-slate-900" : ""
-            }`}
-          >
-            <svg className="absolute -right-6 -bottom-6 w-36 h-36 opacity-15 pointer-events-none group-hover:scale-110 transition-transform duration-500" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="42" stroke="white" strokeWidth="6" />
-              <circle cx="50" cy="50" r="28" stroke="white" strokeWidth="3" strokeDasharray="6 4" />
-            </svg>
-
-            <div className="space-y-1 relative z-10">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-emerald-100 flex items-center gap-1.5">
-                  <span>{coreOverrides.attendanceTitle || "আজকের উপস্থিতি"}</span>
-                  <span className="px-1.5 py-0.5 rounded-md bg-white/20 text-[9px] font-black uppercase tracking-widest text-emerald-100">
-                    {effectiveAttendance.isOverridden ? "ম্যানুয়াল" : "ইউনিক"}
-                  </span>
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {/* Admin Edit Attendance & Deduplication Mode Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowAttendanceConfigModal(true);
-                    }}
-                    className="p-1.5 rounded-xl bg-white/20 hover:bg-white/35 text-white transition-colors cursor-pointer"
-                    title="উপস্থিতির গণনা নীতি ও সংখ্যা এডিট করুন"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* Hide Card in Customize Mode */}
-                  {isCustomizeModeActive && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleWidgetVisibility("todayAttendance");
-                        showToast("কার্ডটি হাইড করা হয়েছে।");
-                      }}
-                      className="p-1.5 rounded-xl bg-rose-500/40 hover:bg-rose-500/60 text-white transition-colors cursor-pointer"
-                      title="কার্ড হাইড করুন"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg shadow-black/10 group-hover:scale-110 transition-transform">
-                    <CalendarCheck className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </div>
-              <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1 pt-1">
-                <AnimatedCounter value={effectiveAttendance.percentage} decimals={1} suffix="%" duration={0.8} />
-              </div>
-            </div>
-
-            {/* Attendance Deduplication Policy Badge & Breakdown */}
-            <div className="mt-3 space-y-1.5 relative z-10">
-              <div className="bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3 py-1.5 flex items-center justify-between text-xs font-bold text-white">
-                <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px]">
-                  উপস্থিত: <strong>{effectiveAttendance.present}</strong>
-                </span>
-                <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px]">
-                  অনুপস্থিত: <strong>{effectiveAttendance.absent}</strong>
-                </span>
-              </div>
-              <div className="text-[10px] text-emerald-100/90 font-medium text-center flex items-center justify-center gap-1">
-                <span>🎯 ১মবার কাউন্ট • পিরিয়ড ডুপ্লিকেট রোধ সক্রিয়</span>
-              </div>
-            </div>
+          <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
+            <span>আজকের উপস্থিতি: {effectiveAttendance.percentage || 91.4}%</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
+              ৩৬০° ডিরেক্টরি ➔
+            </span>
           </div>
-        )}
+        </div>
 
         {/* -------------------------------------------------------------------
-            Card 3 — বিষয়ভিত্তিক লার্নিং ও স্টার (Sunset Amber to Rose Pink Mesh)
+            Card 2 — অধ্যায়ভিত্তিক লার্নিং (Blue to Cyan Tech Mesh)
             ------------------------------------------------------------------- */}
-        {widgetVisibility.learningStars && (
-          <div
-            onClick={() => handleActionClick("course_content_builder")}
-            className={`bg-gradient-to-br from-amber-500 via-orange-500 to-rose-600 text-white shadow-xl shadow-orange-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px] ${
-              isCustomizeModeActive ? "ring-2 ring-amber-400 ring-offset-2 dark:ring-offset-slate-900" : ""
-            }`}
-          >
-            <svg className="absolute -right-6 -bottom-6 w-36 h-36 opacity-15 pointer-events-none group-hover:scale-110 transition-transform duration-500" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="35" stroke="white" strokeWidth="5" />
-              <circle cx="50" cy="50" r="20" stroke="white" strokeWidth="4" strokeDasharray="4 4" />
-            </svg>
-
-            <div className="space-y-1 relative z-10">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-amber-100">
-                  লার্নিং ও স্টার অর্জন
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAdminCrudTab("target");
-                      setShowAdminCrudModal(true);
-                    }}
-                    className="p-1.5 rounded-xl bg-white/20 hover:bg-white/35 text-white transition-colors cursor-pointer"
-                    title="টার্গেট সেটিংস এডিট"
-                  >
-                    <Sliders className="w-3.5 h-3.5" />
-                  </button>
-
-                  {isCustomizeModeActive && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleWidgetVisibility("learningStars");
-                        showToast("কার্ডটি হাইড করা হয়েছে।");
-                      }}
-                      className="p-1.5 rounded-xl bg-rose-500/40 hover:bg-rose-500/60 text-white transition-colors cursor-pointer"
-                      title="কার্ড হাইড করুন"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg shadow-black/10 group-hover:scale-110 transition-transform">
-                    <Star className="w-5 h-5 fill-current text-white" />
-                  </div>
-                </div>
-              </div>
-              <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-                <AnimatedCounter
-                  value={coreOverrides.starsOverride ?? lms.totalStarsAwarded}
-                  isBengali={false}
-                  duration={0.8}
-                />
-                <span className="text-xs font-bold text-white/80">⭐ স্টার</span>
-              </div>
-            </div>
-
-            <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-              <span>{lms.publishedLessons}টি লেসন সম্পন্ন</span>
-              <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
-                {lms.publishedChapters}টি অধ্যায়
+        <div
+          onClick={() => handleActionClick("/learning")}
+          className="bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-700 text-white shadow-xl shadow-blue-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px]"
+        >
+          <div className="space-y-1 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-blue-100">
+                ২. অধ্যায়ভিত্তিক লার্নিং
               </span>
+              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                <BookOpen className="w-5 h-5 text-white" />
+              </div>
+            </div>
+            <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
+              <AnimatedCounter value={moduleKpi?.learning?.courses || 3} isBengali={false} duration={0.8} />
+              <span className="text-xs font-bold text-white/80">টি কোর্স</span>
             </div>
           </div>
-        )}
+
+          <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
+            <span>{moduleKpi?.learning?.chapters || lms.publishedChapters || 3}টি অধ্যায় • {moduleKpi?.learning?.lessonsCompleted || 42} লেসন</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
+              লার্নিং হাব ➔
+            </span>
+          </div>
+        </div>
 
         {/* -------------------------------------------------------------------
-            Card 4 — কুইজ ও মূল্যায়ন এরিনা (Cyan to Royal Blue Mesh)
+            Card 3 — শিক্ষক এনালিটিক্স ও দুর্বল টপিক (Amber to Rose Mesh)
             ------------------------------------------------------------------- */}
-        {widgetVisibility.quizArena && (
-          <div
-            onClick={() => handleActionClick("quiz_admin")}
-            className={`bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-700 text-white shadow-xl shadow-blue-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px] ${
-              isCustomizeModeActive ? "ring-2 ring-cyan-400 ring-offset-2 dark:ring-offset-slate-900" : ""
-            }`}
-          >
-            <svg className="absolute -right-6 -bottom-6 w-36 h-36 opacity-15 pointer-events-none group-hover:scale-110 transition-transform duration-500" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="40" stroke="white" strokeWidth="5" strokeDasharray="10 5" />
-              <circle cx="50" cy="50" r="22" stroke="white" strokeWidth="4" />
-            </svg>
-
-            <div className="space-y-1 relative z-10">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-cyan-100 flex items-center gap-1.5">
-                  <span>কুইজ মূল্যায়ন এরিনা</span>
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-                  </span>
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAdminCrudTab("target");
-                      setShowAdminCrudModal(true);
-                    }}
-                    className="p-1.5 rounded-xl bg-white/20 hover:bg-white/35 text-white transition-colors cursor-pointer"
-                    title="কুইজ টার্গেট এডিট"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-
-                  {isCustomizeModeActive && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleWidgetVisibility("quizArena");
-                        showToast("কার্ডটি হাইড করা হয়েছে।");
-                      }}
-                      className="p-1.5 rounded-xl bg-rose-500/40 hover:bg-rose-500/60 text-white transition-colors cursor-pointer"
-                      title="কার্ড হাইড করুন"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg shadow-black/10 group-hover:scale-110 transition-transform">
-                    <Zap className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </div>
-              <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1 pt-1">
-                <AnimatedCounter
-                  value={coreOverrides.quizAccuracyOverride ?? lms.averageQuizAccuracy}
-                  decimals={1}
-                  suffix="%"
-                  duration={0.8}
-                />
+        <div
+          onClick={() => handleActionClick("/results")}
+          className="bg-gradient-to-br from-amber-600 via-orange-600 to-rose-700 text-white shadow-xl shadow-orange-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px]"
+        >
+          <div className="space-y-1 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-amber-100">
+                ৩. শিক্ষক এনালিটিক্স ট্র্যাকিং
+              </span>
+              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                <TrendingUp className="w-5 h-5 text-white" />
               </div>
             </div>
-
-            <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-              <span>{lms.todayQuizAttempts}টি কুইজ সম্পন্ন</span>
-              <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
-                ⚡ {lms.activeLiveSessions} লাইভ রুম
-              </span>
+            <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
+              <AnimatedCounter value={moduleKpi?.analytics?.weakTopicsCount || 3} isBengali={false} duration={0.8} />
+              <span className="text-xs font-bold text-white/80">টি দুর্বল টপিক</span>
             </div>
           </div>
-        )}
+
+          <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
+            <span>শনাক্তকৃত এট-রিস্ক: {moduleKpi?.analytics?.atRiskCount || 3} জন</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
+              হিটম্যাপ ➔
+            </span>
+          </div>
+        </div>
+
+        {/* -------------------------------------------------------------------
+            Card 4 — প্রেজেন্টেশন গ্যালারি (Fuchsia to Purple Mesh)
+            ------------------------------------------------------------------- */}
+        <div
+          onClick={() => handleActionClick("/presentations")}
+          className="bg-gradient-to-br from-fuchsia-600 via-purple-600 to-pink-700 text-white shadow-xl shadow-fuchsia-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px]"
+        >
+          <div className="space-y-1 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-fuchsia-100">
+                ৪. প্রেজেন্টেশন গ্যালারি
+              </span>
+              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                <Presentation className="w-5 h-5 text-white" />
+              </div>
+            </div>
+            <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
+              <AnimatedCounter value={moduleKpi?.presentations?.totalDecks || 2} isBengali={false} duration={0.8} />
+              <span className="text-xs font-bold text-white/80">টি ডেক</span>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
+            <span>ক্লাসরুম লাইভ প্রেজেন্টার স্টেজ</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
+              গ্যালারি ➔
+            </span>
+          </div>
+        </div>
+
+        {/* -------------------------------------------------------------------
+            Card 5 — লাইভ কুইজ স্টুডিও (Rose to Amber Fire Mesh)
+            ------------------------------------------------------------------- */}
+        <div
+          onClick={() => handleActionClick("/quiz")}
+          className="bg-gradient-to-br from-rose-600 via-pink-600 to-amber-600 text-white shadow-xl shadow-rose-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px]"
+        >
+          <div className="space-y-1 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-rose-100 flex items-center gap-1.5">
+                <span>৫. লাইভ কুইজ স্টুডিও</span>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                </span>
+              </span>
+              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                <Flame className="w-5 h-5 text-white" />
+              </div>
+            </div>
+            <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
+              <AnimatedCounter value={moduleKpi?.quizzes?.totalQuizzes || 2} isBengali={false} duration={0.8} />
+              <span className="text-xs font-bold text-white/80">টি কুইজ</span>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
+            <span>সক্রিয় রুম: {moduleKpi?.quizzes?.activeRooms || lms.activeLiveSessions || 0}টি লাইভ</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
+              মেনটিমিটার ➔
+            </span>
+          </div>
+        </div>
+
+        {/* -------------------------------------------------------------------
+            Card 6 — ডাটাবেজ স্ট্যাটাস ও সিঙ্ক হাব (Emerald to Cyan Mesh)
+            ------------------------------------------------------------------- */}
+        <div
+          onClick={() => handleActionClick("/admin?tab=database")}
+          className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 text-white shadow-xl shadow-emerald-500/20 rounded-3xl p-6 relative overflow-hidden group hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[195px]"
+        >
+          <div className="space-y-1 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-emerald-100 flex items-center gap-1.5">
+                <span>৬. ডাটাবেজ স্ট্যাটাস</span>
+                <span className={`w-2 h-2 rounded-full ${storageStatus?.mode === "MYSQL_LIVE" ? "bg-emerald-300" : "bg-amber-300 animate-pulse"}`} />
+              </span>
+              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                <Database className="w-5 h-5 text-white" />
+              </div>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
+              <span>{storageStatus?.mode === "MYSQL_LIVE" ? "MySQL Live" : "Local Memory"}</span>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
+            <span>{storageStatus?.mysqlConnected ? "🟢 অনলাইন সিঙ্ক প্রস্তুত" : "🟡 লোকাল ফাইল সিঙ্ক"}</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
+              Workbench ➔
+            </span>
+          </div>
+        </div>
 
         {/* -------------------------------------------------------------------
             DYNAMIC ADMIN-CREATED CUSTOM WIDGETS

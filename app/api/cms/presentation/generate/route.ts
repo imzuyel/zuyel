@@ -2,6 +2,7 @@ import { Type } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { generateWithFailover } from "@/lib/aiFailoverPipeline";
 import { safeParseAiObject } from "@/lib/safeJsonParser";
+import { upsertHybridPresentation } from "@/lib/hybridStorageEngine";
 
 // Standardize Lucide icon options for better rendering safety
 const VALID_ICONS = [
@@ -201,9 +202,26 @@ Return ONLY the JSON response without any Markdown formatting or backticks.`;
       });
     }
 
+    // Auto-save generated presentation into dual-mode hybrid storage
+    try {
+      const savedDeck = upsertHybridPresentation({
+        title: topic,
+        className,
+        trade: trade || "কারিগরি শাখা",
+        subject: topic,
+        theme: "cyber_cyan",
+        slides: data.slides,
+        author: "PTSC AI Presentation Studio",
+      });
+      data.id = savedDeck.id;
+    } catch (saveErr) {
+      console.warn("Could not auto-save generated presentation to hybridStore:", saveErr);
+    }
+
     return NextResponse.json({
       success: true,
       presentation: data,
+      savedId: data.id,
       model: modelName || "gemini-flash-latest",
       provider: providerName || "gemini"
     });

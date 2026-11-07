@@ -73,6 +73,7 @@ import {
   parseClassNumeric,
 } from "@/lib/academicStructure";
 import { useAcademySettings } from "@/lib/useAcademySettings";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
 import { saveCustomLessonQuiz, StudentQuizQuestion } from "@/lib/studentIntelligenceStore";
 import { TWENTY_QUIZ_TEMPLATES, QuizTemplateTheme } from "@/lib/quizEngineTypes";
 import UniversalQuestionRenderer from "@/components/quiz/shared/UniversalQuestionRenderer";
@@ -166,6 +167,19 @@ export default function CourseContentBuilderAdmin({
   // Filters for Class and Trade (Strict rule: 6-8 NO trade, 9-12 has trade)
   const [filterClass, setFilterClass] = useState<number>(9);
   const [filterTrade, setFilterTrade] = useState<string>("all");
+  const [filterSubject, setFilterSubject] = useState<string>("all");
+  const [aiTargetChapterId, setAiTargetChapterId] = useState<number | "NEW_CHAPTER">("NEW_CHAPTER");
+
+  const globalAcademic = useGlobalAcademic();
+
+  useEffect(() => {
+    if (globalAcademic?.activeClass?.numericValue) {
+      setFilterClass(globalAcademic.activeClass.numericValue);
+      if (globalAcademic.activeTrade?.code && doesClassHaveTrade(globalAcademic.activeClass.numericValue)) {
+        setFilterTrade(globalAcademic.activeTrade.code);
+      }
+    }
+  }, [globalAcademic?.activeClass?.numericValue, globalAcademic?.activeTrade?.code]);
 
   const adminClassHasTrade = useMemo(() => {
     return doesClassHaveTrade(filterClass);
@@ -451,7 +465,30 @@ export default function CourseContentBuilderAdmin({
       toast.error("প্রথমে কোর্স নির্বাচন করুন");
       return;
     }
-    const targetChapter = selectedCourse.chapters[0];
+    let targetChapterId: number;
+    if (aiTargetChapterId === "NEW_CHAPTER" || !selectedCourse.chapters || selectedCourse.chapters.length === 0) {
+      const chRes = await fetch("/api/learning/chapters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId: selectedCourse.id,
+          title: generatedPackage.blogPost.title,
+          titleBangla: `অধ্যায় ${(selectedCourse.chapters?.length || 0) + 1}: ${generatedPackage.blogPost.title}`,
+          description: generatedPackage.lessonSummary.briefOverview,
+          orderIndex: (selectedCourse.chapters?.length || 0) + 1,
+          isPublished: true,
+        }),
+      });
+      const chData = await chRes.json();
+      if (!chData.success || !chData.chapter) {
+        toast.error(chData.error || "অধ্যায় তৈরি করতে ব্যর্থ হয়েছে");
+        return;
+      }
+      targetChapterId = chData.chapter.id;
+    } else {
+      targetChapterId = Number(aiTargetChapterId);
+    }
+    const targetChapter = { id: targetChapterId };
     if (!targetChapter) {
       toast.error("নির্বাচিত কোর্সে কোনো অধ্যায় নেই। প্রথমে একটি অধ্যায় তৈরি করুন।");
       return;
@@ -1991,18 +2028,31 @@ export default function CourseContentBuilderAdmin({
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={String(aiTargetChapterId)}
+                    onChange={(e) => setAiTargetChapterId(e.target.value === "NEW_CHAPTER" ? "NEW_CHAPTER" : Number(e.target.value))}
+                    className="py-1.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200"
+                  >
+                    <option value="NEW_CHAPTER">✨ নতুন অধ্যায় হিসেবে তৈরি ও সেভ করুন</option>
+                    {selectedCourse?.chapters?.map((ch) => (
+                      <option key={ch.id} value={ch.id}>
+                        {ch.titleBangla || ch.title}
+                      </option>
+                    ))}
+                  </select>
+
                   <button
                     onClick={handleAddAiPackageToChapter}
                     disabled={isAddingToChapter}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
                   >
                     {isAddingToChapter ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <CheckCircle2 className="w-4 h-4" />
                     )}
-                    <span>অধ্যায়ে ব্লক হিসেবে যুক্ত করুন</span>
+                    <span>💾 অধ্যায়ে যুক্ত ও সেভ করুন</span>
                   </button>
                 </div>
               </div>

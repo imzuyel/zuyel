@@ -247,6 +247,8 @@ export default function AdminSidebar({
             id: "weak_topic_analytics",
             label: "শিক্ষক অ্যানালিটিক্স ও ট্র্যাকিং",
             icon: BrainCircuit,
+            badge: "লাইভ",
+            badgeColor: "bg-rose-500 text-white font-bold",
             keywords: ["weak", "analytics", "mistakes", "অ্যানালিটিক্স", "দুর্বল টপিক"],
             colorTheme: {
               iconText: "text-rose-600 dark:text-rose-400",
@@ -262,6 +264,8 @@ export default function AdminSidebar({
             id: "presentations",
             label: "প্রেজেন্টেশন ও গ্যালারি রিডার",
             icon: Layers,
+            badge: "৪ ডেক",
+            badgeColor: "bg-amber-500 text-slate-950 font-bold",
             keywords: ["slides", "presentation", "projection", "স্লাইড"],
             colorTheme: {
               iconText: "text-amber-600 dark:text-amber-400",

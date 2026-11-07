@@ -244,6 +244,127 @@ export function calculateQuizStars(
 
 const INITIAL_COURSES: CourseItem[] = [
   {
+    id: 10,
+    code: "CRS-IT-901",
+    title: "IT Support & IoT Basics - Part 1 (Computer Fundamentals & Networking)",
+    titleBangla: "আইটি সাপোর্ট ও আইওটি বেসিক্স - ১ম পত্র (কম্পিউটার ও নেটওয়ার্কিং)",
+    description: "কারিগরি শিক্ষা বোর্ডের নবম শ্রেণির শিক্ষার্থীদের জন্য আইটি সাপোর্ট, কম্পিউটার হার্ডওয়্যার এসেম্বলিং, নেটওয়ার্ক ক্যাবলিং ও আইওটি সেন্সরের পরিচিতি।",
+    classId: 9,
+    className: "Class 9 (Vocational)",
+    numericClass: 9,
+    tradeId: 102,
+    tradeCode: "IT-IOT",
+    tradeName: "IT Support & IoT Basics (আইটি সাপোর্ট ও আইওটি বেসিক্স)",
+    subjectId: 201,
+    subjectCode: "IT-IOT-101",
+    subjectName: "আইটি সাপোর্ট ও আইওটি বেসিক্স-১",
+    thumbnailUrl: "https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=800&auto=format&fit=crop&q=80",
+    badgeGradient: "from-blue-600 to-indigo-700",
+    isPublished: true,
+    orderIndex: 1,
+    totalXp: 400,
+    estimatedHours: 8.0,
+    difficulty: "Beginner",
+    createdAt: "2026-01-10T00:00:00.000Z",
+    updatedAt: "2026-02-01T00:00:00.000Z",
+    chapters: [
+      {
+        id: 1001,
+        courseId: 10,
+        chapterNumber: 1,
+        title: "Computer Hardware Assembly, BIOS Setup & Operating Systems",
+        titleBangla: "অধ্যায় ১: কম্পিউটার হার্ডওয়্যার এসেম্বলিং, বায়োস সেটআপ ও অপারেটিং সিস্টেম",
+        description: "কম্পিউটারের বিভিন্ন অভ্যন্তরীণ অংশ সংযোজন, রিমুভেবল ড্রাইভ থেকে বুট এবং ট্রাবলশুটিং।",
+        orderIndex: 1,
+        isPublished: true,
+        unlockRule: "IMMEDIATE",
+        requiredMinXp: 0,
+        createdAt: "2026-01-10T00:00:00.000Z",
+        updatedAt: "2026-02-01T00:00:00.000Z",
+        items: [
+          {
+            id: 10001,
+            chapterId: 1001,
+            orderIndex: 1,
+            itemType: "BLOG_PART",
+            title: "Part 1: PC Building Essentials, Safety & Anti-Static Precautions",
+            titleBangla: "১.১ ব্লগ পার্ট ১: পিসি বিল্ডিংয়ের মূল নিয়ম ও অ্যান্টি-স্ট্যাটিক সতর্কতা",
+            isPublished: true,
+            isMandatory: true,
+            xpReward: 50,
+            unlockRule: "UNLOCKED",
+            minScoreToUnlockNext: 0,
+            attemptLimit: 0,
+            passingScore: 100,
+            durationMinutes: 5,
+            blogPartNumber: 1,
+            readTimeMinutes: 5,
+            summary: "কম্পিউটার এসেম্বল করার সময় ESD রিস্ট ব্যান্ড ব্যবহার এবং প্রসেসর ইন্সটলেশনের সঠিক ধাপসমূহ।",
+            keyTakeaways: [
+              "ইলেক্ট্রোস্ট্যাটিক ডিসচার্জ (ESD) থেকে স্পর্শকাতর ইলেকট্রনিক্স চিপ রক্ষা করা আবশ্যক।",
+              "প্রসেসর লাগানোর সময় ত্রিভুজাকার পিন-১ মার্কার লক্ষ্য রাখতে হয়।",
+              "থার্মাল পেস্ট প্রসেসর ও হিটসিঙ্কের তাপ পরিবহনে সহায়তা করে।"
+            ],
+            contentMarkdown: `# ১.১ পিসি বিল্ডিংয়ের মূল নিয়ম ও অ্যান্টি-স্ট্যাটিক সতর্কতা
+
+কম্পিউটার এসেম্বলিং হলো কারিগরি শিক্ষার্থীদের জন্য প্রথম ধাপের একটি মৌলিক প্র্যাকটিক্যাল দক্ষতা।
+
+## ১. নিরাপদ এসেম্বলিং পরিবেশ
+- অ্যান্টি-স্ট্যাটিক ম্যাট বা গ্রাউন্ডেড টেবিল ব্যবহার করুন।
+- প্রসেসর বা র‍্যামের গোল্ডেন কন্টাক্ট সরাসরি খালি হাতে স্পর্শ করবেন না।
+
+## ২. এসেম্বলিং ক্রম
+1. মাদারবোর্ডে CPU ও কুলার স্থাপন।
+2. RAM স্লটে সঠিক ওরিয়েন্টেশনে মেমরি লক করা।
+3. কেসিংয়ে মাদারবোর্ড স্ক্রু দিয়ে সুরক্ষিত করা।
+4. SMPS পাওয়ার ক্যাবল (24-pin ATX, 8-pin CPU) সংযোগ প্রদান।`,
+            createdAt: "2026-01-10T00:00:00.000Z",
+            updatedAt: "2026-02-01T00:00:00.000Z",
+          },
+          {
+            id: 10002,
+            chapterId: 1001,
+            orderIndex: 2,
+            itemType: "QUIZ",
+            title: "Quiz 1: PC Assembly & Component Safety Verification",
+            titleBangla: "১.২ কুইজ ১: কম্পিউটার এসেম্বলিং ও নিরাপত্তা যাচাই",
+            isPublished: true,
+            isMandatory: true,
+            xpReward: 60,
+            unlockRule: "PREVIOUS_ITEM_COMPLETED",
+            minScoreToUnlockNext: 60,
+            attemptLimit: 3,
+            passingScore: 60,
+            durationMinutes: 5,
+            timeLimitSeconds: 300,
+            shuffleQuestions: true,
+            showCorrectAnswersAfter: true,
+            quizQuestions: [
+              {
+                id: "q-10002-1",
+                questionText: "কম্পিউটার যন্ত্রাংশ এসেম্বল করার পূর্বে ইলেক্ট্রোস্ট্যাটিক ডিসচার্জ থেকে রক্ষা পেতে কোনটি ব্যবহার করা উচিত?",
+                options: ["অ্যান্টি-স্ট্যাটিক রিস্ট স্ট্র্যাপ (ESD Strap)", "সাধারণ উলের গ্লাভস", "লোহার আংটি", "প্লাস্টিকের ক্যাপ"],
+                correctOptionIndex: 0,
+                explanation: "ESD রিস্ট স্ট্র্যাপ শরীরের স্থির বিদ্যুৎ নিরাপদ মাটিতে ডিসচার্জ করে চিপ পুড়ে যাওয়া রোধ করে।",
+                marks: 1
+              },
+              {
+                id: "q-10002-2",
+                questionText: "প্রসেসর এবং কুলিং হিটসিঙ্কের মধ্যে তাপ পরিবহন বৃদ্ধির জন্য কী লাগানো হয়?",
+                options: ["থার্মাল পেস্ট (Thermal Paste)", "সুপার গ্লু", "সাধারণ তেল", "সিলিকন টেপ"],
+                correctOptionIndex: 0,
+                explanation: "থার্মাল পেস্ট মাইক্রোস্কোপিক বাতাসের ফাঁক দূর করে তাপ পরিবাহিতা নিশ্চিত করে।",
+                marks: 1
+              }
+            ],
+            createdAt: "2026-01-10T00:00:00.000Z",
+            updatedAt: "2026-02-01T00:00:00.000Z",
+          }
+        ]
+      }
+    ]
+  },
+  {
     id: 1,
     code: "CRS-GEW-901",
     title: "Electrical Safety & Circuit Analysis (Ohm's Law)",
@@ -1517,11 +1638,210 @@ $$I_{total} = \\frac{V}{R_{eq}} = \\frac{24}{5} = 4.8 \\text{ Amperes}$$`,
 
 // In-Memory Database Store (singleton persistence in Node process)
 class ChapterLearningStore {
-  private courses: CourseItem[] = JSON.parse(JSON.stringify(INITIAL_COURSES));
+  private courses: CourseItem[] = [];
   private progressStore: Map<string, StudentItemProgressData[]> = new Map(); // studentRoll -> progresses
 
   constructor() {
-    this.seedSampleStudentProgress();
+    let loadedFromHybrid = false;
+    if (typeof window === "undefined") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getHybridLearningCourses, getHybridLearningProgress } = require("./hybridStorageEngine");
+        const hybridCourses = getHybridLearningCourses();
+        if (Array.isArray(hybridCourses) && hybridCourses.length > 0) {
+          this.courses = hybridCourses;
+          loadedFromHybrid = true;
+        }
+        const hybridProgress = getHybridLearningProgress();
+        if (hybridProgress && Object.keys(hybridProgress).length > 0) {
+          Object.entries(hybridProgress).forEach(([roll, list]) => {
+            if (Array.isArray(list)) {
+              this.progressStore.set(roll, list);
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("[ChapterLearningStore] Hybrid store read fallback:", err);
+      }
+    }
+
+    if (!loadedFromHybrid) {
+      this.courses = JSON.parse(JSON.stringify(INITIAL_COURSES));
+      this.seedSampleStudentProgress();
+      this.persistCoursesToHybrid();
+      this.persistProgressToHybrid();
+    }
+  }
+
+  private persistCoursesToHybrid() {
+    if (typeof window === "undefined") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { saveHybridLearningCourses } = require("./hybridStorageEngine");
+        saveHybridLearningCourses(this.courses);
+      } catch (err) {
+        console.warn("[ChapterLearningStore] Failed to persist courses to hybrid store:", err);
+      }
+    }
+  }
+
+  private persistProgressToHybrid() {
+    if (typeof window === "undefined") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { saveHybridLearningProgress } = require("./hybridStorageEngine");
+        const map: Record<string, StudentItemProgressData[]> = {};
+        this.progressStore.forEach((list, roll) => {
+          map[roll] = list;
+        });
+        saveHybridLearningProgress(map);
+      } catch (err) {
+        console.warn("[ChapterLearningStore] Failed to persist progress to hybrid store:", err);
+      }
+    }
+  }
+
+  private generateFallbackCourseForFilter(clsNum: number, tradeCode: string): CourseItem {
+    const nextId = this.courses.length > 0 ? Math.max(...this.courses.map(c => c.id)) + 1 : 20;
+    const now = new Date().toISOString();
+    const tradeLabels: Record<string, { en: string; bn: string; subEn: string; subBn: string }> = {
+      "IT-IOT": {
+        en: "IT Support & IoT Basics",
+        bn: "আইটি সাপোর্ট ও আইওটি বেসিক্স",
+        subEn: "Computer Application & Networking",
+        subBn: "কম্পিউটার অ্যাপ্লিকেশন ও নেটওয়ার্কিং",
+      },
+      "GEW": {
+        en: "General Electrical Workshop",
+        bn: "জেনারেল ইলেকট্রিক্যাল ওয়ার্কশপ",
+        subEn: "Electrical Circuits & Machinery",
+        subBn: "ইলেকট্রিক্যাল সার্কিট ও মেশিনারি",
+      },
+      "CE": {
+        en: "Consumer Electronics",
+        bn: "কনজিউমার ইলেকট্রনিক্স",
+        subEn: "Solid State Devices & Audio Systems",
+        subBn: "সলিড স্টেট ডিভাইস ও অডিও সিস্টেম",
+      },
+      "AMB": {
+        en: "Apparel Manufacturing Basics",
+        bn: "পোশাক তৈরি ও ফ্যাশন বেসিক্স",
+        subEn: "Pattern Making & Sewing Operations",
+        subBn: "প্যাটার্ন তৈরি ও সেলাই প্রযুক্তি",
+      },
+    };
+
+    const info = tradeLabels[tradeCode] || tradeLabels["IT-IOT"];
+
+    return {
+      id: nextId,
+      code: `CRS-${tradeCode}-${clsNum}01`,
+      title: `${info.en} - Class ${clsNum}`,
+      titleBangla: `${info.bn} (শ্রেণি ${clsNum})`,
+      description: `কারিগরি শিক্ষা বোর্ডের ${clsNum}ম শ্রেণির শিক্ষার্থীদের জন্য ${info.bn} এর মানসম্মত অধ্যায়ভিত্তিক শিক্ষণ ও ল্যাব নির্দেশিকা।`,
+      classId: clsNum,
+      className: `Class ${clsNum} (Vocational)`,
+      numericClass: clsNum,
+      tradeId: 101,
+      tradeCode: tradeCode,
+      tradeName: info.bn,
+      subjectId: 500 + clsNum,
+      subjectCode: `${tradeCode}-${clsNum}01`,
+      subjectName: info.subBn,
+      thumbnailUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=80",
+      badgeGradient: "from-cyan-600 to-blue-700",
+      isPublished: true,
+      orderIndex: 1,
+      totalXp: 350,
+      estimatedHours: 8.0,
+      difficulty: "Beginner",
+      createdAt: now,
+      updatedAt: now,
+      chapters: [
+        {
+          id: nextId * 100 + 1,
+          courseId: nextId,
+          chapterNumber: 1,
+          title: `Foundations of ${info.en}`,
+          titleBangla: `অধ্যায় ১: ${info.bn} এর প্রাথমিক ধারণা ও কারিগরি নিরাপত্তা`,
+          description: `কর্মশালা নিরাপত্তা, প্রাথমিক সরঞ্জাম ও মূল ধারণাসমূহ।`,
+          orderIndex: 1,
+          isPublished: true,
+          unlockRule: "IMMEDIATE",
+          requiredMinXp: 0,
+          createdAt: now,
+          updatedAt: now,
+          items: [
+            {
+              id: nextId * 1000 + 1,
+              chapterId: nextId * 100 + 1,
+              orderIndex: 1,
+              itemType: "BLOG_PART",
+              title: "Part 1: Workshop Safety and Fundamentals",
+              titleBangla: "১.১ ব্লগ পার্ট ১: কর্মশালায় ব্যক্তিগত নিরাপত্তা ও মৌলিক পরিচিতি",
+              isPublished: true,
+              isMandatory: true,
+              xpReward: 50,
+              unlockRule: "UNLOCKED",
+              minScoreToUnlockNext: 0,
+              attemptLimit: 0,
+              passingScore: 100,
+              durationMinutes: 5,
+              blogPartNumber: 1,
+              readTimeMinutes: 5,
+              summary: `${info.bn} ট্রেডের শিক্ষার্থীদের জন্য ল্যাব প্রটোকল ও প্রাথমিক নির্দেশনাবলী।`,
+              keyTakeaways: [
+                "কর্মশালায় সর্বদা ব্যক্তিগত সুরক্ষা সামগ্রী (PPE) পরিধান করুন।",
+                "টুলস ও ইকুইপমেন্ট ব্যবহারের পূর্বে সঠিক নিয়ম জেনে নেওয়া আবশ্যক।",
+                "কারিগরি কাজে নিরাপত্তা এবং শৃঙ্খলা সর্বাধিক গুরুত্বপূর্ণ।"
+              ],
+              contentMarkdown: `# ১.১ কর্মশালায় ব্যক্তিগত নিরাপত্তা ও মৌলিক পরিচিতি\n\n${info.bn} বিষয়ে আপনাকে স্বাগতম। কারিগরি শিক্ষার প্রতিটি পদক্ষেপে নিরাপত্তা প্রথম অগ্রাধিকার।\n\n## মৌলিক নির্দেশিকা\n1. ল্যাবে প্রবেশের পূর্বে উপযুক্ত ড্রেসকোড ও জুতা নিশ্চিত করুন।\n2. শিক্ষক বা ইন্সট্রাক্টরের অনুমতি ব্যতীত কোনো পাওয়ার সাপ্লাই চালু করবেন না।\n3. কাজ শেষে প্রতিটি সরঞ্জাম পরিষ্কার করে নির্ধারিত স্থানে সংরক্ষণ করুন।`,
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: nextId * 1000 + 2,
+              chapterId: nextId * 100 + 1,
+              orderIndex: 2,
+              itemType: "QUIZ",
+              title: "Quiz 1: Safety & Protocol Evaluation",
+              titleBangla: "১.২ কুইজ ১: কর্মশালা নিরাপত্তা ও প্রাথমিক ধারণা যাচাই",
+              isPublished: true,
+              isMandatory: true,
+              xpReward: 60,
+              unlockRule: "PREVIOUS_ITEM_COMPLETED",
+              minScoreToUnlockNext: 60,
+              attemptLimit: 3,
+              passingScore: 60,
+              durationMinutes: 4,
+              timeLimitSeconds: 240,
+              shuffleQuestions: true,
+              showCorrectAnswersAfter: true,
+              quizQuestions: [
+                {
+                  id: `q-fb-${nextId}-1`,
+                  questionText: "কারিগরি কর্মশালায় কাজ করার সময় কোনটি সর্বাধিক অগ্রাধিকার পায়?",
+                  options: ["ব্যক্তিগত নিরাপত্তা (Safety First)", "দ্রুত কাজ শেষ করা", "অপ্রয়োজনে আড্ডা দেওয়া", "ভারী গান বাজানো"],
+                  correctOptionIndex: 0,
+                  explanation: "কর্মশালায় ব্যক্তিগত সুরক্ষা ও নিরাপত্তা সবার আগে নিশ্চিত করতে হয়।",
+                  marks: 1,
+                },
+                {
+                  id: `q-fb-${nextId}-2`,
+                  questionText: "PPE এর পূর্ণ রূপ কী?",
+                  options: ["Personal Protective Equipment", "Private Practical Education", "Public Power Energy", "Personal Production Engine"],
+                  correctOptionIndex: 0,
+                  explanation: "PPE হলো Personal Protective Equipment (ব্যক্তিগত সুরক্ষা সামগ্রী)।",
+                  marks: 1,
+                }
+              ],
+              createdAt: now,
+              updatedAt: now,
+            }
+          ]
+        }
+      ]
+    };
   }
 
   private seedSampleStudentProgress() {
@@ -1598,6 +1918,18 @@ class ChapterLearningStore {
       }
     }
 
+    // Ensure screen is NEVER empty for any requested class/trade
+    if (result.length === 0 && filters?.classId) {
+      const clsNum = Number(filters.classId);
+      const tradeCode = filters.tradeCode && filters.tradeCode !== "all" ? filters.tradeCode : "IT-IOT";
+      const fallbackCourse = this.generateFallbackCourseForFilter(clsNum, tradeCode);
+      if (fallbackCourse) {
+        this.courses.push(fallbackCourse);
+        this.persistCoursesToHybrid();
+        result = [fallbackCourse];
+      }
+    }
+
     return result.sort((a, b) => a.orderIndex - b.orderIndex);
   }
 
@@ -1649,6 +1981,7 @@ class ChapterLearningStore {
     };
 
     this.courses.push(newCourse);
+    this.persistCoursesToHybrid();
     return newCourse;
   }
 
@@ -1663,12 +1996,14 @@ class ChapterLearningStore {
       updatedAt: new Date().toISOString(),
     };
 
+    this.persistCoursesToHybrid();
     return this.courses[courseIndex];
   }
 
   public deleteCourse(id: number): boolean {
     const initialLen = this.courses.length;
     this.courses = this.courses.filter(c => c.id !== Number(id));
+    this.persistCoursesToHybrid();
     return this.courses.length < initialLen;
   }
 
@@ -1702,6 +2037,7 @@ class ChapterLearningStore {
 
     course.chapters.push(newChapter);
     course.updatedAt = now;
+    this.persistCoursesToHybrid();
     return newChapter;
   }
 
@@ -1734,6 +2070,7 @@ class ChapterLearningStore {
           courseId: course.id,
           updatedAt: new Date().toISOString(),
         };
+        this.persistCoursesToHybrid();
         return course.chapters[idx];
       }
     }
@@ -1749,6 +2086,7 @@ class ChapterLearningStore {
         course.chapters.forEach((ch, idx) => {
           ch.orderIndex = idx + 1;
         });
+        this.persistCoursesToHybrid();
         return true;
       }
     }
@@ -1780,6 +2118,7 @@ class ChapterLearningStore {
 
     course.chapters = reordered;
     course.updatedAt = new Date().toISOString();
+    this.persistCoursesToHybrid();
     return true;
   }
 
@@ -1844,6 +2183,7 @@ class ChapterLearningStore {
         chapter.items.push(newItem);
         chapter.updatedAt = now;
         course.updatedAt = now;
+        this.persistCoursesToHybrid();
         return newItem;
       }
     }
@@ -1884,6 +2224,7 @@ class ChapterLearningStore {
           };
           chapter.updatedAt = new Date().toISOString();
           course.updatedAt = new Date().toISOString();
+          this.persistCoursesToHybrid();
           return chapter.items[idx];
         }
       }
@@ -1901,6 +2242,7 @@ class ChapterLearningStore {
           chapter.items.forEach((it, idx) => {
             it.orderIndex = idx + 1;
           });
+          this.persistCoursesToHybrid();
           return true;
         }
       }
@@ -1933,6 +2275,7 @@ class ChapterLearningStore {
 
         chapter.items = reordered;
         chapter.updatedAt = new Date().toISOString();
+        this.persistCoursesToHybrid();
         return true;
       }
     }
@@ -1961,6 +2304,7 @@ class ChapterLearningStore {
       list.push(data);
     }
     this.progressStore.set(studentRoll, list);
+    this.persistProgressToHybrid();
 
     // Asynchronous background persistence to Prisma MySQL if available
     if (isPrismaAvailable()) {

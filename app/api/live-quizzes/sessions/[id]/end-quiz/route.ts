@@ -3,6 +3,7 @@ import { FinalResultService, QuizReportService } from "@/lib/reportService";
 import { sendSmsGateway } from "@/lib/smsGatewayEngine";
 import prisma from "@/lib/prisma";
 import { invalidateSessionCache } from "@/lib/sessionCache";
+import { archiveLiveSessionToDb } from "@/lib/liveSessionStore";
 
 export async function POST(
   req: NextRequest,
@@ -12,6 +13,9 @@ export async function POST(
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const result = FinalResultService.finalize(id);
+
+    // Archive session to hybridStorageEngine disk & MySQL
+    const archivedResult = await archiveLiveSessionToDb(id);
 
     try {
       await prisma.liveQuizSession.update({
@@ -49,7 +53,8 @@ export async function POST(
         ? `লাইভ কুইজ সমাপ্ত এবং ${finalSmsCount} জন অভিভাবকের কাছে রেজাল্ট SMS পাঠানো হয়েছে!`
         : "Live quiz session completed and results finalized successfully.",
       session: result.session,
-      finalSmsCount
+      finalSmsCount,
+      archivedResult,
     });
   } catch (error: any) {
     return NextResponse.json(

@@ -206,6 +206,48 @@ export default function AiPresentationStudio() {
     }
   };
 
+  // Save generated presentation to Gallery API
+  const [savingGallery, setSavingGallery] = useState(false);
+  const handleSaveToGallery = async () => {
+    if (!topic.trim() || slides.length === 0) {
+      toast.error("সেভ করার জন্য অন্তত একটি স্লাইড থাকতে হবে");
+      return;
+    }
+    setSavingGallery(true);
+    try {
+      const clsObj = ACADEMIC_CLASSES.find((c) => String(c.numericValue) === selectedClassId);
+      const clsName = clsObj ? clsObj.nameBangla : "শ্রেণি ৯ (ভোকেশনাল)";
+      const tradeObj = ALL_TRADES.find((t) => t.code === selectedTradeCode);
+      const tradeName = tradeObj ? tradeObj.nameBangla : "কম্পিউটার ও আইটি";
+
+      const res = await fetch("/api/presentations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: topic.trim(),
+          className: clsName,
+          trade: tradeName,
+          subject: topic.trim(),
+          theme: selectedThemeId,
+          slides,
+          author: "AI Presentation Studio",
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast.success("প্রেজেন্টেশন গ্যালারিতে সফলভাবে সংরক্ষিত হয়েছে!", {
+          description: "এখন আপনি এটি ক্লাসরুম প্রজেক্টর মোডে চালাতে পারবেন।",
+        });
+      } else {
+        toast.error("গ্যালারিতে সেভ করতে সমস্যা হয়েছে");
+      }
+    } catch {
+      toast.error("সার্ভার যোগাযোগে ত্রুটি হয়েছে");
+    } finally {
+      setSavingGallery(false);
+    }
+  };
+
   // Direct PPTX Download Handler
   const handleDownloadPPTX = async () => {
     if (!topic.trim()) {
@@ -433,6 +475,16 @@ export default function AiPresentationStudio() {
                 exit={{ opacity: 0, scale: 0.9, x: 10 }}
                 className="flex items-center gap-2"
               >
+                <button
+                  onClick={handleSaveToGallery}
+                  disabled={savingGallery}
+                  className="px-3.5 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-cyan-500/25 transition cursor-pointer disabled:opacity-50"
+                  title="প্রেজেন্টেশনটি ক্লাসরুম গ্যালারিতে সেভ করুন"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>{savingGallery ? "সেভ হচ্ছে..." : "গ্যালারিতে সেভ"}</span>
+                </button>
+
                 <button
                   onClick={handleDownloadPPTX}
                   disabled={downloadingPptx}

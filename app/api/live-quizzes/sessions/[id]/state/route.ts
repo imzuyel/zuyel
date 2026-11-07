@@ -12,7 +12,9 @@ export async function GET(
     const playerId = searchParams.get("playerId") || searchParams.get("participantId");
 
     const ipAddress = req.headers.get("x-forwarded-for") || "127.0.0.1";
-    if (SecurityService.isRateLimited(`state-${ipAddress}`, 240, 60000)) {
+    // Key by session and playerId (or IP if unauthenticated) so 60 students on shared classroom Wi-Fi never collide
+    const rateLimitKey = playerId ? `state-${sessionId}-${playerId}` : `state-${sessionId}-${ipAddress}`;
+    if (SecurityService.isRateLimited(rateLimitKey, 300, 60000)) {
       return NextResponse.json(
         { success: false, message: "Too many state sync requests" },
         { status: 429 }
@@ -168,6 +170,28 @@ export async function GET(
       totalPlayers,
       playerCount: totalPlayers,
       activePlayersCount: totalPlayers,
+      allPlayers: allPlayersList.map((p) => ({
+        id: p.id,
+        displayName: p.name,
+        name: p.name,
+        roll: p.roll,
+        avatar: p.avatar,
+        score: p.score || 0,
+        streak: p.streak || 0,
+        isReady: p.isReady,
+        rank: p.rank || 1,
+      })),
+      players: allPlayersList.map((p) => ({
+        id: p.id,
+        displayName: p.name,
+        name: p.name,
+        roll: p.roll,
+        avatar: p.avatar,
+        score: p.score || 0,
+        streak: p.streak || 0,
+        isReady: p.isReady,
+        rank: p.rank || 1,
+      })),
       readyPlayers: readyPlayers.map((p) => ({
         playerId: p.id,
         id: p.id,

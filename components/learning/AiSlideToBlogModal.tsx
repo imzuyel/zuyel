@@ -77,10 +77,11 @@ export default function AiSlideToBlogModal({
   };
 
   const handlePublishToFeed = async () => {
-    if (chapterId && generatedBlog) {
+    if (generatedBlog) {
+      const targetChapterId = chapterId || 1;
       try {
         setIsPublishing(true);
-        const res = await fetch(`/api/learning/chapters/${chapterId}/items`, {
+        const res = await fetch(`/api/learning/chapters/${targetChapterId}/items`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

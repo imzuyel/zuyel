@@ -83,8 +83,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Rate limiting check
-    if (SecurityService.isRateLimited(`join-${ipAddress}`, 25, 60000)) {
+    // Rate limiting check: Allow up to 300 joins/min per IP so 60 students on classroom Wi-Fi never get blocked
+    if (SecurityService.isRateLimited(`join-${ipAddress}`, 300, 60000)) {
       return NextResponse.json(
         { success: false, message: "অতিরিক্ত রিকোয়েস্ট। অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করুন।" },
         { status: 429 }

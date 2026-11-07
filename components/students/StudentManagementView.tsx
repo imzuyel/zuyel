@@ -30,6 +30,10 @@ import {
   Award,
   Image as ImageIcon,
   RefreshCw,
+  Zap,
+  CheckCheck,
+  CheckCircle2,
+  Link2,
 } from "lucide-react";
 import IdCardRenderer from "@/components/documents/IdCardRenderer";
 import AcademicTranscriptModal from "@/components/results/AcademicTranscriptModal";
@@ -49,6 +53,7 @@ import { useAuth } from "@/context/AuthContext";
 interface StudentManagementViewProps {
   initialClassId?: number;
   openAddModalInitially?: boolean;
+  initialSubTab?: "directory" | "resolution";
   onNavigateToAttendance?: () => void;
   onNavigateToIdHub?: () => void;
   onNavigateToPromotion?: () => void;
@@ -58,6 +63,7 @@ interface StudentManagementViewProps {
 export default function StudentManagementView({
   initialClassId,
   openAddModalInitially = false,
+  initialSubTab = "directory",
   onNavigateToAttendance,
   onNavigateToIdHub,
   onNavigateToPromotion,
@@ -66,6 +72,12 @@ export default function StudentManagementView({
   const { currentUser } = useAuth();
   const currentRole = currentUser?.role || "admin";
   const isAdmin = currentRole !== "teacher";
+
+  // Sub-Tab Switcher State: Directory vs Resolution Studio
+  const [activeSubTab, setActiveSubTab] = useState<"directory" | "resolution">(initialSubTab);
+  const [resolutionStats, setResolutionStats] = useState<any>(null);
+  const [isResolving, setIsResolving] = useState<boolean>(false);
+  const [assigningEntryId, setAssigningEntryId] = useState<string | null>(null);
 
   // Core database state
   const [students, setStudents] = useState<Student[]>([]);
@@ -165,6 +177,72 @@ export default function StudentManagementView({
       }
     } catch (err) {
       console.error("Failed to reload students:", err);
+    }
+  };
+
+  const fetchResolutionStats = async () => {
+    try {
+      const res = await fetch("/api/students/resolve");
+      const data = await res.json();
+      if (data.success && data.stats) {
+        setResolutionStats(data.stats);
+      }
+    } catch (err) {
+      console.error("Failed to fetch resolution stats:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === "resolution") {
+      fetchResolutionStats();
+    }
+  }, [activeSubTab]);
+
+  const handleAutoResolveAndMerge = async () => {
+    try {
+      setIsResolving(true);
+      const res = await fetch("/api/students/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "AUTO_RESOLVE" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({
+          type: "success",
+          message: data.result?.message || "সকল ডাটা সফলভাবে অটো-রেজোলিউশন ও মার্জ সম্পন্ন হয়েছে!",
+        });
+        await fetchStudents();
+        await fetchResolutionStats();
+      } else {
+        throw new Error(data.error || "Auto-resolve failed");
+      }
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "অটো-রেজোলিউশনে ত্রুটি হয়েছে" });
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  const handleManualAssign = async (entryId: string, targetStudentId: string) => {
+    try {
+      setAssigningEntryId(entryId);
+      const res = await fetch("/api/students/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "MANUAL_ASSIGN", entryId, targetStudentId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: "success", message: data.message });
+        await fetchResolutionStats();
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "অ্যাসাইন করতে ব্যর্থ হয়েছে" });
+    } finally {
+      setAssigningEntryId(null);
     }
   };
 
@@ -605,8 +683,41 @@ export default function StudentManagementView({
         </div>
       )}
 
-      {/* 3. Advanced Filtering Panel */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+      {/* Sub-Tab Navigation Switcher */}
+      <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200/80 dark:border-slate-800 w-fit">
+        <button
+          onClick={() => setActiveSubTab("directory")}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeSubTab === "directory"
+              ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs ring-1 ring-slate-200 dark:ring-slate-700"
+              : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+          }`}
+        >
+          <Users className="w-4 h-4 text-emerald-500" />
+          <span>👥 শিক্ষার্থী ডিরেক্টরি (Master Directory)</span>
+        </button>
+        <button
+          onClick={() => setActiveSubTab("resolution")}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeSubTab === "resolution"
+              ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-xs ring-1 ring-white/30"
+              : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-cyan-400" />
+          <span>🔍 ডাটা রেজোলিউশন ও মার্জ স্টুডিও (Resolution Hub)</span>
+          {resolutionStats?.unresolvedEntriesCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[10px]">
+              {resolutionStats.unresolvedEntriesCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeSubTab === "directory" && (
+        <>
+          {/* 3. Advanced Filtering Panel */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -1064,6 +1175,283 @@ export default function StudentManagementView({
           </>
         )}
       </div>
+      </>
+      )}
+
+      {/* SUB-TAB 2: DATA RESOLUTION & MERGE STUDIO */}
+      {activeSubTab === "resolution" && (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Resolution KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-bold">ভেরিফাইড শিক্ষার্থী প্রোফাইল</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
+                  {resolutionStats?.resolvedProfilesCount ?? students.length}
+                </span>
+                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
+                  ১০০% রেজলভড
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                মাস্টার ডাটাবেজ এবং স্টুডেন্ট আইডি সক্রিয়
+              </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-bold">আন-ম্যাপড কুইজ/লার্নিং এন্ট্রি</span>
+                <AlertCircle className="w-4 h-4 text-amber-500" />
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-amber-500 font-mono">
+                  {resolutionStats?.unresolvedEntriesCount ?? 0}
+                </span>
+                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full">
+                  অতিথি/অনাবাসী
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                মাস্টার প্রোফাইলের সাথে সরাসরি লিঙ্ক প্রয়োজন
+              </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-bold">ডুপ্লিকেট রোল/নাম শনাক্ত</span>
+                <RefreshCw className="w-4 h-4 text-indigo-500" />
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-black text-indigo-500 font-mono">
+                  {resolutionStats?.duplicateConflictsCount ?? 0}
+                </span>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full">
+                  মার্জযোগ্য
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                একই রোল বা ট্রেডের মধ্যে সম্ভাব্য ডুপ্লিকেট
+              </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-bold">স্টোরেজ সিঙ্ক স্ট্যাটাস</span>
+                <Building className="w-4 h-4 text-cyan-500" />
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm font-black text-slate-900 dark:text-white">
+                  {resolutionStats?.storageMode === "MYSQL_LIVE" ? "🗄️ MySQL Live DB" : "⚡ Local Memory DB"}
+                </span>
+                <span className="text-[10px] font-bold text-cyan-600 bg-cyan-50 dark:bg-cyan-950/40 px-2 py-0.5 rounded-full">
+                  হাইভ্রিড ইঞ্জিন
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                সিঙ্ক হলে উভয় স্টোরেজে আপ-টু-ডেট থাকে
+              </p>
+            </div>
+          </div>
+
+          {/* 1-Click Auto-Resolve Banner */}
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-indigo-800/40 shadow-xl relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="space-y-1.5 relative z-10 max-w-2xl">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-wider border border-emerald-500/30">
+                  AI Entity Resolution Engine
+                </span>
+                <span className="text-xs text-indigo-300">PTSC মাল্টি-পাস ম্যাচার</span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-white">
+                ⚡ স্মার্ট শিক্ষার্থী ডাটা অটো-রেজোলিউশন ও মার্জিং স্টুডিও
+              </h2>
+              <p className="text-xs text-indigo-200/80 leading-relaxed">
+                লাইভ কুইজের অতিথি প্লেয়ার, অধ্যায়ভিত্তিক লার্নিং স্কোর এবং ডিজিটাল হাজিরা স্ক্যান স্বয়ংক্রিয়ভাবে শ্রেণি, ট্রেড ও রোল নম্বরের ভিত্তিতে মাস্টার শিক্ষার্থীর প্রোফাইলে লিঙ্ক ও মার্জ হবে।
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 relative z-10 shrink-0">
+              <button
+                onClick={fetchResolutionStats}
+                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition flex items-center gap-2 border border-white/20 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>রিফ্রেশ স্ট্যাটাস</span>
+              </button>
+
+              <button
+                onClick={handleAutoResolveAndMerge}
+                disabled={isResolving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-black transition flex items-center gap-2 shadow-lg shadow-emerald-500/30 cursor-pointer active:scale-95 disabled:opacity-50"
+              >
+                {isResolving ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                ) : (
+                  <Zap className="w-4 h-4 text-slate-950 fill-current" />
+                )}
+                <span>⚡ সকল ডাটা অটো-রেজোলিউশন ও মার্জ করুন</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Unresolved Entries & Conflict Management Tables */}
+          <div className="grid grid-cols-1 gap-6">
+            {/* Table 1: Unresolved Guest / Quiz Entries */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-500" />
+                    <span>⚠️ আন-ম্যাপড ও অতিথি এন্ট্রি তালিকা (Unmapped Guest & Quiz Records)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    যেসব এন্ট্রি এখনও কোনো নির্দিষ্ট ভেরিফাইড শিক্ষার্থীর রোল বা আইডির সাথে লিঙ্ক হয়নি
+                  </p>
+                </div>
+              </div>
+
+              {(!resolutionStats?.unresolvedEntries || resolutionStats.unresolvedEntries.length === 0) ? (
+                <div className="p-8 text-center space-y-2">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                    কোনো অমীমাংসিত অতিথি বা আন-ম্যাপড এন্ট্রি নেই!
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                    সকল লাইভ কুইজ প্লেয়ার এবং লার্নিং স্কোর সফলভাবে তাদের নিজ নিজ মাস্টার স্টুডেন্ট প্রোফাইলের সাথে লিঙ্ক করা হয়েছে।
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">উৎস</th>
+                        <th className="py-3 px-4">খসড়া নাম</th>
+                        <th className="py-3 px-4">খসড়া রোল</th>
+                        <th className="py-3 px-4">শ্রেণি ও ট্রেড</th>
+                        <th className="py-3 px-4">সম্ভাব্য ম্যাচ (AI Suggestion)</th>
+                        <th className="py-3 px-4 text-right">অ্যাকশন</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {resolutionStats.unresolvedEntries.map((entry: any) => {
+                        const topMatch = entry.suggestedMatches?.[0];
+                        return (
+                          <tr key={entry.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold text-[10px]">
+                                {entry.source === "LIVE_QUIZ" ? "🎯 লাইভ কুইজ" : "📖 চ্যাপ্টার লার্নিং"}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-black text-slate-900 dark:text-white">
+                              {entry.rawName}
+                            </td>
+                            <td className="py-3 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">
+                              {entry.rawRoll}
+                            </td>
+                            <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
+                              {entry.rawClass || "Class 9"} • {entry.rawTrade || "Computer & IT"}
+                            </td>
+                            <td className="py-3 px-4">
+                              {topMatch ? (
+                                <div className="space-y-0.5">
+                                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                                    {topMatch.student?.nameBangla || topMatch.student?.name}
+                                  </span>
+                                  <span className="text-[10px] text-emerald-600 font-mono block">
+                                    (রোল: {topMatch.student?.roll} • {topMatch.confidence}% ম্যাচ)
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic">কোনো স্পষ্ট ম্যাচ নেই</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              {topMatch ? (
+                                <button
+                                  onClick={() => handleManualAssign(entry.id, topMatch.student.id)}
+                                  disabled={assigningEntryId === entry.id}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs transition cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
+                                >
+                                  {assigningEntryId === entry.id ? (
+                                    <RefreshCw className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <Link2 className="w-3 h-3" />
+                                  )}
+                                  <span>লিঙ্ক করুন</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 text-[11px]">ম্যানুয়াল দরকার</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Table 2: Duplicate Conflicts Inspector */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-indigo-500" />
+                  <span>🔄 সম্ভাব্য ডুপ্লিকেট রোল বা নাম কনফ্লিক্ট চেকার (Duplicate Conflicts)</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  একই শ্রেণিতে একই রোল নম্বর থাকা রেকর্ড যা একটি মাস্টার রেকর্ডে মার্জ করা আবশ্যক
+                </p>
+              </div>
+
+              {(!resolutionStats?.duplicateConflicts || resolutionStats.duplicateConflicts.length === 0) ? (
+                <div className="p-8 text-center space-y-2">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 flex items-center justify-center mx-auto">
+                    <CheckCheck className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                    কোনো ডুপ্লিকেট রোল বা কনফ্লিক্ট শনাক্ত হয়নি!
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                    সকল শিক্ষার্থীর রোল নম্বর ও আইডি সম্পূর্ণ ইউনিক ও সুসংহত রয়েছে।
+                  </p>
+                </div>
+              ) : (
+                <div className="p-4 space-y-3">
+                  {resolutionStats.duplicateConflicts.map((conf: any) => (
+                    <div
+                      key={conf.id}
+                      className="p-4 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-1">
+                        <span className="font-black text-slate-900 dark:text-white">
+                          {conf.className} • রোল {conf.roll}
+                        </span>
+                        <p className="text-amber-800 dark:text-amber-300 text-[11px]">
+                          {conf.reason}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleAutoResolveAndMerge}
+                        disabled={isResolving}
+                        className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs transition cursor-pointer shrink-0 disabled:opacity-50"
+                      >
+                        স্বয়ংক্রিয় মার্জ করুন
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 5. MANUAL ADMISSION FORM MODAL (MULTI-SECTION) */}
       {(isAddModalOpen || editingStudent) && (

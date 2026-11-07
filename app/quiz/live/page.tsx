@@ -602,14 +602,33 @@ function LiveQuizArenaContent() {
               {questionText}
             </h2>
 
-            {/* Optional Images */}
-            {currentSlide?.imageLeftUrl && (
-              <div className="pt-2">
-                <img
-                  src={currentSlide.imageLeftUrl}
-                  alt="Question illustration"
-                  className="max-h-48 mx-auto rounded-2xl object-contain border border-slate-700"
-                />
+            {/* Optional Images & Side-by-Side Comparison */}
+            {(currentSlide?.imageUrl || currentSlide?.imageLeftUrl || currentSlide?.imageRightUrl) && (
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                {(currentSlide.imageUrl || currentSlide.imageLeftUrl) && (
+                  <div className="text-center space-y-1">
+                    {currentSlide.imageLeftLabel && (
+                      <span className="text-[11px] font-bold text-slate-400 block">{currentSlide.imageLeftLabel}</span>
+                    )}
+                    <img
+                      src={currentSlide.imageLeftUrl || currentSlide.imageUrl}
+                      alt="Question illustration"
+                      className="max-h-40 rounded-2xl object-contain border border-slate-700 mx-auto"
+                    />
+                  </div>
+                )}
+                {currentSlide.imageRightUrl && (
+                  <div className="text-center space-y-1">
+                    {currentSlide.imageRightLabel && (
+                      <span className="text-[11px] font-bold text-slate-400 block">{currentSlide.imageRightLabel}</span>
+                    )}
+                    <img
+                      src={currentSlide.imageRightUrl}
+                      alt="Comparison visual"
+                      className="max-h-40 rounded-2xl object-contain border border-slate-700 mx-auto"
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
