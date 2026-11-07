@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLiveSession } from "@/lib/liveSessionStore";
+import { getLiveSession, syncAndAutoAdvanceSession } from "@/lib/liveSessionStore";
 import { institutionalDb } from "@/lib/database";
 
 export async function GET(
@@ -16,6 +16,9 @@ export async function GET(
         { status: 404 }
       );
     }
+
+    // Auto-advance session timers & ranks
+    syncAndAutoAdvanceSession(session);
 
     const playersList = Object.values(session.players || {}).map((p) => ({
       id: p.id,

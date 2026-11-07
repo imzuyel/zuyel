@@ -188,7 +188,10 @@ export default function StudentModern3DJoinCard({
       // Store in sessionStorage (per-tab) and localStorage fallback (keyed by roomCode)
       try {
         sessionStorage.setItem("live_quiz_player", JSON.stringify(identity));
+        sessionStorage.setItem(`live_quiz_player_${cleanCode}`, JSON.stringify(identity));
+        sessionStorage.setItem(`pgtsc_player_${cleanCode}`, JSON.stringify(identity));
         localStorage.setItem(`live_quiz_player_${cleanCode}`, JSON.stringify(identity));
+        localStorage.setItem("pgtsc_live_quiz_player", JSON.stringify(identity));
       } catch {
         // quota safety
       }

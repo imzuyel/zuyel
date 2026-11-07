@@ -47,13 +47,16 @@ export default function FloatingReactionOverlay() {
   // Listen for window-level custom events so any component can trigger reactions
   useEffect(() => {
     const handleCustomReaction = (e: any) => {
-      if (e.detail?.reactionKey) {
-        addReaction(e.detail.reactionKey);
+      const key = e.detail?.reactionKey || e.detail?.emoji;
+      if (key) {
+        addReaction(key);
       }
     };
     window.addEventListener("live-quiz-reaction" as any, handleCustomReaction);
+    window.addEventListener("quiz-reaction" as any, handleCustomReaction);
     return () => {
       window.removeEventListener("live-quiz-reaction" as any, handleCustomReaction);
+      window.removeEventListener("quiz-reaction" as any, handleCustomReaction);
     };
   }, [addReaction]);
 

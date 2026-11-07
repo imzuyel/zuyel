@@ -216,3 +216,50 @@ export async function GET(
     );
   }
 }
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: sessionId } = await params;
+    const body = await req.json();
+
+    const session = getLiveSession(sessionId);
+    if (!session) {
+      return NextResponse.json(
+        { success: false, message: "Live quiz session not found" },
+        { status: 404 }
+      );
+    }
+
+    const now = Date.now();
+    if (body.stage) session.stage = body.stage;
+    if (body.status) session.status = body.status;
+    if (typeof body.currentSlideIndex === "number") {
+      session.currentSlideIndex = Math.min(Math.max(0, body.currentSlideIndex), session.slides.length - 1);
+    }
+    if (body.durationMs) {
+      session.stageStartedAt = now;
+      session.stageEndsAt = now + Number(body.durationMs);
+    }
+
+    saveLiveSession(session);
+
+    return NextResponse.json({
+      success: true,
+      message: "Stage updated successfully",
+      stage: session.stage,
+      status: session.status,
+      currentSlideIndex: session.currentSlideIndex,
+      stageStartedAt: session.stageStartedAt,
+      stageEndsAt: session.stageEndsAt,
+      session,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, message: error.message || "Failed to update session stage" },
+      { status: 500 }
+    );
+  }
+}

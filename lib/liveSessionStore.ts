@@ -77,71 +77,100 @@ export interface LiveSessionRecord {
 }
 
 // ============================================================================
-// GLOBAL SINGLETON & DISK PERSISTENCE (.next/cache/live-sessions-v3.json)
+// ATOMIC FILE-BACKED SINGLETON (.next/cache/pgtsc-live-sessions.json)
+// Multi-worker Next.js dev server & Localtunnel persistence engine
 // ============================================================================
 
 declare global {
   // eslint-disable-next-line no-var
-  var __pgtscLiveSessions: Map<string, LiveSessionRecord> | undefined;
+  var __pgtscLiveSessionMap: Map<string, LiveSessionRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscLiveSessionsLastMtime: number | undefined;
 }
 
 const CACHE_DIR = path.join(process.cwd(), ".next", "cache");
-const CACHE_FILE = path.join(CACHE_DIR, "live-sessions-v3.json");
+const CACHE_FILE = path.join(CACHE_DIR, "pgtsc-live-sessions.json");
+const LEGACY_CACHE_FILE = path.join(CACHE_DIR, "live-sessions-v3.json");
 
-function getStorageMap(): Map<string, LiveSessionRecord> {
-  if (!globalThis.__pgtscLiveSessions) {
-    globalThis.__pgtscLiveSessions = new Map<string, LiveSessionRecord>();
-    // Try restoring from atomic disk persistence file if present
-    try {
-      if (fs.existsSync(CACHE_FILE)) {
-        const raw = fs.readFileSync(CACHE_FILE, "utf-8");
+function syncMapFromDisk(): Map<string, LiveSessionRecord> {
+  if (!globalThis.__pgtscLiveSessionMap) {
+    globalThis.__pgtscLiveSessionMap = new Map<string, LiveSessionRecord>();
+  }
+
+  try {
+    const targetFile = fs.existsSync(CACHE_FILE)
+      ? CACHE_FILE
+      : fs.existsSync(LEGACY_CACHE_FILE)
+      ? LEGACY_CACHE_FILE
+      : null;
+
+    if (targetFile) {
+      const stats = fs.statSync(targetFile);
+      if (stats.mtimeMs !== globalThis.__pgtscLiveSessionsLastMtime) {
+        globalThis.__pgtscLiveSessionsLastMtime = stats.mtimeMs;
+        const raw = fs.readFileSync(targetFile, "utf-8");
         const list: LiveSessionRecord[] = JSON.parse(raw);
         if (Array.isArray(list)) {
           for (const item of list) {
             if (item && item.id) {
-              // Ensure numeric timestamps
               item.stageStartedAt = Number(item.stageStartedAt) || Date.now();
-              item.stageEndsAt = Number(item.stageEndsAt) || (Date.now() + 3000);
+              item.stageEndsAt = Number(item.stageEndsAt) || Date.now() + 3000;
               item.updatedAt = Number(item.updatedAt) || Date.now();
               item.createdAt = Number(item.createdAt) || Date.now();
-              globalThis.__pgtscLiveSessions.set(item.id, item);
+              item.players = item.players || {};
+              item.answers = item.answers || {};
+              globalThis.__pgtscLiveSessionMap.set(item.id, item);
             }
           }
         }
       }
-    } catch (err) {
-      console.warn("[liveSessionStore] Initial cache read warning:", (err as Error).message);
     }
+  } catch (err) {
+    console.warn("[liveSessionStore] Disk read warning:", (err as Error).message);
   }
-  return globalThis.__pgtscLiveSessions;
+
+  return globalThis.__pgtscLiveSessionMap;
 }
 
-let persistTimeout: NodeJS.Timeout | null = null;
-
-function scheduleDiskPersistence() {
-  if (persistTimeout) return;
-  persistTimeout = setTimeout(() => {
-    persistTimeout = null;
-    try {
-      if (!fs.existsSync(CACHE_DIR)) {
-        fs.mkdirSync(CACHE_DIR, { recursive: true });
-      }
-      const map = getStorageMap();
-      const list = Array.from(map.values());
-      fs.writeFileSync(CACHE_FILE, JSON.stringify(list), "utf-8");
-    } catch (err) {
-      console.warn("[liveSessionStore] Atomic disk write warning:", (err as Error).message);
+function flushMapToDisk(): void {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
     }
-  }, 100);
+    const map = syncMapFromDisk();
+    const list = Array.from(map.values());
+    const serialized = JSON.stringify(list);
+    // Write synchronously to guarantee instant cross-process visibility over tunnels/workers
+    fs.writeFileSync(CACHE_FILE, serialized, "utf-8");
+    const stats = fs.statSync(CACHE_FILE);
+    globalThis.__pgtscLiveSessionsLastMtime = stats.mtimeMs;
+  } catch (err) {
+    console.warn("[liveSessionStore] Disk write warning:", (err as Error).message);
+  }
 }
 
 // ============================================================================
-// SLIDE NORMALIZATION (Guarantee safe timeLimit and complete properties)
+// GUARANTEED SLIDE NORMALIZATION (normalizeSlideForLive)
 // ============================================================================
 
-export function normalizeSlide(raw: any, index: number): any {
+export function normalizeSlideForLive(raw: any, index: number): any {
   if (!raw) raw = {};
   const sType = String(raw.type || raw.questionType || "MCQ").toUpperCase();
+  const validTypes = [
+    "MCQ",
+    "TRUE_FALSE",
+    "FILL_BLANKS",
+    "MATCHING",
+    "REORDER",
+    "WORD_CLOUD",
+    "OPEN_ENDED",
+    "IMAGE_COMPARE",
+    "TEXT_SLIDE",
+    "LIVE_QA",
+    "LEADERBOARD",
+  ];
+  const type = validTypes.includes(sType) ? sType : "MCQ";
+
   const isContent = [
     "TEXT_SLIDE",
     "IMAGE_COMPARE",
@@ -149,42 +178,57 @@ export function normalizeSlide(raw: any, index: number): any {
     "WORD_CLOUD",
     "LIVE_QA",
     "LEADERBOARD",
-  ].includes(sType);
+  ].includes(type);
 
   const rawLimit = Number(raw.timeLimit);
-  // For graded questions, minimum 5 seconds, default 20 seconds.
-  // For content slides without timer, keep 0 or given limit.
   const safeTimeLimit = isContent
-    ? (Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 0)
+    ? Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 0
     : Math.max(5, Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20);
 
-  const options = Array.isArray(raw.options) ? raw.options : [];
+  const rawPoints = Number(raw.points || raw.marks);
+  const safePoints = isContent
+    ? 0
+    : Math.max(10, Number.isFinite(rawPoints) && rawPoints > 0 ? rawPoints : 100);
+
+  let options: string[] = [];
+  if (Array.isArray(raw.options)) {
+    options = raw.options.map((o: any) => String(o ?? ""));
+  } else if (type === "TRUE_FALSE") {
+    options = ["সত্য (True)", "মিথ্যা (False)"];
+  }
+
   const matchingPairs = raw.matchingPairs || raw.pairs || raw.questionData?.pairs || [];
   const reorderItems = raw.reorderItems || raw.items || raw.correctOrder || raw.questionData?.items || [];
-  const sentenceWithBlank = raw.sentenceWithBlank || raw.title || raw.questionText || raw.question;
-  const blankAnswer = raw.blankAnswer || raw.correctAnswer || (raw.acceptedAnswers && raw.acceptedAnswers[0]) || "";
-  const acceptedAnswers = raw.acceptedAnswers || (blankAnswer ? [blankAnswer] : []);
+  const questionStr = String(
+    raw.question ||
+    raw.questionText ||
+    raw.title ||
+    raw.content ||
+    `প্রশ্ন ${index + 1}`
+  );
+  const titleStr = String(raw.title || raw.questionText || raw.question || `স্লাইড ${index + 1}`);
 
   return {
     id: String(raw.id || raw.slideId || `slide-${index}`),
-    type: sType,
-    questionType: sType,
-    title: raw.title || raw.questionText || raw.question || `স্লাইড ${index + 1}`,
-    questionText: raw.questionText || raw.question || raw.title || raw.content || `প্রশ্ন ${index + 1}`,
+    type,
+    questionType: type,
+    title: titleStr,
+    question: questionStr,
+    questionText: questionStr,
     content: raw.content || "",
     options,
     timeLimit: safeTimeLimit,
-    points: Number(raw.points || raw.marks) || (isContent ? 0 : 100),
-    marks: Number(raw.points || raw.marks) || (isContent ? 0 : 100),
+    points: safePoints,
+    marks: safePoints,
     correctAnswer: raw.correctAnswer !== undefined ? raw.correctAnswer : (raw.correctOptionIndex ?? 0),
     matchingPairs,
     pairs: matchingPairs,
     reorderItems,
     items: reorderItems,
     correctOrder: reorderItems,
-    sentenceWithBlank,
-    blankAnswer,
-    acceptedAnswers,
+    sentenceWithBlank: raw.sentenceWithBlank || titleStr || questionStr,
+    blankAnswer: raw.blankAnswer || raw.correctAnswer || (raw.acceptedAnswers && raw.acceptedAnswers[0]) || "",
+    acceptedAnswers: raw.acceptedAnswers || [],
     imageLeftUrl: raw.imageLeftUrl || raw.leftImage || "",
     imageRightUrl: raw.imageRightUrl || raw.rightImage || "",
     bulletPoints: Array.isArray(raw.bulletPoints) ? raw.bulletPoints : [],
@@ -193,13 +237,16 @@ export function normalizeSlide(raw: any, index: number): any {
   };
 }
 
+// Backward-compatible alias
+export const normalizeSlide = normalizeSlideForLive;
+
 // ============================================================================
 // SESSION LOOKUP, CREATION & PERSISTENCE
 // ============================================================================
 
 export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
   if (!idOrCode) return null;
-  const map = getStorageMap();
+  const map = syncMapFromDisk();
   const needle = String(idOrCode).trim();
   const digitsOnly = needle.replace(/\D/g, "");
 
@@ -215,7 +262,7 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
     }
   }
 
-  // 3. Fallback: check institutionalDb.liveSessions to bridge legacy sessions
+  // 3. Fallback: Check institutionalDb.liveSessions to bridge legacy in-memory sessions
   const legacy = institutionalDb.liveSessions.find(
     (s) =>
       s.id === needle ||
@@ -225,7 +272,7 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
 
   if (legacy) {
     const rawSlides = (legacy as any).slides || (legacy as any).questions || [];
-    const normalizedSlides = rawSlides.map((s: any, idx: number) => normalizeSlide(s, idx));
+    const normalizedSlides = rawSlides.map((s: any, idx: number) => normalizeSlideForLive(s, idx));
 
     const converted: LiveSessionRecord = {
       id: legacy.id,
@@ -240,7 +287,7 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
       currentSlideIndex: legacy.currentQuestionIndex || 0,
       stageStartedAt: (legacy as any).stageStartedAt ? Number((legacy as any).stageStartedAt) : Date.now(),
       stageEndsAt: (legacy as any).stageEndsAt ? Number((legacy as any).stageEndsAt) : Date.now() + 30000,
-      slides: normalizedSlides.length > 0 ? normalizedSlides : [normalizeSlide({}, 0)],
+      slides: normalizedSlides.length > 0 ? normalizedSlides : [normalizeSlideForLive({}, 0)],
       players: {},
       answers: {},
       smsInterval: "EVERY_3",
@@ -269,7 +316,7 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
     }
 
     map.set(converted.id, converted);
-    scheduleDiskPersistence();
+    flushMapToDisk();
     return converted;
   }
 
@@ -278,7 +325,7 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
 
 export function saveLiveSession(session: LiveSessionRecord): void {
   if (!session || !session.id) return;
-  const map = getStorageMap();
+  const map = syncMapFromDisk();
 
   // Strict numeric timestamps enforcement
   session.stageStartedAt = Number(session.stageStartedAt);
@@ -289,12 +336,18 @@ export function saveLiveSession(session: LiveSessionRecord): void {
 
   session.updatedAt = Date.now();
   map.set(session.id, session);
-  scheduleDiskPersistence();
+  flushMapToDisk();
 
-  // Sync to institutionalDb so legacy route consumers continue to see valid data
+  // Sync to institutionalDb for legacy consumers
   const legacyIdx = institutionalDb.liveSessions.findIndex((s) => s.id === session.id);
   const legacyStatus =
-    session.status === "ENDED" ? "COMPLETED" : session.stage === "READY_CHECK" ? "READY" : session.status === "WAITING" ? "LOBBY" : "QUESTION_ACTIVE";
+    session.status === "ENDED"
+      ? "COMPLETED"
+      : session.stage === "READY_CHECK"
+      ? "READY"
+      : session.status === "WAITING"
+      ? "LOBBY"
+      : "QUESTION_ACTIVE";
 
   if (legacyIdx >= 0) {
     const leg = institutionalDb.liveSessions[legacyIdx];
@@ -309,7 +362,7 @@ export function saveLiveSession(session: LiveSessionRecord): void {
 }
 
 export function createLiveSession(data: Partial<LiveSessionRecord>): LiveSessionRecord {
-  const map = getStorageMap();
+  const map = syncMapFromDisk();
   const id = data.id || `session-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
   // Generate 6-digit room code if not provided
@@ -335,7 +388,7 @@ export function createLiveSession(data: Partial<LiveSessionRecord>): LiveSession
   }
 
   const rawSlides = Array.isArray(data.slides) && data.slides.length > 0 ? data.slides : [];
-  const normalizedSlides = rawSlides.map((s, idx) => normalizeSlide(s, idx));
+  const normalizedSlides = rawSlides.map((s, idx) => normalizeSlideForLive(s, idx));
 
   const now = Date.now();
   const sessionRecord: LiveSessionRecord = {
@@ -350,8 +403,8 @@ export function createLiveSession(data: Partial<LiveSessionRecord>): LiveSession
     stage: data.stage || "READY_CHECK",
     currentSlideIndex: Number(data.currentSlideIndex) || 0,
     stageStartedAt: Number(data.stageStartedAt) || now,
-    stageEndsAt: Number(data.stageEndsAt) || (now + 30000),
-    slides: normalizedSlides.length > 0 ? normalizedSlides : [normalizeSlide({}, 0)],
+    stageEndsAt: Number(data.stageEndsAt) || now + 30000,
+    slides: normalizedSlides.length > 0 ? normalizedSlides : [normalizeSlideForLive({}, 0)],
     players: data.players || {},
     answers: data.answers || {},
     smsInterval: data.smsInterval || "EVERY_3",
@@ -463,7 +516,6 @@ export function recordPlayerAnswer(
 
   session.answers[slideKey][playerId] = answer;
 
-  // Update player score & streak in O(1)
   const player = session.players[playerId];
   if (player) {
     player.score = (player.score || 0) + (answer.points || 0);
@@ -480,15 +532,15 @@ export function recordPlayerAnswer(
 }
 
 // ============================================================================
-// SERVER-SIDE AUTO-STAGE PROGRESSION (TASK 2)
-// Evaluates stage timers & auto-advances. Called on EVERY /state request!
+// SERVER-SIDE AUTOMATIC STAGE PROGRESSION (syncAndAutoAdvanceSession)
+// Guaranteed auto-transition so neither Host nor Students ever get stuck!
 // ============================================================================
 
-export function evaluateAndAdvanceSessionStage(session: LiveSessionRecord): boolean {
+export function syncAndAutoAdvanceSession(session: LiveSessionRecord): boolean {
   if (!session) return false;
   const now = Date.now();
 
-  // Enforce valid finite numeric timestamps
+  // Enforce strictly finite numeric timestamps
   if (!Number.isFinite(session.stageStartedAt)) session.stageStartedAt = now;
   if (!Number.isFinite(session.stageEndsAt)) session.stageEndsAt = now + 3000;
 
@@ -496,23 +548,21 @@ export function evaluateAndAdvanceSessionStage(session: LiveSessionRecord): bool
   const currentSlide = session.slides[session.currentSlideIndex] || session.slides[0];
   const safeTimeLimit = Math.max(5, Number(currentSlide?.timeLimit) || 20);
 
-  // Auto-Transition Rule 1 (COUNTDOWN_321 -> ANSWERING_ACTIVE):
-  // When 3-second countdown expires, immediately open answering.
+  // Auto-Advance Rule 1: COUNTDOWN_321 -> ANSWERING_ACTIVE
   if (session.stage === "COUNTDOWN_321" && now >= session.stageEndsAt) {
     session.stage = "ANSWERING_ACTIVE";
     session.stageStartedAt = now;
     session.stageEndsAt = now + safeTimeLimit * 1000;
     modified = true;
   }
-  // Auto-Transition Rule 2 (QUESTION_ONLY -> ANSWERING_ACTIVE):
+  // Auto-Advance Rule 2: QUESTION_ONLY -> ANSWERING_ACTIVE
   else if (session.stage === "QUESTION_ONLY" && now >= session.stageEndsAt) {
     session.stage = "ANSWERING_ACTIVE";
     session.stageStartedAt = now;
     session.stageEndsAt = now + safeTimeLimit * 1000;
     modified = true;
   }
-  // Auto-Transition Rule 3 (ANSWERING_ACTIVE -> RESULT_REVEAL):
-  // When time runs out OR all joined students have submitted:
+  // Auto-Advance Rule 3: ANSWERING_ACTIVE -> RESULT_REVEAL
   else if (session.stage === "ANSWERING_ACTIVE") {
     const totalPlayers = Object.keys(session.players || {}).length;
     const slideKey = String(session.currentSlideIndex);
@@ -521,7 +571,15 @@ export function evaluateAndAdvanceSessionStage(session: LiveSessionRecord): bool
     if (now >= session.stageEndsAt || (totalPlayers > 0 && submittedCount >= totalPlayers)) {
       session.stage = "RESULT_REVEAL";
       session.stageStartedAt = now;
-      session.stageEndsAt = now + 120000; // ample time for teacher reveal/review
+      session.stageEndsAt = now + 120000;
+
+      // Recompute all player ranks (#1 to #60)
+      const playerList = Object.values(session.players || {});
+      playerList.sort((a, b) => (b.score || 0) - (a.score || 0));
+      playerList.forEach((p, idx) => {
+        p.rank = idx + 1;
+      });
+
       modified = true;
     }
   }
@@ -533,6 +591,9 @@ export function evaluateAndAdvanceSessionStage(session: LiveSessionRecord): bool
 
   return modified;
 }
+
+// Backward-compatible alias
+export const evaluateAndAdvanceSessionStage = syncAndAutoAdvanceSession;
 
 // ============================================================================
 // NAN-PROOF COUNTDOWN UTILITY
@@ -548,4 +609,3 @@ export function computeSafeRemainingSeconds(
   const diff = Math.ceil((target - (Date.now() + serverOffsetMs)) / 1000);
   return Number.isFinite(diff) ? Math.max(0, diff) : fallbackSeconds;
 }
-

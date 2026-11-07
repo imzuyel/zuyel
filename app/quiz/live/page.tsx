@@ -31,8 +31,19 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import StudentModern3DJoinCard, { StudentAuthIdentity } from "@/components/quiz/StudentModern3DJoinCard";
-import { computeSafeRemainingSeconds } from "@/lib/liveSessionStore";
+import FloatingReactionOverlay, { emitLiveReaction } from "@/components/quiz/FloatingReactionOverlay";
 import { triggerFireworks } from "@/lib/confetti";
+
+export function computeSafeRemainingSeconds(
+  stageEndsAt?: any,
+  serverOffsetMs = 0,
+  fallbackSeconds = 3
+): number {
+  const target = Number(stageEndsAt);
+  if (!Number.isFinite(target) || target <= 0) return fallbackSeconds;
+  const diff = Math.ceil((target - (Date.now() + serverOffsetMs)) / 1000);
+  return Number.isFinite(diff) ? Math.max(0, diff) : fallbackSeconds;
+}
 
 function toBanglaDigits(num: number | string): string {
   const bn = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
@@ -75,6 +86,7 @@ function LiveQuizArenaContent() {
   const [textInput, setTextInput] = useState("");
   const [reorderList, setReorderList] = useState<any[]>([]);
   const [matchingPairsSelected, setMatchingPairsSelected] = useState<Record<string, string>>({});
+  const [matchingSelectedLeft, setMatchingSelectedLeft] = useState<string | null>(null);
 
   // Slide tracking to reset inputs on slide change
   const currentSlideIndexRef = useRef<number>(-1);
@@ -84,8 +96,11 @@ function LiveQuizArenaContent() {
   useEffect(() => {
     try {
       const codeKey = paramCode ? `live_quiz_player_${paramCode}` : "";
+      const pgtscKey = paramCode ? `pgtsc_player_${paramCode}` : "";
       const raw =
         (typeof window !== "undefined" && window.sessionStorage.getItem("live_quiz_player")) ||
+        (codeKey && typeof window !== "undefined" && window.sessionStorage.getItem(codeKey)) ||
+        (pgtscKey && typeof window !== "undefined" && window.sessionStorage.getItem(pgtscKey)) ||
         (codeKey && typeof window !== "undefined" && window.localStorage.getItem(codeKey)) ||
         (typeof window !== "undefined" && window.localStorage.getItem("pgtsc_live_quiz_player"));
 
@@ -202,8 +217,28 @@ function LiveQuizArenaContent() {
         }
       }
       setMatchingPairsSelected({});
+      setMatchingSelectedLeft(null);
     }
   }, [currentSlideIndex, currentSlide]);
+
+  // Derived matching pairs for MATCHING questions
+  const matchingPairs = useMemo(() => {
+    if (Array.isArray(currentSlide?.pairs) && currentSlide.pairs.length > 0) return currentSlide.pairs;
+    if (Array.isArray(currentSlide?.questionData?.pairs) && currentSlide.questionData.pairs.length > 0) return currentSlide.questionData.pairs;
+    if (Array.isArray(currentSlide?.options)) {
+      const parsed = currentSlide.options
+        .map((opt: any) => {
+          if (typeof opt === "string" && opt.includes(":")) {
+            const [left, ...rest] = opt.split(":");
+            return { left: left.trim(), right: rest.join(":").trim() };
+          }
+          return null;
+        })
+        .filter(Boolean);
+      if (parsed.length > 0) return parsed;
+    }
+    return [];
+  }, [currentSlide]);
 
   // 5. Handle "I am Ready" Tap
   const handleReadyTap = async () => {
@@ -426,6 +461,33 @@ function LiveQuizArenaContent() {
                 </>
               )}
             </motion.button>
+
+            {/* Quick Reactions Bar */}
+            <div className="pt-3 border-t border-slate-800/80 space-y-2">
+              <p className="text-xs font-bold text-slate-400">
+                সহপাঠীদের সাথে অনুভূতি শেয়ার করো:
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                {[
+                  { emoji: "🔥", label: "আগুন" },
+                  { emoji: "🎉", label: "আনন্দ" },
+                  { emoji: "💡", label: "বুদ্ধি" },
+                  { emoji: "❤️", label: "ভালোবাসা" },
+                ].map((item) => (
+                  <motion.button
+                    key={item.emoji}
+                    type="button"
+                    whileHover={{ scale: 1.2 }}
+                    whileTap={{ scale: 0.85 }}
+                    onClick={() => emitLiveReaction(item.emoji)}
+                    className="w-12 h-12 rounded-2xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 flex items-center justify-center text-2xl shadow-lg cursor-pointer transition active:border-cyan-400"
+                    title={item.label}
+                  >
+                    <span>{item.emoji}</span>
+                  </motion.button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -433,6 +495,9 @@ function LiveQuizArenaContent() {
         <p className="text-[11px] text-slate-500 text-center pb-2">
           শিক্ষক স্লাইড স্টার্ট করলেই স্ক্রিন স্বয়ংক্রিয়ভাবে প্রশ্নের কাউন্টডাউনে যাবে।
         </p>
+
+        {/* Floating Reactions Overlay */}
+        <FloatingReactionOverlay />
       </div>
     );
   }
@@ -721,8 +786,129 @@ function LiveQuizArenaContent() {
                 </div>
               )}
 
-              {/* 5. MATCHING, IMAGE_COMPARE, TEXT_SLIDE & Fallback */}
-              {!["MCQ", "TRUE_FALSE", "FILL_BLANKS", "WORD_CLOUD", "OPEN_ENDED", "REORDER"].includes(qType) && (
+              {/* 5. MATCHING (Tap-to-Pair Interface) */}
+              {qType === "MATCHING" && (
+                <div className="space-y-4">
+                  <p className="text-xs font-bold text-center text-cyan-300">
+                    বাম পাশের আইটেমে ট্যাপ করে ডান পাশের সঠিক আইটেমের সাথে জোড়া লাগাও:
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Left Column */}
+                    <div className="space-y-2">
+                      <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider block text-center">বাম পাশ</span>
+                      {matchingPairs.map((p: any, idx: number) => {
+                        const leftText = typeof p === "string" ? p.split(":")[0]?.trim() : (p.left || p.key || `আইটেম ${idx + 1}`);
+                        const isSelected = matchingSelectedLeft === leftText;
+                        const isPaired = Boolean(matchingPairsSelected[leftText]);
+
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setMatchingSelectedLeft(leftText)}
+                            className={`w-full p-3 rounded-2xl border-2 text-left text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
+                              isSelected
+                                ? "bg-cyan-500/30 border-cyan-400 text-cyan-200 ring-2 ring-cyan-400"
+                                : isPaired
+                                ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-200"
+                                : "bg-slate-900 border-slate-700 text-slate-200 hover:border-slate-500"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="truncate">{leftText}</span>
+                              {isPaired && <span className="text-[10px] text-emerald-400">✓</span>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="space-y-2">
+                      <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider block text-center">ডান পাশ</span>
+                      {matchingPairs.map((p: any, idx: number) => {
+                        const rightText = typeof p === "string" ? p.split(":")[1]?.trim() : (p.right || p.value || `অপশন ${idx + 1}`);
+                        const pairedLeft = Object.keys(matchingPairsSelected).find(
+                          (k) => matchingPairsSelected[k] === rightText
+                        );
+
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              if (matchingSelectedLeft) {
+                                setMatchingPairsSelected((prev) => ({
+                                  ...prev,
+                                  [matchingSelectedLeft]: rightText,
+                                }));
+                                setMatchingSelectedLeft(null);
+                              }
+                            }}
+                            className={`w-full p-3 rounded-2xl border-2 text-left text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
+                              pairedLeft
+                                ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-200"
+                                : matchingSelectedLeft
+                                ? "bg-amber-500/10 border-amber-400/60 hover:bg-amber-500/20 text-amber-200 animate-pulse"
+                                : "bg-slate-900 border-slate-700 text-slate-200 hover:border-slate-500"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="truncate">{rightText}</span>
+                              {pairedLeft && <span className="text-[10px] text-emerald-400">🔗</span>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Current Pairs Summary */}
+                  {Object.keys(matchingPairsSelected).length > 0 && (
+                    <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>সংযুক্ত জোড়া ({Object.keys(matchingPairsSelected).length}/{matchingPairs.length}):</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMatchingPairsSelected({});
+                            setMatchingSelectedLeft(null);
+                          }}
+                          className="text-rose-400 hover:underline cursor-pointer"
+                        >
+                          রিসেট
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(matchingPairsSelected).map(([l, r], idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold"
+                          >
+                            <span>{l}</span>
+                            <span className="text-slate-500">↔</span>
+                            <span>{r}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={isSubmitting || Object.keys(matchingPairsSelected).length === 0}
+                    onClick={() => handleSubmitAnswer(matchingPairsSelected)}
+                    className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black text-base shadow-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-5 h-5" />
+                    <span>জোড়া চূড়ান্ত ও সাবমিট করুন</span>
+                  </button>
+                </div>
+              )}
+
+              {/* 6. IMAGE_COMPARE, TEXT_SLIDE & Fallback */}
+              {!["MCQ", "TRUE_FALSE", "FILL_BLANKS", "WORD_CLOUD", "OPEN_ENDED", "REORDER", "MATCHING"].includes(qType) && (
                 <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 text-center space-y-4">
                   <p className="text-sm text-slate-300">
                     {currentSlide?.content || "স্লাইডের নির্দেশনা দেখুন।"}
@@ -740,6 +926,9 @@ function LiveQuizArenaContent() {
             </div>
           )}
         </main>
+
+        {/* Floating Reactions Overlay */}
+        <FloatingReactionOverlay />
       </div>
     );
   }

@@ -1332,38 +1332,88 @@ export default function UnifiedQuizMentimeterWorkspace({
     }
   };
 
-  // Launch Fullscreen Live Presentation (Task 3)
+  // Launch Fullscreen Live Presentation (Task 2: Auto-save + Strict Slide Normalization)
   const handleLaunchLivePresentation = async (deckToLaunch: DeckItem) => {
     try {
       showToast("🚀 লাইভ সেশন প্রস্তুত হচ্ছে...", "info");
+
+      // 1. Auto-save deck before launching
+      await saveDeckToServer(deckToLaunch, false);
+
+      // 2. Strict slide normalization so real live sessions NEVER have 0 questions
+      const rawSlides = Array.isArray(deckToLaunch.slides) && deckToLaunch.slides.length > 0
+        ? deckToLaunch.slides
+        : [
+            {
+              id: `slide-${Date.now()}-1`,
+              type: "MCQ" as SlideType,
+              title: "প্রথম প্রশ্ন",
+              options: ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
+              correctAnswer: 0,
+              timeLimit: 20,
+              points: 100,
+            },
+          ];
+
+      const normalizedSlides = rawSlides.map((s, idx) => ({
+        ...s,
+        id: s.id || `slide-${idx}`,
+        type: ((s.type || "MCQ") as string).toUpperCase() as SlideType,
+        title: s.title || (s as any).question || `প্রশ্ন ${idx + 1}`,
+        question: (s as any).question || s.title || `প্রশ্ন ${idx + 1}`,
+        questionText: (s as any).question || s.title || `প্রশ্ন ${idx + 1}`,
+        options: Array.isArray(s.options) ? s.options : [],
+        correctAnswer: s.correctAnswer !== undefined ? s.correctAnswer : 0,
+        timeLimit: Math.max(5, Number(s.timeLimit) || 20),
+        points: Math.max(10, Number(s.points) || 100),
+        pairs: s.pairs || (s as any).matchingPairs || [],
+        items: s.items || (s as any).reorderItems || [],
+        acceptedAnswers: s.acceptedAnswers || [],
+        imageLeftUrl: s.imageLeftUrl || "",
+        imageRightUrl: s.imageRightUrl || "",
+        explanation: s.explanation || "",
+      }));
+
       const res = await fetch("/api/live-quizzes/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quizId: deckToLaunch.id,
-          slides: deckToLaunch.slides,
+          title: deckToLaunch.title,
+          slides: normalizedSlides,
           competitionMode: "individual",
           settings: deckSettings,
           scheduledStartTime: deckSettings.scheduledStartTime || undefined,
           academicYearId: deckToLaunch.academicYearId || "2026",
           classId: deckToLaunch.classId,
           className: deckToLaunch.className,
+          trade: deckToLaunch.trade || deckToLaunch.tradeName,
           tradeId: deckToLaunch.tradeId,
           tradeName: deckToLaunch.trade || deckToLaunch.tradeName,
+          subject: deckToLaunch.subjectName,
           subjectId: deckToLaunch.subjectId,
           subjectName: deckToLaunch.subjectName,
           subjectCode: deckToLaunch.subjectCode,
+          smsInterval: deckSettings.autoSmsMilestone || "EVERY_3",
         }),
       });
 
       const data = await res.json();
       if (data.success && data.session) {
-        const pin = data.session.sessionCode;
+        const pin = data.session.sessionCode || data.session.code;
         const sessionId = data.session.id;
+        const finalSlides =
+          Array.isArray(data.session.slides) && data.session.slides.length > 0
+            ? data.session.slides
+            : normalizedSlides;
+
         setActiveLivePresenterSession({
           id: sessionId,
           pin,
-          deck: deckToLaunch,
+          deck: {
+            ...deckToLaunch,
+            slides: finalSlides,
+          },
         });
         if (onLiveStateChange) onLiveStateChange(true);
         showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
@@ -1372,7 +1422,10 @@ export default function UnifiedQuizMentimeterWorkspace({
         setActiveLivePresenterSession({
           id: `session-${Date.now()}`,
           pin,
-          deck: deckToLaunch,
+          deck: {
+            ...deckToLaunch,
+            slides: normalizedSlides,
+          },
         });
         if (onLiveStateChange) onLiveStateChange(true);
         showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");

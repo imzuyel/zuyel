@@ -61,9 +61,9 @@ export async function POST(
     }
 
     // -------------------------------------------------------------------------
-    // ACTION 2: SKIP_COUNTDOWN / FORCE_ANSWERING (1-Click Teacher Override)
+    // ACTION 2: SKIP_COUNTDOWN / FORCE_ANSWERING / FORCE_ACTIVE (1-Click Teacher Override & Timeout Failsafe)
     // -------------------------------------------------------------------------
-    if (action === "SKIP_COUNTDOWN" || action === "FORCE_ANSWERING") {
+    if (action === "SKIP_COUNTDOWN" || action === "FORCE_ANSWERING" || action === "FORCE_ACTIVE") {
       const currentSlide = session.slides[session.currentSlideIndex] || session.slides[0];
       const safeTimeLimit = Math.max(5, Number(currentSlide?.timeLimit) || 20);
 
@@ -82,6 +82,26 @@ export async function POST(
         stage: "ANSWERING_ACTIVE",
         stageStartedAt: session.stageStartedAt,
         stageEndsAt: session.stageEndsAt,
+        session,
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 2.5: REVEAL_RESULTS
+    // -------------------------------------------------------------------------
+    if (action === "REVEAL_RESULTS") {
+      session.stage = "RESULT_REVEAL";
+      session.stageStartedAt = now;
+      session.stageEndsAt = now + 120000;
+      session.updatedAt = now;
+
+      saveLiveSession(session);
+      invalidateSessionCache(id);
+
+      return NextResponse.json({
+        success: true,
+        message: "Results revealed.",
+        stage: "RESULT_REVEAL",
         session,
       });
     }

@@ -870,11 +870,12 @@ export default function LiveQuizPortal({
               }
 
               if (data.questionEndsAt) {
-                const serverTime = new Date(data.serverTime).getTime();
-                const endsAt = new Date(data.questionEndsAt).getTime();
+                const serverTime = Number(new Date(data.serverTime).getTime()) || Date.now();
+                const endsAt = Number(new Date(data.questionEndsAt).getTime()) || (Date.now() + 20000);
                 const clientNow = Date.now();
-                const offset = serverTime - clientNow;
-                const remaining = Math.max(0, Math.ceil((endsAt - (Date.now() + offset)) / 1000));
+                const offset = Number.isFinite(serverTime - clientNow) ? (serverTime - clientNow) : 0;
+                const rawRemaining = Math.max(0, Math.ceil((endsAt - (Date.now() + offset)) / 1000));
+                const remaining = Number.isFinite(rawRemaining) ? rawRemaining : 0;
                 
                 setTimeLeft(remaining);
 
