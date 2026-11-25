@@ -132,6 +132,50 @@ export function calculateFuzzySimilarity(str1: string, str2: string): number {
 // Core Identity Resolver Function
 // ---------------------------------------------------------------------------
 
+function extractNumericClass(className?: string | null): number | null {
+  if (!className) return null;
+  const raw = String(className).toLowerCase();
+  const bnToEn: Record<string, string> = { "৬": "6", "৭": "7", "৮": "8", "৯": "9", "১০": "10", "১১": "11", "১২": "12" };
+  let norm = raw;
+  Object.entries(bnToEn).forEach(([b, e]) => {
+    norm = norm.replace(new RegExp(b, "g"), e);
+  });
+  const m = norm.match(/\b(6|7|8|9|10|11|12)\b/);
+  if (m) return Number(m[1]);
+  if (norm.includes("six")) return 6;
+  if (norm.includes("seven")) return 7;
+  if (norm.includes("eight")) return 8;
+  if (norm.includes("nine")) return 9;
+  if (norm.includes("ten")) return 10;
+  if (norm.includes("eleven")) return 11;
+  if (norm.includes("twelve")) return 12;
+  return null;
+}
+
+export function normalizeTradeForMatching(trade?: string | null): string {
+  if (!trade) return "";
+  const t = String(trade).toLowerCase().trim();
+  if (t.includes("it") || t.includes("iot") || t.includes("computer") || t.includes("কম্পিউটার") || t.includes("আইটি")) return "it_iot";
+  if (t.includes("electrical") || t.includes("gew") || t.includes("ইলেকট্রিক্যাল")) return "electrical";
+  if (t.includes("electronics") || t.includes("consumer") || t.includes("ce") || t.includes("ইলেকট্রনিক্স")) return "electronics";
+  if (t.includes("apparel") || t.includes("dress") || t.includes("amb") || t.includes("garments") || t.includes("পোশাক") || t.includes("অ্যাপারেল")) return "apparel";
+  if (t.includes("general") || t.includes("সাধারণ")) return "general";
+  return t;
+}
+
+export function buildCanonicalStudentKey(
+  className?: string | null,
+  trade?: string | null,
+  roll?: string | number | null
+): string {
+  const numCls = extractNumericClass(className);
+  const clsPart = numCls ? `class-${numCls}` : (className || "class-0").toLowerCase().trim().replace(/\s+/g, "-");
+  const isNoDeptClass = numCls !== null && numCls >= 6 && numCls <= 8;
+  const tradePart = isNoDeptClass ? "general" : normalizeTradeForMatching(trade) || "general";
+  const rollPart = String(roll ?? "").replace(/[^\d]/g, "") || String(roll ?? "guest").trim().toLowerCase();
+  return `${clsPart}::${tradePart}::${rollPart}`;
+}
+
 export function resolveStudentIdentity(query: StudentResolutionQuery): StudentResolutionResult {
   const store = getHybridStore();
   const students = store.students || [];
@@ -184,15 +228,18 @@ export function resolveStudentIdentity(query: StudentResolutionQuery): StudentRe
     }
   }
 
-  // 2. Pass 2: Exact (Class + Trade + Roll) Match
+  // 2. Pass 2: Exact (Class + Trade + Roll) Match (Class 6-8 has NO Trade/Department)
   if (rollNum !== null && query.className) {
+    const queryNumCls = extractNumericClass(query.className);
     const clsQuery = query.className.toLowerCase().replace(/class\s*/i, "").trim();
-    const trdQuery = query.trade ? query.trade.toLowerCase().trim() : "";
+    const trdQuery = normalizeTradeForMatching(query.trade);
 
     const candidates = students.filter(s => {
+      const sNumCls = extractNumericClass(s.className);
       const sCls = s.className.toLowerCase().replace(/class\s*/i, "").trim();
+      const clsMatch = queryNumCls !== null && sNumCls !== null ? queryNumCls === sNumCls : sCls.includes(clsQuery);
       const sRollMatch = s.roll === rollNum || String(s.roll).endsWith(String(rollNum));
-      return sRollMatch && sCls.includes(clsQuery);
+      return sRollMatch && clsMatch;
     });
 
     if (candidates.length === 1) {
@@ -211,23 +258,42 @@ export function resolveStudentIdentity(query: StudentResolutionQuery): StudentRe
       };
     }
 
-    if (candidates.length > 1 && trdQuery) {
-      const tradeFiltered = candidates.find(s => 
-        s.trade.toLowerCase().includes(trdQuery) || 
-        trdQuery.includes(s.trade.toLowerCase())
-      );
-      if (tradeFiltered) {
+    if (candidates.length > 1) {
+      const requiresTrade = queryNumCls === null || queryNumCls >= 9;
+      if (requiresTrade && trdQuery && trdQuery !== "general") {
+        const tradeFiltered = candidates.find(s => {
+          const sTrd = normalizeTradeForMatching(s.trade);
+          return sTrd === trdQuery || s.trade.toLowerCase().includes(trdQuery) || (query.trade && s.trade.toLowerCase().includes(query.trade.toLowerCase()));
+        });
+        if (tradeFiltered) {
+          return {
+            isResolved: true,
+            matchType: "EXACT_ROLL_CLASS_TRADE",
+            confidence: 99,
+            student: tradeFiltered,
+            studentId: tradeFiltered.id,
+            canonicalName: tradeFiltered.nameBangla || tradeFiltered.name,
+            canonicalRoll: tradeFiltered.roll,
+            className: tradeFiltered.className,
+            trade: tradeFiltered.trade,
+            details: `Exact class, trade and roll resolution: Class ${tradeFiltered.className}, ${tradeFiltered.trade}, Roll ${tradeFiltered.roll}`,
+          };
+        }
+      }
+      // If Class 6-8 or no trade disambiguation needed, pick exact numeric roll match first
+      const exactNum = candidates.find(s => s.roll === rollNum) || candidates[0];
+      if (exactNum) {
         return {
           isResolved: true,
           matchType: "EXACT_ROLL_CLASS_TRADE",
-          confidence: 99,
-          student: tradeFiltered,
-          studentId: tradeFiltered.id,
-          canonicalName: tradeFiltered.nameBangla || tradeFiltered.name,
-          canonicalRoll: tradeFiltered.roll,
-          className: tradeFiltered.className,
-          trade: tradeFiltered.trade,
-          details: `Exact class, trade and roll resolution: Class ${tradeFiltered.className}, ${tradeFiltered.trade}, Roll ${tradeFiltered.roll}`,
+          confidence: 94,
+          student: exactNum,
+          studentId: exactNum.id,
+          canonicalName: exactNum.nameBangla || exactNum.name,
+          canonicalRoll: exactNum.roll,
+          className: exactNum.className,
+          trade: exactNum.trade,
+          details: `Class and roll match: Class ${exactNum.className}, Roll ${exactNum.roll}`,
         };
       }
     }

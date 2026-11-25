@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const classFilter = searchParams.get("class") || "all";
+    const classFilter = searchParams.get("class") || searchParams.get("className") || "all";
     const tradeFilter = searchParams.get("trade") || "all";
     const subjectFilter = searchParams.get("subject") || "all";
 

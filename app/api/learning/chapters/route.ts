@@ -165,6 +165,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (isPrismaAvailable()) {
+      await safePrismaQuery(async (p) => {
+        const courseExists = await p.course.findUnique({ where: { id: Number(body.courseId) } });
+        if (!courseExists) return null;
+        return await p.courseChapter.create({
+          data: {
+            courseId: Number(body.courseId),
+            chapterNumber: chapter.chapterNumber,
+            title: chapter.title,
+            titleBangla: chapter.titleBangla,
+            description: chapter.description || "",
+            orderIndex: chapter.orderIndex,
+            isPublished: chapter.isPublished,
+            unlockRule: chapter.unlockRule || "PREVIOUS_COMPLETED",
+            requiredMinXp: chapter.requiredMinXp || 0,
+          },
+        });
+      }, null);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Chapter created successfully",

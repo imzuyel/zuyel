@@ -237,6 +237,7 @@ export default function GlobalSettingsSubjectMappingHub() {
         loadMappedSubjects();
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("pts-academic-mapping-updated"));
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
         }
       } else {
         showToast(data.error || "রিমুভ করতে ব্যর্থ হয়েছে", "error");
@@ -273,6 +274,7 @@ export default function GlobalSettingsSubjectMappingHub() {
         loadMappedSubjects();
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("pts-academic-mapping-updated"));
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
         }
       } else {
         showToast(data.error || "প্রিসেট অ্যাপ্লাই ব্যর্থ হয়েছে", "error");
@@ -354,6 +356,7 @@ export default function GlobalSettingsSubjectMappingHub() {
         loadMappedSubjects();
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("pts-academic-mapping-updated"));
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
         }
       } else {
         showToast(data.error || "ম্যাপিং ব্যর্থ হয়েছে", "error");

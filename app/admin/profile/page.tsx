@@ -20,7 +20,7 @@ export default function AdminProfilePage() {
   };
 
   return (
-    <div className="flex h-screen max-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
+    <div className="flex min-h-dvh bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-x-hidden font-sans">
       {/* Desktop Persistent Admin Sidebar */}
       <AdminSidebar
         activeTab="profile"
@@ -30,7 +30,7 @@ export default function AdminProfilePage() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 min-h-0 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="flex-1 min-h-dvh flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
         <Header
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           onNavigate={(target) => {

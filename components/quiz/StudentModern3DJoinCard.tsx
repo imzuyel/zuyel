@@ -84,7 +84,7 @@ export default function StudentModern3DJoinCard({
     }
   }, [searchParams, code]);
 
-  // Auto-verify 6-digit room code with strict live status check
+  // Auto-verify 6-digit room code against clean /api/live-v2/join
   useEffect(() => {
     const clean = code.trim().replace(/\D/g, "");
     if (clean.length === 6) {
@@ -93,44 +93,44 @@ export default function StudentModern3DJoinCard({
       setErrorMsg(null);
       setSessionBlockedNotice(null);
 
-      fetch(`/api/live-quizzes/sessions/join?code=${clean}`)
+      fetch(`/api/live-v2/join?code=${clean}`)
         .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
         .then(({ ok, data }) => {
           if (!isMounted) return;
-          if (ok && data?.success && data.session) {
-            const st = String(data.session.status || "WAITING").toUpperCase();
+          if (ok && data?.ok && data.sessionId) {
+            const st = String(data.stage || "LOBBY").toUpperCase();
             if (st === "PAUSED" || st === "ENDED") {
               setVerifiedSession(null);
               setSessionBlockedNotice({
                 error: "SESSION_NOT_LIVE",
                 status: st,
-                message: "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
+                message: "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় শুরু করলে পরে যুক্ত হও।",
               });
             } else {
               setSessionBlockedNotice(null);
               setVerifiedSession({
-                id: data.session.id,
-                title: data.session.title || "লাইভ কুইজ",
-                className: data.session.className || "কারিগরি শাখা",
-                trade: data.session.trade || "জেনারেল",
-                playerCount: Number(data.session.playerCount) || 0,
+                id: data.sessionId,
+                title: data.quizTitle || "লাইভ কুইজ",
+                className: data.className || "কারিগরি শাখা",
+                trade: data.trade || "জেনারেল",
+                playerCount: Number(data.playerCount) || 0,
                 status: st,
               });
             }
           } else {
             setVerifiedSession(null);
-            if (data?.error === "SESSION_NOT_LIVE") {
+            if (data?.errorCode === "SESSION_NOT_LIVE") {
               setSessionBlockedNotice({
                 error: "SESSION_NOT_LIVE",
                 status: data.status,
                 message:
-                  data.message ||
-                  "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
+                  data.error ||
+                  "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় শুরু করলে পরে যুক্ত হও।",
               });
-            } else if (data?.error === "INVALID_CODE") {
+            } else if (data?.errorCode === "INVALID_CODE") {
               setSessionBlockedNotice({
                 error: "INVALID_CODE",
-                message: data.message || "❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।",
+                message: data.error || "❌ ভুল রুম কোড!",
               });
             }
           }
@@ -158,7 +158,7 @@ export default function StudentModern3DJoinCard({
     const cleanCode = code.trim().replace(/\D/g, "");
 
     if (cleanCode.length !== 6) {
-      setErrorMsg("❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।");
+      setErrorMsg("❌ ভুল রুম কোড!");
       return;
     }
     if (!name.trim()) {
@@ -171,26 +171,24 @@ export default function StudentModern3DJoinCard({
     setSessionBlockedNotice(null);
 
     try {
-      // Unique tab-scoped player ID (reused seamlessly if stored locally for cross-day resume)
+      // Isolated sessionStorage ONLY (never touches Admin cookies or localStorage)
       let storedId = "";
       try {
-        const storedRaw =
-          sessionStorage.getItem(`pgtsc_live_player_${cleanCode}`) ||
-          localStorage.getItem(`pgtsc_live_player_${cleanCode}`);
+        const storedRaw = sessionStorage.getItem(`live_v2_player_${cleanCode}`);
         if (storedRaw) {
           storedId = JSON.parse(storedRaw)?.playerId || "";
         }
       } catch {}
 
       const localId =
-        storedId || `player_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        storedId || `pl_v2_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-      const res = await fetch("/api/live-quizzes/sessions/join", {
+      const res = await fetch("/api/live-v2/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionCode: cleanCode,
-          displayName: name.trim(),
+          code: cleanCode,
+          name: name.trim(),
           roll: roll.trim() || "—",
           avatar: selectedAvatar,
           playerId: localId,
@@ -199,70 +197,54 @@ export default function StudentModern3DJoinCard({
 
       const data = await res.json().catch(() => ({}));
 
-      if (!res.ok || (!data.success && !(data.playerId && data.sessionId))) {
-        if (data?.error === "SESSION_NOT_LIVE") {
+      if (!res.ok || (!data.ok && !(data.playerId && data.sessionId))) {
+        if (data?.errorCode === "SESSION_NOT_LIVE") {
           setVerifiedSession(null);
           setSessionBlockedNotice({
             error: "SESSION_NOT_LIVE",
             status: data.status,
             message:
-              data.message ||
-              "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
+              data.error ||
+              "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় শুরু করলে পরে যুক্ত হও।",
           });
           return;
         }
-        if (data?.error === "INVALID_CODE") {
+        if (data?.errorCode === "INVALID_CODE") {
           setVerifiedSession(null);
           setSessionBlockedNotice({
             error: "INVALID_CODE",
-            message: data.message || "❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।",
+            message: data.error || "❌ ভুল রুম কোড!",
           });
           return;
         }
-        throw new Error(data.message || data.error || "লবিতে প্রবেশ করতে সমস্যা হয়েছে।");
+        throw new Error(data.error || data.message || "লবিতে প্রবেশ করতে সমস্যা হয়েছে।");
       }
 
-      if (data?.session?.status === "PAUSED" || data?.session?.status === "ENDED") {
-        setVerifiedSession(null);
-        setSessionBlockedNotice({
-          error: "SESSION_NOT_LIVE",
-          status: data.session.status,
-          message: "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
-        });
-        return;
-      }
-
-      const assignedPlayerId = data.playerId || data.player?.id || data.participant?.id || localId;
-      const actualSessionId = data.sessionId || data.session?.id || verifiedSession?.id || `sess_${cleanCode}`;
-      const resolvedCode = String(data.code || data.session?.code || cleanCode);
+      const assignedPlayerId = data.playerId || data.player?.id || localId;
+      const actualSessionId = data.sessionId || verifiedSession?.id || `live_v2_${cleanCode}`;
+      const resolvedCode = String(data.code || cleanCode);
 
       const canonicalPlayer = {
         sessionId: actualSessionId,
         code: resolvedCode,
         playerId: assignedPlayerId,
-        name: name.trim(),
-        roll: roll.trim() || "—",
-        avatar: selectedAvatar,
+        name: data.player?.name || name.trim(),
+        roll: data.player?.roll || roll.trim() || "—",
+        avatar: data.player?.avatar || selectedAvatar,
       };
 
       const identity: StudentAuthIdentity = {
         playerId: assignedPlayerId,
-        playerName: name.trim(),
-        roll: roll.trim() || "—",
-        avatar: selectedAvatar,
+        playerName: canonicalPlayer.name,
+        roll: canonicalPlayer.roll,
+        avatar: canonicalPlayer.avatar,
         sessionId: actualSessionId,
         roomCode: resolvedCode,
       };
 
-      // Save to BOTH sessionStorage & localStorage under canonical key `pgtsc_live_player_${code}`
-      const canonicalKey = `pgtsc_live_player_${resolvedCode}`;
+      // Strictly store student live identity ONLY in sessionStorage under live_v2_player_<code >
       try {
-        sessionStorage.setItem(canonicalKey, JSON.stringify(canonicalPlayer));
-        localStorage.setItem(canonicalKey, JSON.stringify(canonicalPlayer));
-        sessionStorage.setItem("live_quiz_player", JSON.stringify(identity));
-        sessionStorage.setItem(`live_quiz_player_${resolvedCode}`, JSON.stringify(identity));
-        localStorage.setItem(`live_quiz_player_${resolvedCode}`, JSON.stringify(identity));
-        localStorage.setItem("pgtsc_live_quiz_player", JSON.stringify(identity));
+        sessionStorage.setItem(`live_v2_player_${resolvedCode}`, JSON.stringify(canonicalPlayer));
       } catch {
         // quota safety
       }

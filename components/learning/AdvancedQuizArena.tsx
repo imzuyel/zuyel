@@ -445,6 +445,8 @@ export function AdvancedQuizArena({
         body: JSON.stringify({
           studentRoll: activeStudent.rollNumber,
           studentName: activeStudent.studentName,
+          className: activeStudent.classLevel,
+          trade: activeStudent.trade,
           answers: answersMap,
           timeSpentSeconds: totalTimeSpent,
           tabSwitchedQuestionIds,
@@ -681,9 +683,51 @@ export function AdvancedQuizArena({
   const renderFeedbackBanner = () => {
     if (!hasAnsweredCurrent || !currentResult || !currentQuestion) return null;
 
+    const qType = String(currentQuestion.questionType || (currentQuestion as any).type || "MCQ").toUpperCase();
+    let correctAnswerText = "";
+    let studentAnswerText = "";
+
+    if (qType === "TRUE_FALSE") {
+      const boolAns = (currentQuestion as any).correctBoolean !== undefined
+        ? Boolean((currentQuestion as any).correctBoolean)
+        : String(currentQuestion.correctAnswer ?? "").toLowerCase() === "true" || currentQuestion.correctOptionIndex === 0;
+      correctAnswerText = boolAns ? "সত্য (True)" : "মিথ্যা (False)";
+      const rawAns = universalAnswersMap[currentQuestion.id];
+      if (rawAns !== undefined && rawAns !== null) {
+        studentAnswerText = String(rawAns) === "true" || rawAns === true ? "সত্য (True)" : "মিথ্যা (False)";
+      }
+    } else if (qType === "FILL_BLANKS") {
+      const blanks = Array.from(currentQuestion.questionText.matchAll(/\[(.*?)\]/g)).map((m) => m[1]);
+      correctAnswerText = blanks.length > 0
+        ? blanks.join(", ")
+        : (currentQuestion.acceptedAnswers || []).join(", ") || "N/A";
+      const rawAns = universalAnswersMap[currentQuestion.id];
+      studentAnswerText = typeof rawAns === "object" && rawAns !== null
+        ? Object.values(rawAns).join(", ")
+        : String(rawAns ?? "");
+    } else if (qType === "MATCHING") {
+      const pairs = currentQuestion.matchingPairs || (currentQuestion as any).pairs || [];
+      correctAnswerText = pairs.map((p: any) => `${p.left} → ${p.right}`).join(" | ");
+    } else if (qType === "REORDER") {
+      const order = (currentQuestion.correctOrder && currentQuestion.correctOrder.length > 0)
+        ? currentQuestion.correctOrder
+        : (currentQuestion.options || []);
+      correctAnswerText = order.join(" → ");
+    } else {
+      const opts = currentQuestion.options || [];
+      correctAnswerText = opts[currentQuestion.correctOptionIndex ?? 0] || String(currentQuestion.correctAnswer ?? "N/A");
+      if (currentResult.selectedOriginalIndex !== null && currentResult.selectedOriginalIndex !== undefined) {
+        studentAnswerText = opts[currentResult.selectedOriginalIndex] || "";
+      }
+    }
+
+    const bengaliExplanation =
+      currentQuestion.explanation?.trim() ||
+      `এই প্রশ্নের সঠিক উত্তর হলো "${correctAnswerText}" — মূল পাঠ্য অংশ থেকে ধারণাটি ঝালিয়ে নিন।`;
+
     return (
       <div
-        className={`p-4 sm:p-5 rounded-2xl border transition-all animate-fade-in space-y-2 mt-4 ${currentTemplate.feedbackBanner}`}
+        className={`p-4 sm:p-5 rounded-2xl border transition-all animate-fade-in space-y-2.5 mt-4 ${currentTemplate.feedbackBanner}`}
       >
         <div className="flex items-center gap-2 font-black text-xs sm:text-sm">
           {currentResult.isCorrect ? (
@@ -694,21 +738,32 @@ export function AdvancedQuizArena({
           ) : currentResult.isTimeout ? (
             <>
               <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-              <span className="text-amber-700 dark:text-amber-300">সময় শেষ! সঠিক উত্তরটি সবুজ চিহ্নিত করা হয়েছে।</span>
+              <span className="text-amber-700 dark:text-amber-300">সময় শেষ! সঠিক উত্তরটি নিচে দেখে নিন।</span>
             </>
           ) : (
             <>
               <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span className="text-rose-700 dark:text-rose-300">উত্তরটি ভুল হয়েছে। সঠিক উত্তরটি দেখে নিন।</span>
+              <span className="text-rose-700 dark:text-rose-300">উত্তরটি ভুল হয়েছে! সঠিক উত্তর ও ব্যাখ্যা দেখে নিন:</span>
             </>
           )}
         </div>
 
-        {currentQuestion.explanation && (
-          <p className="text-xs sm:text-sm leading-relaxed text-slate-700 dark:text-slate-300 pt-1.5 border-t border-slate-300/60 dark:border-slate-700/60">
-            <strong>ব্যাখ্যা:</strong> {currentQuestion.explanation}
-          </p>
+        {!currentResult.isCorrect && correctAnswerText && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            {studentAnswerText && (
+              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 font-semibold">
+                ❌ আপনার উত্তর: {studentAnswerText}
+              </div>
+            )}
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold">
+              ✅ সঠিক উত্তর: {correctAnswerText}
+            </div>
+          </div>
         )}
+
+        <p className="text-xs sm:text-sm leading-relaxed text-slate-700 dark:text-slate-300 pt-1.5 border-t border-slate-300/60 dark:border-slate-700/60">
+          <strong className="text-cyan-600 dark:text-cyan-400">💡 ব্যাখ্যা:</strong> {bengaliExplanation}
+        </p>
       </div>
     );
   };

@@ -103,6 +103,9 @@ export default function AcademicYearsManagerView() {
       if (json.success) {
         setToast({ type: "success", message: `শিক্ষাবর্ষ ${y.name} সফলভাবে সক্রিয় করা হয়েছে।` });
         fetchYears();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
+        }
       } else {
         setToast({ type: "error", message: json.error || "শিক্ষাবর্ষ পরিবর্তন ব্যর্থ হয়েছে।" });
       }

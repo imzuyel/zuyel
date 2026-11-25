@@ -63,8 +63,12 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/reset-password/") ||
     pathname === "/forbidden" ||
     pathname.startsWith("/quiz/join") ||
+    pathname.startsWith("/quiz/live") ||
+    pathname.startsWith("/quiz/lobby") ||
+    pathname.startsWith("/quiz/result") ||
     pathname.startsWith("/live-quizzes/join") ||
     pathname.startsWith("/live-quiz/join") ||
+    pathname.startsWith("/api/live-v2") ||
     pathname.startsWith("/_next") ||
     pathname.includes(".")
   ) {
@@ -119,6 +123,7 @@ export function middleware(request: NextRequest) {
       pathname.startsWith("/api/documents/verify") ||
       (pathname === "/api/results" && request.method === "GET") ||
       (pathname === "/api/notices" && request.method === "GET") ||
+      pathname.startsWith("/api/live-v2") ||
       pathname.startsWith("/api/live-quizzes/join") ||
       pathname.endsWith("/join") ||
       (pathname.startsWith("/api/live-quizzes/sessions/") &&

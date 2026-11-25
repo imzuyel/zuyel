@@ -275,6 +275,8 @@ export default function CourseContentBuilderAdmin({
     keyTakeawaysText: "",
     timeLimitSeconds: 300,
     quizQuestions: [] as QuizQuestionItem[],
+    boardImportant: false,
+    practicalJob: false,
   });
 
   // Question editing sub-state for quiz builder
@@ -936,6 +938,8 @@ export default function CourseContentBuilderAdmin({
       summary: "",
       keyTakeawaysText: "",
       timeLimitSeconds: 300,
+      boardImportant: false,
+      practicalJob: false,
       quizQuestions: [
         {
           id: `q-init-1`,
@@ -972,6 +976,8 @@ export default function CourseContentBuilderAdmin({
       summary: item.summary || "",
       keyTakeawaysText: Array.isArray(item.keyTakeaways) ? item.keyTakeaways.join("\n") : "",
       timeLimitSeconds: item.timeLimitSeconds || 300,
+      boardImportant: Boolean((item as any).boardImportant),
+      practicalJob: Boolean((item as any).practicalJob),
       quizQuestions: item.quizQuestions || [],
     });
 
@@ -1758,6 +1764,16 @@ export default function CourseContentBuilderAdmin({
                                                 ? `চেকপয়েন্ট কুইজ (${item.quizQuestions?.length || 0} টি প্রশ্ন)`
                                                 : `ব্লক পার্ট ${item.blogPartNumber || itemIdx + 1}`}
                                             </span>
+                                            {(item as any).boardImportant && (
+                                              <span className="px-2 py-0.5 rounded-md font-bold bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30">
+                                                📌 বোর্ড পরীক্ষায় আসার মতো
+                                              </span>
+                                            )}
+                                            {(item as any).practicalJob && (
+                                              <span className="px-2 py-0.5 rounded-md font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30">
+                                                🛠️ ল্যাব/প্র্যাকটিক্যাল
+                                              </span>
+                                            )}
 
                                             {/* Read / Duration time */}
                                             <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium flex items-center gap-1">
@@ -3818,6 +3834,37 @@ export default function CourseContentBuilderAdmin({
                   </div>
                 </div>
               )}
+
+              {/* Instructional Emphasis Tags */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <label className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={itemForm.boardImportant}
+                    onChange={(e) =>
+                      setItemForm({ ...itemForm, boardImportant: e.target.checked })
+                    }
+                    className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                  />
+                  <span className="font-bold text-amber-800 dark:text-amber-200 text-xs">
+                    📌 বোর্ড পরীক্ষায় আসার মতো (Board Important)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 p-3 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={itemForm.practicalJob}
+                    onChange={(e) =>
+                      setItemForm({ ...itemForm, practicalJob: e.target.checked })
+                    }
+                    className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500"
+                  />
+                  <span className="font-bold text-cyan-800 dark:text-cyan-200 text-xs">
+                    🛠️ ল্যাব/প্র্যাকটিক্যাল (Practical Job)
+                  </span>
+                </label>
+              </div>
 
               </fieldset>
 

@@ -471,10 +471,27 @@ export function getActiveStudentAccount(): StudentAuthAccount | null {
   return null;
 }
 
+export function syncStudentAccountSession(account: StudentAuthAccount): StudentAuthAccount {
+  const registeredStudents = getRegisteredStudents();
+  const filteredOthers = registeredStudents.filter((s) => {
+    if (s.rollNumber !== account.rollNumber) return true;
+    return !matchStudentClass(s.classLevel, account.classLevel);
+  });
+  saveRegisteredStudents([account, ...filteredOthers]);
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("ptsc_active_student_session", JSON.stringify(account));
+      window.dispatchEvent(new CustomEvent("ptsc_student_auth_changed", { detail: account }));
+    } catch {}
+  }
+  return account;
+}
+
 export function loginStudentAccount(
   rollNumber: string,
   password: string,
-  classLevel?: string
+  classLevel?: string,
+  trade?: string
 ): {
   success: boolean;
   message: string;
@@ -484,20 +501,35 @@ export function loginStudentAccount(
   const cleanRoll = rollNumber.trim();
   const cleanPass = password.trim();
   const targetNormClass = classLevel && classLevel !== "all" ? normalizeStudentClass(classLevel) : "";
+  const isLowerClass = targetNormClass === "class-6" || targetNormClass === "class-7" || targetNormClass === "class-8";
+  const cleanTrade = isLowerClass ? "General" : (trade || "").trim();
 
   // First check in institutionalDb.students
-  const dbStudent = institutionalDb.students.find((s) => {
+  const dbCandidates = institutionalDb.students.filter((s) => {
     const rollMatches = String(s.roll) === cleanRoll || s.studentId === cleanRoll;
     if (!rollMatches) return false;
     if (!targetNormClass) return true;
     return matchStudentClass(s.className, targetNormClass);
   });
+  const dbStudent =
+    (!isLowerClass && cleanTrade
+      ? dbCandidates.find((s) =>
+          (s.tradeNameBangla || "").toLowerCase().includes(cleanTrade.toLowerCase()) ||
+          cleanTrade.toLowerCase().includes((s.tradeNameBangla || "").toLowerCase())
+        )
+      : null) || dbCandidates[0];
 
   const registeredStudents = getRegisteredStudents();
   const regFound = registeredStudents.find((s) => {
     if (s.rollNumber !== cleanRoll) return false;
-    if (!targetNormClass) return true;
-    return matchStudentClass(s.classLevel, targetNormClass);
+    if (targetNormClass && !matchStudentClass(s.classLevel, targetNormClass)) return false;
+    if (!isLowerClass && cleanTrade && s.trade && s.trade !== "General" && s.trade !== "কারিগরি") {
+      return (
+        s.trade.toLowerCase().includes(cleanTrade.toLowerCase()) ||
+        cleanTrade.toLowerCase().includes(s.trade.toLowerCase())
+      );
+    }
+    return true;
   });
 
   // Strict Student Login: Ensure login is strictly restricted to valid students existing in the database
@@ -511,7 +543,9 @@ export function loginStudentAccount(
   // Determine student name and metadata from DB
   const resolvedName = dbStudent?.nameBangla || dbStudent?.name || regFound?.studentName || `শিক্ষার্থী (রোল ${cleanRoll})`;
   const resolvedClass = regFound?.classLevel || dbStudent?.className || targetNormClass || "class-10";
-  const resolvedTrade = regFound?.trade || dbStudent?.tradeNameBangla || "Computer";
+  const resolvedTrade = isLowerClass
+    ? "General"
+    : (cleanTrade || regFound?.trade || dbStudent?.tradeNameBangla || "IT Support & IoT Basics");
 
   // Determine current active password and whether default password was changed
   const targetPassword = regFound?.password || UNIVERSAL_DEFAULT_PASSWORD;

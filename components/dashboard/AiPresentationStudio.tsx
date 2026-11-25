@@ -11,10 +11,13 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicStructure";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import { doesClassHaveDepartment } from "@/lib/academicConfig";
 import { 
   PRESENTATION_THEMES, 
   THEME_CATEGORIES, 
-  getPresentationThemeById, 
+  getPresentationThemeById,
+  getSlideSurfaceTokens,
   PresentationTheme 
 } from "@/lib/presentationThemes";
 import SmartPdfPickerDropdown from "@/components/common/SmartPdfPickerDropdown";
@@ -38,8 +41,11 @@ export interface SlideItem {
 }
 
 export default function AiPresentationStudio() {
+  const globalCtx = useGlobalAcademic();
   const [topic, setTopic] = useState("");
-  const [selectedClassId, setSelectedClassId] = useState("4"); // Default Class 9
+  const [selectedClassId, setSelectedClassId] = useState(
+    () => globalCtx?.selectedClassId || "4"
+  ); // Default Class 9
   const [selectedTradeCode, setSelectedTradeCode] = useState("SSC-T1");
   const [customNotes, setCustomNotes] = useState("");
   const [selectedPdfDocId, setSelectedPdfDocId] = useState<string>("");
@@ -123,10 +129,31 @@ export default function AiPresentationStudio() {
 
   const printAreaRef = useRef<HTMLDivElement>(null);
   const activeTheme = getPresentationThemeById(selectedThemeId);
+  const slideTokens = getSlideSurfaceTokens(activeTheme);
 
-  // Auto-suggest trades for class
-  const currentClassObj = ACADEMIC_CLASSES.find(c => String(c.id) === selectedClassId);
-  const applicableTrades = ALL_TRADES.filter(t => t.applicableClass === currentClassObj?.numericValue);
+  // Sync from GlobalAcademicContext when changed externally
+  useEffect(() => {
+    if (globalCtx?.selectedClassId) {
+      setSelectedClassId(String(globalCtx.selectedClassId));
+    }
+  }, [globalCtx?.selectedClassId]);
+
+  useEffect(() => {
+    if (globalCtx?.activeTrade?.code) {
+      setSelectedTradeCode(globalCtx.activeTrade.code);
+    }
+  }, [globalCtx?.activeTrade?.code]);
+
+  // Auto-suggest trades for class (Strict: Classes 6-8 have NO trade)
+  const currentClassObj = ACADEMIC_CLASSES.find(
+    (c) => String(c.id) === selectedClassId || String(c.numericValue) === selectedClassId
+  );
+  const classHasTrade = currentClassObj
+    ? doesClassHaveDepartment(currentClassObj.numericValue)
+    : false;
+  const applicableTrades = classHasTrade
+    ? ALL_TRADES.filter((t) => t.applicableClass === currentClassObj?.numericValue)
+    : [];
 
   // Filtered Themes list
   const filteredThemes = PRESENTATION_THEMES.filter((t) => {
@@ -167,8 +194,12 @@ export default function AiPresentationStudio() {
 
     try {
       const clsName = currentClassObj ? currentClassObj.nameBangla : "শ্রেণি ৯";
-      const tradeObj = ALL_TRADES.find(t => t.code === selectedTradeCode);
-      const tradeName = tradeObj ? tradeObj.nameBangla : "সাধারণ কারিগরি জ্ঞান";
+      const tradeObj = classHasTrade
+        ? ALL_TRADES.find((t) => t.code === selectedTradeCode) || applicableTrades[0]
+        : null;
+      const tradeName = classHasTrade
+        ? tradeObj?.nameBangla || "কারিগরি শাখা"
+        : "সাধারণ শিক্ষা";
 
       const res = await fetch("/api/cms/presentation/generate", {
         method: "POST",
@@ -191,6 +222,14 @@ export default function AiPresentationStudio() {
       if (data.success && data.presentation && Array.isArray(data.presentation.slides) && data.presentation.slides.length > 0) {
         setSlides(data.presentation.slides);
         setApiErrorBanner(null);
+        // Ensure gallery record keeps the studio's selected contrast theme
+        if (data.savedId) {
+          void fetch(`/api/presentations/${data.savedId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ theme: selectedThemeId }),
+          }).catch(() => {});
+        }
         toast.success(`আলহামদুলিল্লাহ! আপনার ${data.presentation.slides.length}টি স্লাইড সফলভাবে প্রস্তুত হয়েছে।`);
       } else {
         throw new Error(data.error || "দুঃখিত, ফাইল তৈরি করতে ব্যর্থ হয়েছে। আবার চেষ্টা করুন।");
@@ -215,10 +254,13 @@ export default function AiPresentationStudio() {
     }
     setSavingGallery(true);
     try {
-      const clsObj = ACADEMIC_CLASSES.find((c) => String(c.numericValue) === selectedClassId);
-      const clsName = clsObj ? clsObj.nameBangla : "শ্রেণি ৯ (ভোকেশনাল)";
-      const tradeObj = ALL_TRADES.find((t) => t.code === selectedTradeCode);
-      const tradeName = tradeObj ? tradeObj.nameBangla : "কম্পিউটার ও আইটি";
+      const clsName = currentClassObj ? currentClassObj.nameBangla : "শ্রেণি ৯ (ভোকেশনাল)";
+      const tradeObj = classHasTrade
+        ? ALL_TRADES.find((t) => t.code === selectedTradeCode) || applicableTrades[0]
+        : null;
+      const tradeName = classHasTrade
+        ? tradeObj?.nameBangla || "কম্পিউটার ও আইটি"
+        : "সাধারণ শিক্ষা";
 
       const res = await fetch("/api/presentations", {
         method: "POST",
@@ -562,13 +604,17 @@ export default function AiPresentationStudio() {
               />
             </div>
 
-            {/* Class & Trade selection */}
-            <div className="grid grid-cols-2 gap-2.5">
+            {/* Class & Trade selection (Strict: Classes 6-8 have NO trade) */}
+            <div className={`grid ${classHasTrade ? "grid-cols-2" : "grid-cols-1"} gap-2.5`}>
               <div>
                 <label className="block text-[11px] font-bold text-slate-400 mb-1">শ্রেণি (Class)</label>
                 <select
                   value={selectedClassId}
-                  onChange={(e) => setSelectedClassId(e.target.value)}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setSelectedClassId(nextId);
+                    globalCtx?.setSelectedClassId?.(nextId);
+                  }}
                   className="w-full p-2.5 bg-slate-950/90 border border-slate-700/80 rounded-xl text-xs font-bold text-slate-200 outline-hidden"
                   disabled={generating || downloadingPptx}
                 >
@@ -578,23 +624,26 @@ export default function AiPresentationStudio() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1">কারিগরি ট্রেড</label>
-                <select
-                  value={selectedTradeCode}
-                  onChange={(e) => setSelectedTradeCode(e.target.value)}
-                  className="w-full p-2.5 bg-slate-950/90 border border-slate-700/80 rounded-xl text-xs font-bold text-slate-200 outline-hidden"
-                  disabled={generating || downloadingPptx}
-                >
-                  {applicableTrades.length === 0 ? (
-                    <option value="">সাধারণ শিক্ষা</option>
-                  ) : (
-                    applicableTrades.map((t) => (
+              {classHasTrade && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1">কারিগরি ট্রেড</label>
+                  <select
+                    value={selectedTradeCode}
+                    onChange={(e) => {
+                      const nextCode = e.target.value;
+                      setSelectedTradeCode(nextCode);
+                      const matched = ALL_TRADES.find((t) => t.code === nextCode);
+                      if (matched) globalCtx?.setSelectedTradeId?.(matched.id);
+                    }}
+                    className="w-full p-2.5 bg-slate-950/90 border border-slate-700/80 rounded-xl text-xs font-bold text-slate-200 outline-hidden"
+                    disabled={generating || downloadingPptx}
+                  >
+                    {applicableTrades.map((t) => (
                       <option key={t.code} value={t.code}>{t.nameBangla}</option>
-                    ))
-                  )}
-                </select>
-              </div>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* SLIDE COUNT SELECTOR (5, 10, 15, 20 slides) */}
@@ -847,38 +896,53 @@ export default function AiPresentationStudio() {
                 ref={printAreaRef}
                 className={`relative overflow-hidden border rounded-3xl shadow-2xl w-full p-6 sm:p-8 space-y-6 flex flex-col justify-between aspect-[16/10] min-h-[460px] backdrop-blur-xl ${activeTheme.bgTailwind}`}
                 style={{
-                  backgroundColor: `#${activeTheme.bgColor}`,
-                  color: `#${activeTheme.textColor}`,
-                  borderColor: `#${activeTheme.accentColor}40`,
-                  boxShadow: `0 0 45px #${activeTheme.accentColor}25`
+                  colorScheme: slideTokens.colorScheme,
+                  backgroundColor: slideTokens.stageBg,
+                  color: slideTokens.headingColor,
+                  borderColor: `${slideTokens.accentColor}45`,
+                  boxShadow: `0 0 45px ${slideTokens.accentColor}25`
                 }}
               >
                 {/* Backlighting Orb inside slide */}
                 <div 
                   className="absolute top-0 right-0 w-80 h-80 rounded-full blur-[100px] pointer-events-none opacity-25 transition-all"
-                  style={{ backgroundColor: `#${activeTheme.accentColor}` }}
+                  style={{ backgroundColor: slideTokens.accentColor }}
                 />
 
                 {/* Technical Institution Badge for PDF print branding */}
-                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3 relative z-10">
+                <div
+                  className="flex items-center justify-between pb-3 relative z-10 border-b"
+                  style={{ borderColor: slideTokens.cardBorder }}
+                >
                   <div className="flex items-center gap-2.5">
                     <div 
-                      className="w-8 h-8 rounded-xl bg-slate-950 flex items-center justify-center text-[10px] font-black border border-slate-800"
-                      style={{ color: `#${activeTheme.accentColor}` }}
+                      className="w-8 h-8 rounded-xl flex items-center justify-center text-[10px] font-black border"
+                      style={{
+                        backgroundColor: slideTokens.mutedSurfaceBg,
+                        color: slideTokens.accentColor,
+                        borderColor: slideTokens.mutedSurfaceBorder,
+                      }}
                     >
                       PTSC
                     </div>
                     <div>
-                      <h4 className="text-[10px] font-extrabold uppercase leading-none tracking-wide" style={{ color: `#${activeTheme.textColor}` }}>
+                      <h4 className="text-[10px] font-extrabold uppercase leading-none tracking-wide" style={{ color: slideTokens.headingColor }}>
                         Panchagarh Govt. Technical School & College
                       </h4>
-                      <span className="text-[9px] font-mono mt-0.5" style={{ color: `#${activeTheme.subTextColor}` }}>
+                      <span className="text-[9px] font-mono mt-0.5 block" style={{ color: slideTokens.bodyColor }}>
                         EIIN: 132244 • Smart TVET Presentation
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 text-[9px] font-mono font-bold px-3 py-1 rounded-full bg-slate-950/80 border border-slate-800" style={{ color: `#${activeTheme.subTextColor}` }}>
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: `#${activeTheme.accentColor}` }} />
+                  <div
+                    className="flex items-center gap-1.5 text-[9px] font-mono font-bold px-3 py-1 rounded-full border"
+                    style={{
+                      backgroundColor: slideTokens.mutedSurfaceBg,
+                      borderColor: slideTokens.mutedSurfaceBorder,
+                      color: slideTokens.bodyColor,
+                    }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: slideTokens.accentColor }} />
                     <span>শ্রেণি: {currentClassObj?.nameBangla || "সাধারণ"} • ২০২৬</span>
                   </div>
                 </div>
@@ -904,21 +968,21 @@ export default function AiPresentationStudio() {
                           <div 
                             className="p-1.5 rounded-xl border"
                             style={{ 
-                              backgroundColor: `#${activeTheme.accentColor}20`,
-                              color: `#${activeTheme.accentColor}`,
-                              borderColor: `#${activeTheme.accentColor}40`
+                              backgroundColor: `${slideTokens.accentColor}22`,
+                              color: slideTokens.accentColor,
+                              borderColor: `${slideTokens.accentColor}50`
                             }}
                           >
                             <ActiveIconComponent className="w-4 h-4 animate-bounce" />
                           </div>
                           <span 
                             className="text-[10px] font-extrabold uppercase tracking-widest"
-                            style={{ color: `#${activeTheme.accentColor}` }}
+                            style={{ color: slideTokens.accentColor }}
                           >
                             {activeSlide.subtitle}
                           </span>
                         </div>
-                        <h2 className="text-base sm:text-lg lg:text-xl font-black leading-tight" style={{ color: `#${activeTheme.textColor}` }}>
+                        <h2 className="text-base sm:text-lg lg:text-xl font-black leading-tight" style={{ color: slideTokens.headingColor }}>
                           {activeSlide.title}
                         </h2>
                       </div>
@@ -927,22 +991,26 @@ export default function AiPresentationStudio() {
                       <div className="space-y-2">
                         {activeSlide.contentPoints.map((pt, pIdx) => (
                           <div key={pIdx} className="flex items-start gap-2.5 group">
-                            <span className="font-black text-xs shrink-0 mt-0.5" style={{ color: `#${activeTheme.accentColor}` }}>✦</span>
+                            <span className="font-black text-xs shrink-0 mt-0.5" style={{ color: slideTokens.accentColor }}>✦</span>
                             {editMode ? (
                               <input
                                 type="text"
                                 value={pt}
                                 onChange={(e) => handleUpdatePoint(activeSlideIndex, pIdx, e.target.value)}
-                                className="flex-1 bg-slate-950/80 border border-slate-700/80 rounded px-2.5 py-1 text-xs font-semibold"
-                                style={{ color: `#${activeTheme.textColor}` }}
+                                className="flex-1 rounded px-2.5 py-1 text-xs font-semibold border"
+                                style={{
+                                  backgroundColor: slideTokens.mutedSurfaceBg,
+                                  borderColor: slideTokens.mutedSurfaceBorder,
+                                  color: slideTokens.headingColor,
+                                }}
                               />
                             ) : (
-                              <p className="text-xs leading-relaxed font-bold" style={{ color: `#${activeTheme.textColor}` }}>{pt}</p>
+                              <p className="text-xs leading-relaxed font-bold" style={{ color: slideTokens.headingColor }}>{pt}</p>
                             )}
                             {editMode && (
                               <button
                                 onClick={() => handleDeletePoint(activeSlideIndex, pIdx)}
-                                className="p-1 text-slate-500 dark:text-slate-400 hover:text-rose-400 shrink-0"
+                                className="p-1 text-slate-400 hover:text-rose-400 shrink-0"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -953,8 +1021,12 @@ export default function AiPresentationStudio() {
                         {editMode && (
                           <button
                             onClick={() => handleAddPoint(activeSlideIndex)}
-                            className="mt-2.5 px-3 py-1 text-[10px] font-black bg-slate-950/80 border border-slate-800 rounded-lg flex items-center gap-1"
-                            style={{ color: `#${activeTheme.accentColor}` }}
+                            className="mt-2.5 px-3 py-1 text-[10px] font-black border rounded-lg flex items-center gap-1"
+                            style={{
+                              backgroundColor: slideTokens.mutedSurfaceBg,
+                              borderColor: slideTokens.mutedSurfaceBorder,
+                              color: slideTokens.accentColor,
+                            }}
                           >
                             <Plus className="w-3.5 h-3.5" />
                             <span>নতুন পয়েন্ট যোগ করুন</span>
@@ -963,8 +1035,15 @@ export default function AiPresentationStudio() {
                       </div>
 
                       {/* Bottom Takeaway card block */}
-                      <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/80 text-[11px]" style={{ color: `#${activeTheme.subTextColor}` }}>
-                        <strong style={{ color: `#${activeTheme.textColor}` }}>সারসংক্ষেপ (Key Takeaway):</strong> {activeSlide.takeaway}
+                      <div
+                        className="p-3 rounded-2xl border text-[11px]"
+                        style={{
+                          backgroundColor: slideTokens.cardBg,
+                          borderColor: slideTokens.cardBorder,
+                          color: slideTokens.bodyColor,
+                        }}
+                      >
+                        <strong style={{ color: slideTokens.headingColor }}>সারসংক্ষেপ (Key Takeaway):</strong> {activeSlide.takeaway}
                       </div>
 
                     </div>
@@ -1165,22 +1244,30 @@ export default function AiPresentationStudio() {
             exit={{ opacity: 0 }}
             className={`fixed inset-0 z-50 flex flex-col justify-between p-6 sm:p-10 select-none overflow-hidden ${activeTheme.bgTailwind}`}
             style={{
-              backgroundColor: `#${activeTheme.bgColor}`,
-              color: `#${activeTheme.textColor}`
+              colorScheme: slideTokens.colorScheme,
+              backgroundColor: slideTokens.stageBg,
+              color: slideTokens.headingColor
             }}
           >
             {/* Top Modal Navbar */}
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+            <div
+              className="flex items-center justify-between border-b pb-4"
+              style={{ borderColor: slideTokens.cardBorder }}
+            >
               <div className="flex items-center gap-3">
                 <div 
-                  className="w-9 h-9 rounded-2xl bg-slate-950 border flex items-center justify-center font-black text-xs"
-                  style={{ color: `#${activeTheme.accentColor}`, borderColor: `#${activeTheme.accentColor}40` }}
+                  className="w-9 h-9 rounded-2xl border flex items-center justify-center font-black text-xs"
+                  style={{
+                    backgroundColor: slideTokens.mutedSurfaceBg,
+                    color: slideTokens.accentColor,
+                    borderColor: `${slideTokens.accentColor}50`,
+                  }}
                 >
                   PTSC
                 </div>
                 <div>
-                  <h3 className="text-sm font-black" style={{ color: `#${activeTheme.textColor}` }}>{topic}</h3>
-                  <p className="text-[11px] font-mono" style={{ color: `#${activeTheme.subTextColor}` }}>
+                  <h3 className="text-sm font-black" style={{ color: slideTokens.headingColor }}>{topic}</h3>
+                  <p className="text-[11px] font-mono" style={{ color: slideTokens.bodyColor }}>
                     Panchagarh Govt. Technical School & College • Slide Presentation Mode
                   </p>
                 </div>
@@ -1188,14 +1275,23 @@ export default function AiPresentationStudio() {
 
               <div className="flex items-center gap-3">
                 <span 
-                  className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-slate-950 border border-slate-800"
-                  style={{ color: `#${activeTheme.accentColor}` }}
+                  className="text-xs font-mono font-bold px-3 py-1 rounded-full border"
+                  style={{
+                    backgroundColor: slideTokens.mutedSurfaceBg,
+                    borderColor: slideTokens.mutedSurfaceBorder,
+                    color: slideTokens.accentColor,
+                  }}
                 >
                   Slide {(activeSlideIndex + 1)} of {slides.length}
                 </span>
                 <button
                   onClick={() => setPlayMode(false)}
-                  className="p-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+                  className="p-2.5 rounded-2xl border transition cursor-pointer"
+                  style={{
+                    backgroundColor: slideTokens.mutedSurfaceBg,
+                    borderColor: slideTokens.mutedSurfaceBorder,
+                    color: slideTokens.headingColor,
+                  }}
                   title="বন্ধ করুন (Esc)"
                 >
                   <Minimize2 className="w-5 h-5" />
@@ -1213,10 +1309,10 @@ export default function AiPresentationStudio() {
                 className="space-y-8"
               >
                 <div>
-                  <span className="text-xs font-extrabold uppercase tracking-widest font-mono" style={{ color: `#${activeTheme.accentColor}` }}>
+                  <span className="text-xs font-extrabold uppercase tracking-widest font-mono" style={{ color: slideTokens.accentColor }}>
                     {activeSlide.subtitle}
                   </span>
-                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight mt-1" style={{ color: `#${activeTheme.textColor}` }}>
+                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight mt-1" style={{ color: slideTokens.headingColor }}>
                     {activeSlide.title}
                   </h1>
                 </div>
@@ -1225,8 +1321,8 @@ export default function AiPresentationStudio() {
                   <div className="space-y-4">
                     {activeSlide.contentPoints.map((pt, i) => (
                       <div key={i} className="flex items-start gap-3">
-                        <span className="font-black text-lg leading-none mt-1" style={{ color: `#${activeTheme.accentColor}` }}>✦</span>
-                        <p className="text-lg sm:text-xl font-bold leading-relaxed" style={{ color: `#${activeTheme.textColor}` }}>{pt}</p>
+                        <span className="font-black text-lg leading-none mt-1" style={{ color: slideTokens.accentColor }}>✦</span>
+                        <p className="text-lg sm:text-xl font-bold leading-relaxed" style={{ color: slideTokens.headingColor }}>{pt}</p>
                       </div>
                     ))}
                   </div>
@@ -1245,16 +1341,23 @@ export default function AiPresentationStudio() {
                 </div>
 
                 {activeSlide.takeaway && (
-                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-sm font-bold" style={{ color: `#${activeTheme.subTextColor}` }}>
-                    <span style={{ color: `#${activeTheme.accentColor}` }}>সারসংক্ষেপ:</span> {activeSlide.takeaway}
+                  <div
+                    className="p-4 rounded-2xl border text-sm font-bold"
+                    style={{
+                      backgroundColor: slideTokens.cardBg,
+                      borderColor: slideTokens.cardBorder,
+                      color: slideTokens.bodyColor,
+                    }}
+                  >
+                    <span style={{ color: slideTokens.accentColor }}>সারসংক্ষেপ:</span> {activeSlide.takeaway}
                   </div>
                 )}
               </motion.div>
             </div>
 
             {/* Bottom Modal Controller Footer */}
-            <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
-              <div className="text-xs font-mono" style={{ color: `#${activeTheme.subTextColor}` }}>
+            <div className="flex items-center justify-between border-t pt-4" style={{ borderColor: slideTokens.cardBorder }}>
+              <div className="text-xs font-mono" style={{ color: slideTokens.bodyColor }}>
                 কীবোর্ড নেভিগেশন: <strong>&rarr;</strong> / <strong>&larr;</strong> বা স্পেসবার প্রেস করুন
               </div>
 
@@ -1262,7 +1365,12 @@ export default function AiPresentationStudio() {
                 <button
                   disabled={activeSlideIndex === 0}
                   onClick={() => setActiveSlideIndex(prev => prev - 1)}
-                  className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 font-bold text-xs disabled:opacity-30 cursor-pointer flex items-center gap-1"
+                  className="px-4 py-2 rounded-xl border font-bold text-xs disabled:opacity-30 cursor-pointer flex items-center gap-1"
+                  style={{
+                    backgroundColor: slideTokens.mutedSurfaceBg,
+                    borderColor: slideTokens.mutedSurfaceBorder,
+                    color: slideTokens.headingColor,
+                  }}
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>পূর্ববর্তী</span>
@@ -1271,7 +1379,7 @@ export default function AiPresentationStudio() {
                   disabled={activeSlideIndex === slides.length - 1}
                   onClick={() => setActiveSlideIndex(prev => prev + 1)}
                   className="px-4 py-2 rounded-xl font-black text-xs disabled:opacity-30 cursor-pointer flex items-center gap-1 shadow-lg"
-                  style={{ backgroundColor: `#${activeTheme.accentColor}`, color: activeTheme.isDark ? '#020617' : '#FFFFFF' }}
+                  style={{ backgroundColor: slideTokens.accentColor, color: slideTokens.pillTextColor }}
                 >
                   <span>পরবর্তী</span>
                   <ChevronRight className="w-4 h-4" />

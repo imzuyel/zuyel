@@ -122,30 +122,33 @@ export default function HostLiveFullscreenStage({
   const autoSkippedRef = useRef<string>("");
   const hasEndedOrPausedRef = useRef<boolean>(false);
 
-  // Keep host alive with an 8-second heartbeat & auto-pause beacon on beforeunload
+  const mapV2StageToHost = (v2Stage: string): string => {
+    const u = String(v2Stage || "LOBBY").toUpperCase();
+    if (u === "LOBBY" || u === "READY_CHECK" || u === "WELCOME_WAITING") return "LOBBY";
+    if (u === "COUNTDOWN" || u === "COUNTDOWN_321") return "COUNTDOWN_321";
+    if (u === "QUESTION" || u === "ANSWERING_ACTIVE" || u === "QUESTION_ONLY") return "ANSWERING_ACTIVE";
+    if (u === "REVEAL" || u === "RESULT_REVEAL") return "RESULT_REVEAL";
+    if (u === "LEADERBOARD" || u === "LEADERBOARD_VIEW") return "LEADERBOARD_VIEW";
+    if (u === "ENDED") return "ENDED";
+    if (u === "PAUSED") return "PAUSED";
+    return u;
+  };
+
+  // Auto-pause beacon on beforeunload (host presence kept fresh by 1s /state poll with role=host)
   useEffect(() => {
     if (!sessionId) return;
     hasEndedOrPausedRef.current = false;
-
-    const sendHeartbeat = () => {
-      if (hasEndedOrPausedRef.current) return;
-      fetch(`/api/live-quizzes/sessions/${sessionId}/heartbeat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "host" }),
-      }).catch(() => {});
-    };
-
-    sendHeartbeat();
-    const hbInterval = setInterval(sendHeartbeat, 8000);
 
     const handleBeforeUnload = () => {
       if (hasEndedOrPausedRef.current) return;
       try {
         if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
           navigator.sendBeacon(
-            `/api/live-quizzes/sessions/${sessionId}/pause`,
-            new Blob([JSON.stringify({ reason: "beforeunload" })], { type: "application/json" })
+            "/api/live-v2/action",
+            new Blob(
+              [JSON.stringify({ sessionId, action: "PAUSE", role: "host", reason: "beforeunload" })],
+              { type: "application/json" }
+            )
           );
         }
       } catch {
@@ -155,7 +158,6 @@ export default function HostLiveFullscreenStage({
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => {
-      clearInterval(hbInterval);
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, [sessionId]);
@@ -179,47 +181,51 @@ export default function HostLiveFullscreenStage({
   const isCurrentGraded = isGradedQuiz(currentSlide?.type || "MCQ");
   const totalQuestionDuration = Math.max(5, Number(currentSlide?.timeLimit) || 20);
 
-  // 1. Poll live session state cleanly (1000ms interval, skips when tab hidden)
+  // 1. Poll clean /api/live-v2/state?role=host (keeps hostLastSeenAt fresh & ticks timers on server)
   useEffect(() => {
     let isMounted = true;
 
     const pollState = async () => {
       if (typeof document !== "undefined" && document.hidden) return;
       try {
-        const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/state?playerId=HOST`);
+        const res = await fetch(
+          `/api/live-v2/state?sessionId=${encodeURIComponent(sessionId)}&role=host`
+        );
         if (!res.ok) return;
         const sData = await res.json();
-        if (!isMounted || !sData.success) return;
+        const sess = sData?.session;
+        if (!isMounted || !sData?.ok || !sess) return;
 
         // Server clock sync
-        const sNow = Number(sData.serverNow || sData.serverTimestamp);
+        const sNow = Number(sData.serverNow);
         if (Number.isFinite(sNow) && sNow > 0) {
           setServerOffsetMs(sNow - Date.now());
         }
 
         // Slide index sync
         if (
-          typeof sData.currentSlideIndex === "number" &&
-          Number.isFinite(sData.currentSlideIndex) &&
-          sData.currentSlideIndex !== currentSlideIndex
+          typeof sess.currentSlideIndex === "number" &&
+          Number.isFinite(sess.currentSlideIndex) &&
+          sess.currentSlideIndex !== currentSlideIndex
         ) {
-          setCurrentSlideIndex(sData.currentSlideIndex);
+          setCurrentSlideIndex(sess.currentSlideIndex);
           autoSkippedRef.current = "";
         }
 
         // Stage & timestamp sync (never assign NaN)
-        if (sData.stage) {
-          setStage(String(sData.stage).toUpperCase());
+        if (sess.stage) {
+          setStage(mapV2StageToHost(sess.stage));
         }
-        const ends = Number(sData.stageEndsAt);
+        const ends = Number(sess.stageEndsAt);
         if (Number.isFinite(ends) && ends > 0) {
           setStageEndsAt(ends);
+        } else if (sess.stage !== "COUNTDOWN" && sess.stage !== "QUESTION") {
+          setStageEndsAt(0);
         }
 
         // Players sync + animated arrival popup
-        const currentPlayers = Array.isArray(sData.allPlayers || sData.players)
-          ? sData.allPlayers || sData.players
-          : [];
+        const rawPlayers = sess.players ? Object.values(sess.players) : [];
+        const currentPlayers = Array.isArray(rawPlayers) ? rawPlayers : [];
         setPlayers(currentPlayers);
 
         const currentIds = currentPlayers.map((p: any) => p.id);
@@ -231,7 +237,7 @@ export default function HostLiveFullscreenStage({
               const popId = `join-${np.id}-${Date.now()}`;
               setJoinPopups((prev) => [
                 ...prev.slice(-3),
-                { id: popId, name: np.displayName || np.name || "শিক্ষার্থী", avatar: np.avatar || "🚀" },
+                { id: popId, name: np.name || np.displayName || "শিক্ষার্থী", avatar: np.avatar || "🚀" },
               ]);
               setTimeout(() => {
                 setJoinPopups((prev) => prev.filter((item) => item.id !== popId));
@@ -241,21 +247,35 @@ export default function HostLiveFullscreenStage({
         }
         prevPlayerIdsRef.current = currentIds;
 
-        if (typeof sData.readyCount === "number") setReadyCount(sData.readyCount);
-        if (typeof sData.submittedCount === "number") setServerSubmittedCount(sData.submittedCount);
-        if (Array.isArray(sData.optionStats)) setLiveOptionStats(sData.optionStats);
-        if (sData.explanation) setServerExplanation(sData.explanation);
+        setReadyCount(currentPlayers.filter((p: any) => p.isReady).length);
+        if (typeof sess.answeredCount === "number") {
+          setServerSubmittedCount(sess.answeredCount);
+        }
+        if (Array.isArray(sess.optionCounts)) {
+          setLiveOptionStats(sess.optionCounts);
+        }
+        const activeSlideObj = sess.slides?.[sess.currentSlideIndex ?? currentSlideIndex];
+        if (activeSlideObj?.explanation) {
+          setServerExplanation(activeSlideObj.explanation);
+        }
 
-        // Fetch raw answers for Word Cloud / Open Ended cards
+        // Derive Word Cloud / Open Ended responses directly from players map
         if (["WORD_CLOUD", "OPEN_ENDED", "LIVE_QA"].includes((currentSlide?.type || "").toUpperCase())) {
-          fetch(`/api/live-quizzes/sessions/${sessionId}/answers`)
-            .then((r) => r.json())
-            .then((aData) => {
-              if (isMounted && aData.success && Array.isArray(aData.answers)) {
-                setAnswers(aData.answers);
-              }
+          const slideKey = String(sess.currentSlideIndex ?? currentSlideIndex);
+          const derivedAnswers = currentPlayers
+            .map((p: any) => {
+              const ans = p.answers?.[slideKey];
+              if (!ans) return null;
+              return {
+                id: `${p.id}_${slideKey}`,
+                playerName: p.name,
+                slideIndex: Number(slideKey),
+                questionId: activeSlideObj?.id,
+                answerPayload: ans.answerText || "",
+              };
             })
-            .catch(() => {});
+            .filter(Boolean);
+          setAnswers(derivedAnswers);
         }
       } catch {
         // safe polling guard
@@ -293,20 +313,19 @@ export default function HostLiveFullscreenStage({
         playTimerTick(rem <= 3);
       }
 
-      // Failsafe: if COUNTDOWN_321 timer reaches 0 locally, ensure server advances cleanly
+      // Failsafe: if COUNTDOWN_321 timer reaches 0 locally, poll /api/live-v2/state so server ticks cleanly
       const guardKey = `${currentSlideIndex}_${target}`;
       if (stage === "COUNTDOWN_321" && rem <= 0 && autoSkippedRef.current !== guardKey) {
         autoSkippedRef.current = guardKey;
-        fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "SKIP_COUNTDOWN", slideIndex: currentSlideIndex }),
-        })
+        fetch(`/api/live-v2/state?sessionId=${encodeURIComponent(sessionId)}&role=host`)
           .then((r) => r.json())
           .then((d) => {
-            if (d?.success && d.stageEndsAt) {
-              setStage(d.stage || "ANSWERING_ACTIVE");
-              setStageEndsAt(Number(d.stageEndsAt));
+            const sess = d?.session;
+            if (d?.ok && sess) {
+              setStage(mapV2StageToHost(sess.stage));
+              if (Number.isFinite(Number(sess.stageEndsAt))) {
+                setStageEndsAt(Number(sess.stageEndsAt));
+              }
             }
           })
           .catch(() => {});
@@ -326,22 +345,27 @@ export default function HostLiveFullscreenStage({
     }
   }, [stage, currentSlideIndex]);
 
-  // 3. Host Stage Control Handlers
+  // 3. Host Stage Control Handlers (Clean /api/live-v2/action)
   const handleStartQuestion = async () => {
     setScheduledSecondsLeft(0);
     setIsAdvancingSlide(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "START_SLIDE", slideIndex: currentSlideIndex }),
+        body: JSON.stringify({
+          sessionId,
+          action: "START_QUESTION",
+          slideIndex: currentSlideIndex,
+          role: "host",
+        }),
       });
       const data = await res.json();
-      if (data?.success) {
+      if (data?.ok && data.session) {
         autoSkippedRef.current = "";
-        setStage(data.stage || "COUNTDOWN_321");
-        if (Number.isFinite(Number(data.stageEndsAt))) {
-          setStageEndsAt(Number(data.stageEndsAt));
+        setStage(mapV2StageToHost(data.session.stage));
+        if (Number.isFinite(Number(data.session.stageEndsAt))) {
+          setStageEndsAt(Number(data.session.stageEndsAt));
         }
       }
     } finally {
@@ -353,16 +377,21 @@ export default function HostLiveFullscreenStage({
     setScheduledSecondsLeft(0);
     setIsAdvancingSlide(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "SKIP_COUNTDOWN", slideIndex: currentSlideIndex }),
+        body: JSON.stringify({
+          sessionId,
+          action: "SKIP_COUNTDOWN",
+          slideIndex: currentSlideIndex,
+          role: "host",
+        }),
       });
       const data = await res.json();
-      if (data?.success) {
-        setStage("ANSWERING_ACTIVE");
-        if (Number.isFinite(Number(data.stageEndsAt))) {
-          setStageEndsAt(Number(data.stageEndsAt));
+      if (data?.ok && data.session) {
+        setStage(mapV2StageToHost(data.session.stage));
+        if (Number.isFinite(Number(data.session.stageEndsAt))) {
+          setStageEndsAt(Number(data.session.stageEndsAt));
         }
       }
     } finally {
@@ -373,14 +402,15 @@ export default function HostLiveFullscreenStage({
   const handleRevealResults = async () => {
     setIsAdvancingSlide(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "REVEAL_RESULTS" }),
+        body: JSON.stringify({ sessionId, action: "REVEAL", role: "host" }),
       });
       const data = await res.json();
-      if (data?.success) {
+      if (data?.ok) {
         setStage("RESULT_REVEAL");
+        setStageEndsAt(0);
       }
     } finally {
       setIsAdvancingSlide(false);
@@ -395,18 +425,18 @@ export default function HostLiveFullscreenStage({
     const nextIdx = currentSlideIndex + 1;
     setIsAdvancingSlide(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slideIndex: nextIdx, autoStart: true }),
+        body: JSON.stringify({ sessionId, action: "NEXT_QUESTION", role: "host" }),
       });
       const data = await res.json();
       autoSkippedRef.current = "";
-      setCurrentSlideIndex(nextIdx);
-      if (data?.success) {
-        setStage(data.stage || "COUNTDOWN_321");
-        if (Number.isFinite(Number(data.stageEndsAt))) {
-          setStageEndsAt(Number(data.stageEndsAt));
+      if (data?.ok && data.session) {
+        setCurrentSlideIndex(data.session.currentSlideIndex ?? nextIdx);
+        setStage(mapV2StageToHost(data.session.stage));
+        if (Number.isFinite(Number(data.session.stageEndsAt))) {
+          setStageEndsAt(Number(data.session.stageEndsAt));
         }
       }
     } finally {
@@ -419,15 +449,23 @@ export default function HostLiveFullscreenStage({
     const prevIdx = currentSlideIndex - 1;
     setIsAdvancingSlide(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/next`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slideIndex: prevIdx }),
+        body: JSON.stringify({
+          sessionId,
+          action: "SKIP_TO_QUESTION",
+          slideIndex: prevIdx,
+          role: "host",
+        }),
       });
       const data = await res.json();
-      setCurrentSlideIndex(prevIdx);
-      if (data?.success) {
-        setStage(data.stage || "READY_CHECK");
+      if (data?.ok && data.session) {
+        setCurrentSlideIndex(data.session.currentSlideIndex ?? prevIdx);
+        setStage(mapV2StageToHost(data.session.stage));
+        if (Number.isFinite(Number(data.session.stageEndsAt))) {
+          setStageEndsAt(Number(data.session.stageEndsAt));
+        }
       }
     } finally {
       setIsAdvancingSlide(false);
@@ -441,10 +479,10 @@ export default function HostLiveFullscreenStage({
     triggerFireworks();
     playPodiumFanfare();
     try {
-      await fetch(`/api/live-quizzes/sessions/${sessionId}/end-quiz`, {
+      await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ sessionId, action: "END", role: "host" }),
       });
       if (onEnded) onEnded();
     } catch (e) {
@@ -453,7 +491,6 @@ export default function HostLiveFullscreenStage({
   };
 
   const handlePauseAndExit = async () => {
-    // If quiz is already finalized/ended, just close cleanly without reverting ENDED to PAUSED
     if (stage === "ENDED" || isFinalPodiumOpen) {
       hasEndedOrPausedRef.current = true;
       if (document.fullscreenElement) {
@@ -466,10 +503,15 @@ export default function HostLiveFullscreenStage({
     hasEndedOrPausedRef.current = true;
     setIsPausingExit(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/pause`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "host_pause_exit" }),
+        body: JSON.stringify({
+          sessionId,
+          action: "PAUSE",
+          role: "host",
+          reason: "host_pause_exit",
+        }),
       }).catch(() => null);
       const data = res ? await res.json().catch(() => null) : null;
       if (document.fullscreenElement) {

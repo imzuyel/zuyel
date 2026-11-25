@@ -297,6 +297,9 @@ export default function SimplifiedAcademicMappingView() {
         setIsEditModalOpen(false);
         setActiveMapping(null);
         fetchSnapshot(formYear);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
+        }
       } else {
         showToast(data.error || "সংরক্ষণ করতে সমস্যা হয়েছে।", "error");
       }
@@ -331,6 +334,9 @@ export default function SimplifiedAcademicMappingView() {
         setIsDeleteModalOpen(false);
         setActiveMapping(null);
         fetchSnapshot(selectedYear);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
+        }
       } else {
         showToast(data.error || "ডিলিট করতে ব্যর্থ হয়েছে।", "error");
       }

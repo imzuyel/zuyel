@@ -39,7 +39,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAcademySettings } from "@/lib/useAcademySettings";
-import { ACADEMIC_CLASSES, MANDATORY_FOUR_TRADES } from "@/lib/academicStructure";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import { ACADEMIC_CLASSES, MANDATORY_FOUR_TRADES, doesClassHaveTrade } from "@/lib/academicStructure";
 
 export interface ClassWeakTopicAnalyticsProps {
   initialTab?: "overview" | "weak_topics" | "matrix" | "at_risk" | "lesson_completion" | "student_ranks";
@@ -49,18 +50,20 @@ export default function ClassWeakTopicAnalytics({
   initialTab = "overview",
 }: ClassWeakTopicAnalyticsProps) {
   const { mappings } = useAcademySettings();
+  const { activeClass, activeTrade } = useGlobalAcademic();
   const [activeTab, setActiveTab] = useState<"overview" | "weak_topics" | "matrix" | "at_risk" | "lesson_completion" | "student_ranks">(initialTab);
   const [matrixCategoryFilter, setMatrixCategoryFilter] = useState<string>("all");
-  
+
   const [analyticsData, setAnalyticsData] = useState<any>({
-    overallAverageScore: 72,
-    totalQuizzesEvaluated: 145,
-    totalStudentsEnrolled: 840,
-    totalStudentsParticipated: 685,
-    overallParticipationRatePercentage: 82,
-    overallLessonCompletionRatePercentage: 76,
-    totalWeakTopicsTracked: 6,
-    activeRemedialLessonsCount: 3,
+    overallAverageScore: 0,
+    totalQuizzesEvaluated: 0,
+    totalStudentsEnrolled: 0,
+    totalStudentsParticipated: 0,
+    overallParticipationRatePercentage: 0,
+    overallLessonCompletionRatePercentage: 0,
+    totalWeakTopicsTracked: 0,
+    activeRemedialLessonsCount: 0,
+    availableSubjects: [],
     classesBreakdown: [],
     weakTopics: [],
     atRiskStudents: [],
@@ -72,8 +75,29 @@ export default function ClassWeakTopicAnalytics({
 
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>("all");
   const [selectedTradeFilter, setSelectedTradeFilter] = useState<string>("all");
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>("all");
   const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Sync with GlobalAcademicContext when user changes global class/trade selectors
+  useEffect(() => {
+    if (activeClass?.numericValue) {
+      const clsStr = `Class ${activeClass.numericValue}`;
+      setSelectedClassFilter(clsStr);
+      if (!doesClassHaveTrade(activeClass.numericValue)) {
+        setSelectedTradeFilter("all");
+      } else if (activeTrade?.name) {
+        setSelectedTradeFilter(activeTrade.name);
+      }
+    }
+  }, [activeClass?.numericValue, activeTrade?.name]);
+
+  const selectedNumericClass = (() => {
+    if (selectedClassFilter === "all") return null;
+    const m = selectedClassFilter.match(/\d+/);
+    return m ? Number(m[0]) : null;
+  })();
+  const showTradeFilter = selectedNumericClass === null || doesClassHaveTrade(selectedNumericClass);
 
   // Remedial & Note action states
   const [generatingTopic, setGeneratingTopic] = useState<string | null>(null);
@@ -86,7 +110,8 @@ export default function ClassWeakTopicAnalytics({
     try {
       const params = new URLSearchParams();
       if (selectedClassFilter !== "all") params.append("class", selectedClassFilter);
-      if (selectedTradeFilter !== "all") params.append("trade", selectedTradeFilter);
+      if (showTradeFilter && selectedTradeFilter !== "all") params.append("trade", selectedTradeFilter);
+      if (selectedSubjectFilter !== "all") params.append("subject", selectedSubjectFilter);
 
       const res = await fetch(`/api/learning/teacher-analytics?${params.toString()}`);
       const json = await res.json();
@@ -102,33 +127,17 @@ export default function ClassWeakTopicAnalytics({
 
   useEffect(() => {
     refreshData();
-  }, [selectedClassFilter, selectedTradeFilter]);
+  }, [selectedClassFilter, selectedTradeFilter, selectedSubjectFilter]);
 
-  // 1-Click Remedial Quiz Generator
-  const handleCreateRemedialQuiz = async (topic: string, className = "Class 9", trade = "Computer & IT") => {
-    setGeneratingTopic(topic);
-    try {
-      const res = await fetch("/api/learning/teacher-analytics", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "remedial_quiz",
-          topic,
-          className,
-          trade,
-        }),
-      });
-      const json = await res.json();
-      if (json.success && json.deck) {
-        setActiveRemedialDeck(json.deck);
-        toast.success(`'${topic}'-এর ওপর ৫টি প্রশ্নের রিমেডিয়াল লাইভ কুইজ সফলভাবে প্রস্তুত হয়েছে!`);
-      } else {
-        toast.error(json.message || "রিমেডিয়াল কুইজ তৈরিতে সমস্যা হয়েছে");
-      }
-    } catch {
-      toast.error("সার্ভার যোগাযোগে ব্যর্থ হয়েছে");
-    } finally {
-      setGeneratingTopic(null);
+  // Navigate directly to Quiz Studio pre-filled with weak topic ("🎯 রিমেডিয়াল কুইজ তৈরি করুন")
+  const handleCreateRemedialQuiz = (topic: string, className = "Class 9", trade = "General") => {
+    const qs = new URLSearchParams();
+    qs.set("tab", "quiz_studio");
+    qs.set("prefillTopic", topic);
+    if (className) qs.set("className", className);
+    if (trade && trade !== "General") qs.set("trade", trade);
+    if (typeof window !== "undefined") {
+      window.location.assign(`/admin?${qs.toString()}`);
     }
   };
 
@@ -160,46 +169,30 @@ export default function ClassWeakTopicAnalytics({
     }
   };
 
-  // 1-Click Parent Alert SMS
-  const handleSendParentAlertSms = async (student: any) => {
-    setSendingSmsRolls((prev) => ({ ...prev, [student.roll]: true }));
-    try {
-      const message = `অভিভাবক মহোদয়, আপনার সন্তান ${student.name} (রোল: ${student.roll}) কারিগরি কুইজে ${student.avgScore}% নম্বর পেয়েছে ও ক্লাসে উপস্থিতি ${student.attendanceRate}%। বিশেষ করে '${student.primaryWeakTopic}' বিষয়ে দুর্বলতা রয়েছে। অনুগ্রহ করে তার পড়াশোনায় বাড়তি নজর দিন। - অধ্যক্ষ, PTSC`;
-
-      const res = await fetch("/api/communication/sms/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetAudience: "individual",
-          individualPhone: student.phone || "01711000000",
-          studentName: student.name,
-          message,
-        }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        toast.success(`রোল ${student.roll} (${student.name})-এর অভিভাবকের কাছে সতর্কতামূলক SMS পাঠানো হয়েছে!`, {
-          description: `মোবাইল: ${student.phone || "01711000000"}`,
-        });
-      } else {
-        toast.info(`এসএমএস গেটওয়ে রেডি: রোল ${student.roll}-এর বার্তা লগ করা হয়েছে।`);
-      }
-    } catch {
-      toast.info(`এসএমএস নোটিফিকেশন প্রক্রিয়াধীন রয়েছে।`);
-    } finally {
-      setSendingSmsRolls((prev) => ({ ...prev, [student.roll]: false }));
+  // Route directly to SMS Studio with resolved Guardian Phone & Student Name/Roll ("📩 অভিভাবককে SMS পাঠান")
+  const handleSendParentAlertSms = (student: any) => {
+    const guardianPhone = student.guardianPhone || student.phone || "";
+    const qs = new URLSearchParams();
+    qs.set("tab", "sms_studio");
+    if (guardianPhone) qs.set("phone", guardianPhone);
+    if (student.name) qs.set("studentName", student.name);
+    if (student.roll !== undefined) qs.set("roll", String(student.roll));
+    if (student.primaryWeakTopic) qs.set("topic", student.primaryWeakTopic);
+    if (typeof window !== "undefined") {
+      window.location.assign(`/admin?${qs.toString()}`);
     }
   };
 
   const {
-    overallAverageScore = 72,
-    totalQuizzesEvaluated = 145,
-    totalStudentsEnrolled = 840,
-    totalStudentsParticipated = 685,
-    overallParticipationRatePercentage = 82,
-    overallLessonCompletionRatePercentage = 76,
-    totalWeakTopicsTracked = 6,
-    activeRemedialLessonsCount = 3,
+    overallAverageScore = 0,
+    totalQuizzesEvaluated = 0,
+    totalStudentsEnrolled = 0,
+    totalStudentsParticipated = 0,
+    overallParticipationRatePercentage = 0,
+    overallLessonCompletionRatePercentage = 0,
+    totalWeakTopicsTracked = 0,
+    activeRemedialLessonsCount = 0,
+    availableSubjects = [],
     classesBreakdown = [],
     weakTopics = [],
     atRiskStudents = [],
@@ -270,9 +263,6 @@ export default function ClassWeakTopicAnalytics({
           </div>
           <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono flex items-center gap-2">
             <span>{overallAverageScore}%</span>
-            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center">
-              <TrendingUp className="w-3.5 h-3.5 inline" /> +4.2%
-            </span>
           </div>
           <div className="text-[11px] text-slate-500 font-medium">
             মূল্যায়িত: {totalQuizzesEvaluated} টি কুইজ ও লেসন
@@ -331,42 +321,68 @@ export default function ClassWeakTopicAnalytics({
             <span className="text-xs font-bold text-slate-700 dark:text-slate-300">ফিল্টার:</span>
           </div>
 
-          {/* Class Filter */}
+          {/* Class Filter (6-12) */}
           <select
             value={selectedClassFilter}
-            onChange={(e) => setSelectedClassFilter(e.target.value)}
+            onChange={(e) => {
+              const nextVal = e.target.value;
+              setSelectedClassFilter(nextVal);
+              const m = nextVal.match(/\d+/);
+              if (m && !doesClassHaveTrade(Number(m[0]))) {
+                setSelectedTradeFilter("all");
+              }
+            }}
             className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
           >
             <option value="all">সকল শ্রেণি (Class 6 - 12)</option>
-            <option value="Class 9">শ্রেণি ৯ (ভোকেশনাল)</option>
-            <option value="Class 10">শ্রেণি ১০ (ভোকেশনাল)</option>
-            <option value="Class 11">একাদশ শ্রেণি</option>
-            <option value="Class 12">দ্বাদশ শ্রেণি</option>
+            {ACADEMIC_CLASSES.map((c) => (
+              <option key={c.numericValue} value={`Class ${c.numericValue}`}>
+                {c.nameBangla}
+              </option>
+            ))}
           </select>
 
-          {/* Trade Filter */}
-          <select
-            value={selectedTradeFilter}
-            onChange={(e) => setSelectedTradeFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="all">সকল টেকনোলজি / ট্রেড</option>
-            <option value="Computer & IT">কম্পিউটার ও আইটি (IT-IoT)</option>
-            <option value="Electrical & Electronics">ইলেকট্রিক্যাল ও ইলেকট্রনিক্স</option>
-            <option value="Civil & Construction">সিভিল অ্যান্ড ড্রাফটিং</option>
-            <option value="Automobile">অটোমোবাইল টেকনোলজি</option>
-          </select>
+          {/* Trade Filter (Hidden automatically for Classes 6-8) */}
+          {showTradeFilter && (
+            <select
+              value={selectedTradeFilter}
+              onChange={(e) => setSelectedTradeFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">সকল ট্রেড / বিভাগ (৪টি)</option>
+              {MANDATORY_FOUR_TRADES.map((t) => (
+                <option key={t.code} value={t.name}>
+                  {t.nameBangla} ({t.code})
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Subject Filter */}
+          {Array.isArray(availableSubjects) && availableSubjects.length > 0 && (
+            <select
+              value={selectedSubjectFilter}
+              onChange={(e) => setSelectedSubjectFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">সকল বিষয়</option>
+              {availableSubjects.map((sub: string) => (
+                <option key={sub} value={sub}>
+                  {sub}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Navigation Sub-Tabs */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           <button
             onClick={() => setActiveTab("overview")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "overview"
-                ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${activeTab === "overview"
+              ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
           >
             <BarChart3 className="w-3.5 h-3.5" />
             <span>শ্রেণি পারফরম্যান্স</span>
@@ -374,11 +390,10 @@ export default function ClassWeakTopicAnalytics({
 
           <button
             onClick={() => setActiveTab("matrix")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "matrix"
-                ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${activeTab === "matrix"
+              ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
           >
             <GraduationCap className="w-3.5 h-3.5" />
             <span>শিক্ষার্থী ম্যাট্রিক্স (Matrix)</span>
@@ -386,11 +401,10 @@ export default function ClassWeakTopicAnalytics({
 
           <button
             onClick={() => setActiveTab("weak_topics")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "weak_topics"
-                ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${activeTab === "weak_topics"
+              ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>দুর্বল টপিক হিটম্যাপ</span>
@@ -398,11 +412,10 @@ export default function ClassWeakTopicAnalytics({
 
           <button
             onClick={() => setActiveTab("at_risk")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "at_risk"
-                ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${activeTab === "at_risk"
+              ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
           >
             <ShieldAlert className="w-3.5 h-3.5" />
             <span>ঝুঁকিপূর্ণ শিক্ষার্থী তালিকা ({atRiskStudents.length})</span>
@@ -410,11 +423,10 @@ export default function ClassWeakTopicAnalytics({
 
           <button
             onClick={() => setActiveTab("student_ranks")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "student_ranks"
-                ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${activeTab === "student_ranks"
+              ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
           >
             <Trophy className="w-3.5 h-3.5" />
             <span>টপ পারফর্মার</span>
@@ -443,13 +455,12 @@ export default function ClassWeakTopicAnalytics({
                     </span>
                   </div>
                   <span
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
-                      item.status === "excellent"
-                        ? "bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
-                        : item.status === "good"
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${item.status === "excellent"
+                      ? "bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                      : item.status === "good"
                         ? "bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800"
                         : "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
-                    }`}
+                      }`}
                   >
                     {item.status === "excellent" ? "চমৎকার" : item.status === "good" ? "সন্তোষজনক" : "মনোযোগ দরকার"}
                   </span>
@@ -464,13 +475,12 @@ export default function ClassWeakTopicAnalytics({
                   </div>
                   <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        item.averageScorePercentage >= 75
-                          ? "bg-emerald-500"
-                          : item.averageScorePercentage >= 60
+                      className={`h-full rounded-full transition-all duration-500 ${item.averageScorePercentage >= 75
+                        ? "bg-emerald-500"
+                        : item.averageScorePercentage >= 60
                           ? "bg-indigo-500"
                           : "bg-rose-500"
-                      }`}
+                        }`}
                       style={{ width: `${item.averageScorePercentage}%` }}
                     />
                   </div>
@@ -531,25 +541,22 @@ export default function ClassWeakTopicAnalytics({
               <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
                 <button
                   onClick={() => setSelectedSeverity("all")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedSeverity === "all" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-cyan-400 shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${selectedSeverity === "all" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-cyan-400 shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   সবগুলো ({weakTopics.length})
                 </button>
                 <button
                   onClick={() => setSelectedSeverity("high")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedSeverity === "high" ? "bg-rose-500 text-white shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${selectedSeverity === "high" ? "bg-rose-500 text-white shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   🚨 ক্রিটিক্যাল (&lt;৫৫%)
                 </button>
                 <button
                   onClick={() => setSelectedSeverity("medium")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedSeverity === "medium" ? "bg-amber-500 text-slate-950 shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${selectedSeverity === "medium" ? "bg-amber-500 text-slate-950 shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   ⚠️ মাঝারি (৫৫-৭৫%)
                 </button>
@@ -565,25 +572,23 @@ export default function ClassWeakTopicAnalytics({
                 return (
                   <div
                     key={wt.id}
-                    className={`p-5 rounded-2xl border transition-all ${
-                      isCritical
-                        ? "bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 hover:border-rose-400"
-                        : isModerate
+                    className={`p-5 rounded-2xl border transition-all ${isCritical
+                      ? "bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 hover:border-rose-400"
+                      : isModerate
                         ? "bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50 hover:border-amber-400"
                         : "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50 hover:border-emerald-400"
-                    }`}
+                      }`}
                   >
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                       <div className="space-y-2 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              isCritical
-                                ? "bg-rose-600 text-white"
-                                : isModerate
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${isCritical
+                              ? "bg-rose-600 text-white"
+                              : isModerate
                                 ? "bg-amber-500 text-slate-950"
                                 : "bg-emerald-600 text-white"
-                            }`}
+                              }`}
                           >
                             {isCritical ? "🚨 ক্রিটিক্যাল দুর্বলতা" : isModerate ? "⚠️ মাঝারি দুর্বলতা" : "✅ আয়ত্তাধীন"}
                           </span>
@@ -609,9 +614,8 @@ export default function ClassWeakTopicAnalytics({
                           </div>
                           <div className="w-full bg-slate-200 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all duration-500 ${
-                                isCritical ? "bg-rose-500" : isModerate ? "bg-amber-500" : "bg-emerald-500"
-                              }`}
+                              className={`h-full rounded-full transition-all duration-500 ${isCritical ? "bg-rose-500" : isModerate ? "bg-amber-500" : "bg-emerald-500"
+                                }`}
                               style={{ width: `${wt.accuracy}%` }}
                             />
                           </div>
@@ -638,7 +642,7 @@ export default function ClassWeakTopicAnalytics({
                           ) : (
                             <Zap className="w-3.5 h-3.5 text-amber-200" />
                           )}
-                          <span>🎯 রিমেডিয়াল লাইভ কুইজ তৈরি করুন</span>
+                          <span>🎯 রিমেডিয়াল কুইজ তৈরি করুন</span>
                         </button>
 
                         <button
@@ -659,7 +663,7 @@ export default function ClassWeakTopicAnalytics({
         </div>
       )}
 
-      
+
       {/* ========================================================
           TAB: AT-RISK VS TOP PERFORMER STUDENT MATRIX
          ======================================================== */}
@@ -681,33 +685,29 @@ export default function ClassWeakTopicAnalytics({
               <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
                 <button
                   onClick={() => setMatrixCategoryFilter("all")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    matrixCategoryFilter === "all" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-cyan-400 shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${matrixCategoryFilter === "all" ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-cyan-400 shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   সকল শিক্ষার্থী ({(studentMatrix || []).length})
                 </button>
                 <button
                   onClick={() => setMatrixCategoryFilter("TOP_PERFORMER")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    matrixCategoryFilter === "TOP_PERFORMER" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${matrixCategoryFilter === "TOP_PERFORMER" ? "bg-emerald-600 text-white shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   🏆 টপ পারফর্মার ({(topPerformers || []).length})
                 </button>
                 <button
                   onClick={() => setMatrixCategoryFilter("STEADY_LEARNER")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    matrixCategoryFilter === "STEADY_LEARNER" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${matrixCategoryFilter === "STEADY_LEARNER" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   📈 নিয়মিত শিক্ষার্থী ({(steadyLearners || []).length})
                 </button>
                 <button
                   onClick={() => setMatrixCategoryFilter("AT_RISK")}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    matrixCategoryFilter === "AT_RISK" ? "bg-rose-600 text-white shadow-xs" : "text-slate-500"
-                  }`}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${matrixCategoryFilter === "AT_RISK" ? "bg-rose-600 text-white shadow-xs" : "text-slate-500"
+                    }`}
                 >
                   🚨 ঝুঁকিপূর্ণ শিক্ষার্থী ({(atRiskStudents || []).length})
                 </button>
@@ -729,26 +729,24 @@ export default function ClassWeakTopicAnalytics({
                   return (
                     <div
                       key={s.id}
-                      className={`p-5 rounded-2xl border transition-all flex flex-col justify-between space-y-4 ${
-                        isTop
-                          ? "bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 hover:border-emerald-400"
-                          : isAtRisk
+                      className={`p-5 rounded-2xl border transition-all flex flex-col justify-between space-y-4 ${isTop
+                        ? "bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 hover:border-emerald-400"
+                        : isAtRisk
                           ? "bg-rose-50/40 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/60 hover:border-rose-400"
                           : "bg-slate-50/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:border-indigo-400"
-                      }`}
+                        }`}
                     >
                       <div className="space-y-3">
                         {/* Card Header: Avatar & Category Badge */}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <div
-                              className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-xs text-white shadow-sm ${
-                                isTop
-                                  ? "bg-gradient-to-tr from-emerald-600 to-teal-500"
-                                  : isAtRisk
+                              className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-xs text-white shadow-sm ${isTop
+                                ? "bg-gradient-to-tr from-emerald-600 to-teal-500"
+                                : isAtRisk
                                   ? "bg-gradient-to-tr from-rose-600 to-amber-600"
                                   : "bg-gradient-to-tr from-indigo-600 to-cyan-600"
-                              }`}
+                                }`}
                             >
                               {s.name?.slice(0, 2) || "ST"}
                             </div>
@@ -763,13 +761,12 @@ export default function ClassWeakTopicAnalytics({
                           </div>
 
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              isTop
-                                ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300"
-                                : isAtRisk
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${isTop
+                              ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300"
+                              : isAtRisk
                                 ? "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300"
                                 : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-300"
-                            }`}
+                              }`}
                           >
                             {s.categoryLabel || (isTop ? "🏆 টপ পারফর্মার" : isAtRisk ? "🚨 ঝুঁকিপূর্ণ" : "📈 নিয়মিত")}
                           </span>
@@ -780,13 +777,12 @@ export default function ClassWeakTopicAnalytics({
                           <div>
                             <span className="text-[10px] text-slate-400 block font-medium">হাজিরা হার:</span>
                             <strong
-                              className={`font-mono font-bold ${
-                                s.attendanceRate >= 80
-                                  ? "text-emerald-600 dark:text-emerald-400"
-                                  : s.attendanceRate >= 70
+                              className={`font-mono font-bold ${s.attendanceRate >= 80
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : s.attendanceRate >= 70
                                   ? "text-amber-600 dark:text-amber-400"
                                   : "text-rose-600 dark:text-rose-400 font-black"
-                              }`}
+                                }`}
                             >
                               {s.attendanceRate}%
                             </strong>
@@ -795,13 +791,12 @@ export default function ClassWeakTopicAnalytics({
                           <div>
                             <span className="text-[10px] text-slate-400 block font-medium">কুইজ নির্ভুলতা:</span>
                             <strong
-                              className={`font-mono font-bold ${
-                                s.avgScore >= 75
-                                  ? "text-emerald-600 dark:text-emerald-400"
-                                  : s.avgScore >= 50
+                              className={`font-mono font-bold ${s.avgScore >= 75
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : s.avgScore >= 50
                                   ? "text-amber-600 dark:text-amber-400"
                                   : "text-rose-600 dark:text-rose-400 font-black"
-                              }`}
+                                }`}
                             >
                               {s.avgScore}%
                             </strong>
@@ -814,13 +809,12 @@ export default function ClassWeakTopicAnalytics({
                             {isTop ? "বিশেষ দক্ষতা:" : "দুর্বলতা / পর্যবেক্ষণের বিষয়:"}
                           </span>
                           <span
-                            className={`px-2.5 py-1 rounded-lg block truncate font-bold text-xs ${
-                              isAtRisk
-                                ? "bg-rose-100/70 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-900/40"
-                                : isTop
+                            className={`px-2.5 py-1 rounded-lg block truncate font-bold text-xs ${isAtRisk
+                              ? "bg-rose-100/70 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-900/40"
+                              : isTop
                                 ? "bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-900/40"
                                 : "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-900/40"
-                            }`}
+                              }`}
                           >
                             {s.primaryWeakTopic}
                           </span>
@@ -836,11 +830,10 @@ export default function ClassWeakTopicAnalytics({
                         <button
                           onClick={() => handleSendParentAlertSms(s)}
                           disabled={sendingSmsRolls[s.roll]}
-                          className={`px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 ${
-                            isAtRisk
-                              ? "bg-rose-600 hover:bg-rose-500 text-white shadow-xs"
-                              : "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300"
-                          }`}
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 ${isAtRisk
+                            ? "bg-rose-600 hover:bg-rose-500 text-white shadow-xs"
+                            : "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300"
+                            }`}
                         >
                           {sendingSmsRolls[s.roll] ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -912,9 +905,8 @@ export default function ClassWeakTopicAnalytics({
 
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`font-mono font-black text-xs ${
-                            s.attendanceRate < 70 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
-                          }`}
+                          className={`font-mono font-black text-xs ${s.attendanceRate < 70 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
+                            }`}
                         >
                           {s.attendanceRate}%
                         </span>
@@ -922,9 +914,8 @@ export default function ClassWeakTopicAnalytics({
 
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`font-mono font-black text-xs ${
-                            s.avgScore < 45 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
-                          }`}
+                          className={`font-mono font-black text-xs ${s.avgScore < 45 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
+                            }`}
                         >
                           {s.avgScore}%
                         </span>
@@ -941,11 +932,10 @@ export default function ClassWeakTopicAnalytics({
 
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                            s.severity === "HIGH"
-                              ? "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300"
-                              : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300"
-                          }`}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${s.severity === "HIGH"
+                            ? "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300"
+                            : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300"
+                            }`}
                         >
                           {s.severity === "HIGH" ? "উচ্চ ঝুঁকি" : "মাঝারি ঝুঁকি"}
                         </span>
@@ -962,7 +952,7 @@ export default function ClassWeakTopicAnalytics({
                           ) : (
                             <Send className="w-3.5 h-3.5" />
                           )}
-                          <span>অভিভাবককে SMS পাঠান</span>
+                          <span>📩 অভিভাবককে SMS পাঠান</span>
                         </button>
                       </td>
                     </tr>
@@ -1000,15 +990,14 @@ export default function ClassWeakTopicAnalytics({
                 >
                   <div className="flex items-center gap-3">
                     <span
-                      className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs ${
-                        p.rank === 1
-                          ? "bg-amber-400 text-slate-950 shadow-md shadow-amber-400/30"
-                          : p.rank === 2
+                      className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs ${p.rank === 1
+                        ? "bg-amber-400 text-slate-950 shadow-md shadow-amber-400/30"
+                        : p.rank === 2
                           ? "bg-slate-300 text-slate-900"
                           : p.rank === 3
-                          ? "bg-amber-700 text-white"
-                          : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300"
-                      }`}
+                            ? "bg-amber-700 text-white"
+                            : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300"
+                        }`}
                     >
                       #{p.rank}
                     </span>

@@ -15,14 +15,24 @@ import {
   GraduationCap,
   AlertTriangle,
   RotateCcw,
+  Eye,
+  EyeOff,
 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { DEFAULT_TRADES } from "@/lib/masterDataEngine";
 import {
   loginStudentAccount,
   updateStudentPassword,
+  syncStudentAccountSession,
   StudentAuthAccount,
   UNIVERSAL_DEFAULT_PASSWORD,
   STUDENT_LOGIN_CLASSES,
 } from "@/lib/studentIntelligenceStore";
+
+function requiresTradeSelection(classId: string): boolean {
+  const norm = classId.toLowerCase();
+  return !(norm.includes("6") || norm.includes("7") || norm.includes("8"));
+}
 
 interface StudentLoginModalProps {
   isOpen?: boolean;
@@ -39,19 +49,24 @@ export default function StudentLoginModal({
   onSuccess,
   defaultClass = "class-10",
 }: StudentLoginModalProps) {
+  const { login: authLogin } = useAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "auto";
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = "auto";
+      }
+    };
   }, []);
 
-  // Lock body scroll while open
+  // Ensure body scroll is never left locked
   useEffect(() => {
-    if (isOpen !== false && mounted) {
-      const prevOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prevOverflow;
-      };
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "auto";
     }
   }, [isOpen, mounted]);
 
@@ -60,8 +75,10 @@ export default function StudentLoginModal({
 
   // Login inputs
   const [selectedClass, setSelectedClass] = useState(defaultClass);
+  const [selectedTrade, setSelectedTrade] = useState(DEFAULT_TRADES[1]?.name || "IT Support & IoT Basics");
   const [loginRoll, setLoginRoll] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Change password inputs
   const [pendingAccount, setPendingAccount] = useState<StudentAuthAccount | null>(null);
@@ -83,8 +100,44 @@ export default function StudentLoginModal({
     const cleanRoll = loginRoll.trim();
     const cleanPass = loginPassword.trim();
 
+    const showTradeSelector = requiresTradeSelection(selectedClass);
+    const activeTradePayload = showTradeSelector ? selectedTrade : "";
+
+    const completeStudentAuth = (account: StudentAuthAccount, apiUser?: any) => {
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = "auto";
+        document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
+        document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
+        document.cookie = `ptsc_student_roll=${account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
+        document.cookie = `ptsc_student_class=${account.classLevel}; path=/; max-age=86400; SameSite=Lax`;
+      }
+      syncStudentAccountSession(account);
+      authLogin("student", {
+        id: apiUser?.id || parseInt(account.rollNumber, 10) || 101,
+        email: apiUser?.email || `student.${account.rollNumber}@pgtsc.gov.bd`,
+        fullName: apiUser?.fullName || account.studentName,
+        nameBangla: apiUser?.nameBangla || account.studentName,
+        role: "student",
+        designation: apiUser?.designation || `শিক্ষার্থী (${account.classLevel})`,
+        mobile: apiUser?.mobile || "01700-000000",
+        avatarUrl:
+          apiUser?.avatarUrl ||
+          "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80",
+        roll: account.rollNumber,
+        trade: account.trade,
+        studentId: apiUser?.studentId,
+      });
+
+      if (typeof onSuccessLogin === "function") {
+        onSuccessLogin(account);
+      } else if (typeof onSuccess === "function") {
+        onSuccess(account);
+      }
+      onClose();
+    };
+
     try {
-      // 1. Attempt server-side auth verification first
+      // 1. Attempt server-side auth verification first (matches Class + Trade + Roll in Hybrid & MySQL)
       const apiRes = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,6 +145,7 @@ export default function StudentLoginModal({
           identifier: cleanRoll,
           password: cleanPass,
           classLevel: selectedClass,
+          trade: activeTradePayload,
           source: "student",
         }),
       }).catch(() => null);
@@ -99,26 +153,20 @@ export default function StudentLoginModal({
       if (apiRes && apiRes.ok) {
         const apiData = await apiRes.json();
         if (apiData.success && apiData.user) {
-          const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass);
+          const account: StudentAuthAccount = {
+            studentName: apiData.user.nameBangla || apiData.user.fullName,
+            rollNumber: String(apiData.user.roll || cleanRoll),
+            classLevel: selectedClass,
+            trade: showTradeSelector ? (apiData.user.trade || selectedTrade) : "General",
+            password: cleanPass,
+            createdAt: new Date().toISOString().split("T")[0],
+            isLoggedIn: true,
+            hasChangedDefaultPassword: cleanPass !== UNIVERSAL_DEFAULT_PASSWORD,
+            academicYear: "2026",
+          };
           setIsSubmitting(false);
           setMessage({ text: apiData.message || "লগইন সফল হয়েছে!", isError: false });
-          setTimeout(() => {
-            if (typeof onSuccessLogin === "function") {
-              onSuccessLogin(res.account || {
-                studentName: apiData.user.fullName,
-                rollNumber: cleanRoll,
-                classLevel: selectedClass,
-                trade: "কারিগরি",
-                password: cleanPass,
-                createdAt: new Date().toISOString(),
-                isLoggedIn: true,
-                hasChangedDefaultPassword: cleanPass !== "1234",
-              });
-            } else if (typeof onSuccess === "function") {
-              onSuccess(res.account);
-            }
-            onClose();
-          }, 600);
+          setTimeout(() => completeStudentAuth(account, apiData.user), 350);
           return;
         }
       }
@@ -126,12 +174,11 @@ export default function StudentLoginModal({
       console.warn("Server auth fallback to local intelligence store:", e);
     }
 
-    const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass);
+    const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass, activeTradePayload);
     setIsSubmitting(false);
 
     if (res.success) {
       if (res.requiresPasswordChange && res.account) {
-        // First login detected with universal default password (1234)!
         setPendingAccount(res.account);
         setModalMode("change_password");
         setMessage({
@@ -139,23 +186,8 @@ export default function StudentLoginModal({
           isError: false,
         });
       } else if (res.account) {
-        // Normal successful login
-        try {
-          document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
-          document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
-          document.cookie = `ptsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
-          document.cookie = `ptsc_student_class=${res.account.classLevel}; path=/; max-age=86400; SameSite=Lax`;
-        } catch (e) {}
-
         setMessage({ text: res.message, isError: false });
-        setTimeout(() => {
-          if (typeof onSuccessLogin === "function") {
-            onSuccessLogin(res.account!);
-          } else if (typeof onSuccess === "function") {
-            onSuccess(res.account);
-          }
-          onClose();
-        }, 700);
+        setTimeout(() => completeStudentAuth(res.account!), 350);
       }
     } else {
       setMessage({ text: res.message, isError: true });
@@ -203,10 +235,26 @@ export default function StudentLoginModal({
 
     if (res.success && res.account) {
       try {
-        document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
-        document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
-        document.cookie = `ptsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
-        document.cookie = `ptsc_student_class=${res.account.classLevel}; path=/; max-age=86400; SameSite=Lax`;
+        if (typeof document !== "undefined") {
+          document.body.style.overflow = "auto";
+          document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
+          document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
+          document.cookie = `ptsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
+          document.cookie = `ptsc_student_class=${res.account.classLevel}; path=/; max-age=86400; SameSite=Lax`;
+        }
+        syncStudentAccountSession(res.account);
+        authLogin("student", {
+          id: parseInt(res.account.rollNumber, 10) || 101,
+          email: `student.${res.account.rollNumber}@pgtsc.gov.bd`,
+          fullName: res.account.studentName,
+          nameBangla: res.account.studentName,
+          role: "student",
+          designation: `শিক্ষার্থী (${res.account.classLevel})`,
+          mobile: "01700-000000",
+          avatarUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80",
+          roll: res.account.rollNumber,
+          trade: res.account.trade,
+        });
       } catch (e) {}
 
       setMessage({ text: res.message, isError: false });
@@ -217,7 +265,7 @@ export default function StudentLoginModal({
           onSuccess(res.account);
         }
         onClose();
-      }, 900);
+      }, 600);
     } else {
       setMessage({ text: res.message, isError: true });
     }
@@ -230,7 +278,12 @@ export default function StudentLoginModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[99999] min-h-dvh w-full overflow-y-auto bg-[#0F172A]/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="student-login-modal-title"
+      className="fixed inset-0 z-[99999] min-h-dvh w-full overflow-y-auto overscroll-contain bg-[#0F172A]/95 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in"
+    >
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-indigo-500/30 shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto my-auto flex flex-col">
         
         {/* Header */}
@@ -242,7 +295,7 @@ export default function StudentLoginModal({
                 PTSC STUDENT PORTAL
               </span>
             </div>
-            <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+            <h2 id="student-login-modal-title" className="text-base sm:text-lg font-black text-white flex items-center gap-2">
               <GraduationCap className="w-5 h-5 text-indigo-400" />
               <span>
                 {modalMode === "login"
@@ -269,6 +322,8 @@ export default function StudentLoginModal({
           {/* Status Alert Banner */}
           {message && (
             <div
+              role="alert"
+              aria-live="polite"
               className={`p-3.5 rounded-2xl text-xs font-bold flex items-start gap-2.5 animate-fade-in leading-relaxed ${
                 message.isError
                   ? "bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400"
@@ -287,7 +342,7 @@ export default function StudentLoginModal({
           )}
 
           {modalMode === "login" ? (
-            /* 1. STANDARD LOGIN FORM WITH CLASS + ROLL DISAMBIGUATION */
+            /* 1. STANDARD LOGIN FORM WITH CLASS + CONDITIONAL TRADE + ROLL */
             <form onSubmit={handleLoginSubmit} className="space-y-3.5">
               
               {/* Class / Academic Year Dropdown */}
@@ -299,6 +354,7 @@ export default function StudentLoginModal({
                   <select
                     id="student-login-class"
                     name="studentClass"
+                    autoComplete="off"
                     value={selectedClass}
                     onChange={(e) => setSelectedClass(e.target.value)}
                     className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none pr-8"
@@ -318,9 +374,41 @@ export default function StudentLoginModal({
                   </span>
                 </div>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                  * একই রোল নম্বর একাধিক শ্রেণিতে থাকতে পারে, তাই আপনার সঠিক শ্রেণি নির্বাচন করুন।
+                  * একই রোল নম্বর একাধিক শ্রেণি ও ট্রেডে থাকতে পারে (৬ষ্ঠ–৮ম শ্রেণিতে কোনো ট্রেড নেই)।
                 </p>
               </div>
+
+              {/* Conditional Trade/Department Selector (Hidden for Class 6-8, Shown for Class 9-12) */}
+              {requiresTradeSelection(selectedClass) && (
+                <div className="space-y-1.5">
+                  <label htmlFor="student-login-trade" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
+                    ট্রেড / বিভাগ (Trade / Department):
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="student-login-trade"
+                      name="studentTrade"
+                      autoComplete="off"
+                      value={selectedTrade}
+                      onChange={(e) => setSelectedTrade(e.target.value)}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none pr-8"
+                    >
+                      {DEFAULT_TRADES.map((t) => (
+                        <option
+                          key={t.code}
+                          value={t.name}
+                          className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        >
+                          {t.nameBangla} ({t.name})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                      ▼
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Roll Number Input */}
               <div className="space-y-1.5">
@@ -332,16 +420,18 @@ export default function StudentLoginModal({
                   id="student-login-roll"
                   name="studentRoll"
                   autoComplete="username"
+                  spellCheck={false}
                   aria-label="রোল নম্বর"
+                  aria-invalid={Boolean(message?.isError)}
                   required
                   placeholder="যেমন: 101, 102, 1"
                   value={loginRoll}
                   onChange={(e) => setLoginRoll(e.target.value)}
-                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-indigo-500"
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 user-invalid:border-rose-500 rounded-xl text-xs font-bold text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
-              {/* Password Input */}
+              {/* Password Input with Show Password Toggle */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor="student-login-password" className="text-xs font-black text-slate-800 dark:text-slate-200 block">
@@ -351,18 +441,30 @@ export default function StudentLoginModal({
                     ডিফল্ট: 1234
                   </span>
                 </div>
-                <input
-                  type="password"
-                  id="student-login-password"
-                  name="studentPassword"
-                  autoComplete="current-password"
-                  aria-label="পাসওয়ার্ড"
-                  required
-                  placeholder="প্রথমবার লগইনে '1234' দিন"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="student-login-password"
+                    name="studentPassword"
+                    autoComplete="current-password"
+                    spellCheck={false}
+                    aria-label="পাসওয়ার্ড"
+                    aria-invalid={Boolean(message?.isError)}
+                    required
+                    placeholder="প্রথমবার লগইনে '1234' দিন"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full p-3 pr-10 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 user-invalid:border-rose-500 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "পাসওয়ার্ড লুকান" : "পাসওয়ার্ড দেখুন"}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <div className="p-3 bg-indigo-50/80 dark:bg-indigo-950/40 rounded-xl border border-indigo-200/80 dark:border-indigo-800/60 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">

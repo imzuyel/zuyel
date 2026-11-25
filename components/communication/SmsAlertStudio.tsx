@@ -71,6 +71,29 @@ export default function SmsAlertStudio() {
 
   useEffect(() => {
     fetchLogs();
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const phone = params.get("phone");
+      const studentName = params.get("studentName");
+      const roll = params.get("roll");
+      const topic = params.get("topic");
+      if (phone) {
+        setTargetAudience("individual");
+        setIndividualPhone(phone);
+      }
+      if (studentName) {
+        setStudentNameInput(roll ? `${studentName} (রোল ${roll})` : studentName);
+      }
+      if (phone || studentName) {
+        setTemplateKey("custom");
+        const sLabel = studentName || "আপনার সন্তান";
+        const rLabel = roll ? ` (রোল: ${roll})` : "";
+        const tLabel = topic ? ` (${topic})` : "";
+        setMessageText(
+          `সম্মানিত অভিভাবক, আপনার সন্তান ${sLabel}${rLabel} পিজিটিএসসি-এর পড়াশোনা/কুইজ ফলাফল ও উপস্থিতি${tLabel} বিষয়ে বিশেষ নজরদারির প্রয়োজন। অনুগ্রহ করে শ্রেণি শিক্ষকের সাথে যোগাযোগ করুন। - অধ্যক্ষ, পিজিটিএসসি।`
+        );
+      }
+    }
   }, []);
 
   // SMS character & part stats

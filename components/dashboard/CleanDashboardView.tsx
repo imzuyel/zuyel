@@ -80,6 +80,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import { doesClassHaveDepartment, parseClassNumeric } from "@/lib/academicConfig";
 import { AnimatedCounter } from "@/components/ui/animation-effects";
 import IconThemeSelectorModal from "@/components/theme/IconThemeSelectorModal";
 import QuickQuizModal from "@/components/quiz/QuickQuizModal";
@@ -207,6 +208,8 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
 
   const [selectedClassId, setSelectedClassId] = useState<string>("all");
   const [selectedTradeId, setSelectedTradeId] = useState<string>("all");
+  const [selectedSubject, setSelectedSubject] = useState<string>("all");
+  const [availableSubjects, setAvailableSubjects] = useState<Array<{ code: string; name: string; nameBangla: string }>>([]);
   const [showIconModal, setShowIconModal] = useState(false);
   const [showQuickQuizModal, setShowQuickQuizModal] = useState(false);
   const [showSpotlight, setShowSpotlight] = useState(false);
@@ -382,8 +385,24 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
       });
     };
     updateClock();
-    const interval = setInterval(updateClock, 1000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      updateClock();
+    }, 1000);
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        updateClock();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      clearInterval(interval);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+    };
   }, []);
 
   // Load Preferences from LocalStorage on mount
@@ -515,16 +534,73 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const selectedClassObj = useMemo(() => {
+    if (!selectedClassId || selectedClassId === "all") return null;
+    return (
+      availableClasses?.find(
+        (c) => String(c.id) === String(selectedClassId) || String(c.numericValue) === String(selectedClassId)
+      ) || null
+    );
+  }, [availableClasses, selectedClassId]);
+
+  const isDepartmentFilterVisible = useMemo(() => {
+    if (!selectedClassId || selectedClassId === "all") return true;
+    const numeric = selectedClassObj?.numericValue ?? parseClassNumeric(selectedClassId);
+    if (!numeric) return true;
+    return doesClassHaveDepartment(numeric);
+  }, [selectedClassId, selectedClassObj]);
+
+  const fetchMappedSubjects = useCallback(async () => {
+    const targetClassVal =
+      selectedClassObj?.numericValue ||
+      (selectedClassId !== "all" ? parseClassNumeric(selectedClassId) : 9);
+    if (!targetClassVal) {
+      setAvailableSubjects([]);
+      return;
+    }
+    try {
+      const params = new URLSearchParams({
+        action: "mapped_subjects",
+        classVal: String(targetClassVal),
+        academicYear: academicYear || "2026",
+      });
+      if (isDepartmentFilterVisible && selectedTradeId && selectedTradeId !== "all") {
+        params.append("tradeVal", selectedTradeId);
+      }
+      const res = await safeFetchJson<any>(`/api/academic/global-settings?${params.toString()}`);
+      if (res?.success && Array.isArray(res.subjects)) {
+        setAvailableSubjects(
+          res.subjects.map((s: any) => ({
+            code: String(s.code || s.id),
+            name: String(s.name || ""),
+            nameBangla: String(s.nameBangla || s.name || ""),
+          }))
+        );
+      }
+    } catch {
+      setAvailableSubjects([]);
+    }
+  }, [academicYear, isDepartmentFilterVisible, selectedClassId, selectedClassObj, selectedTradeId]);
+
+  useEffect(() => {
+    fetchMappedSubjects();
+  }, [fetchMappedSubjects]);
+
   // Database Fetcher with Context Filtering
   const loadDashboardData = useCallback(
     async (isManualRefresh = false) => {
       if (isManualRefresh) setIsRefreshing(true);
       try {
+        const effectiveTrade = isDepartmentFilterVisible ? (selectedTradeId || "all") : "all";
+        const effectiveClassName = selectedClassObj?.name || (selectedClassId !== "all" ? `Class ${selectedClassId}` : "all");
         const queryParams = new URLSearchParams({
           view: "admin",
           academicYear: academicYear || "2026",
           classId: selectedClassId || "all",
-          tradeId: selectedTradeId || "all",
+          className: effectiveClassName,
+          tradeId: effectiveTrade,
+          trade: effectiveTrade,
+          subject: selectedSubject || "all",
         });
         if (isManualRefresh) {
           queryParams.append("fresh", "true");
@@ -601,12 +677,39 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
         if (isManualRefresh) setIsRefreshing(false);
       }
     },
-    [academicYear, selectedClassId, selectedTradeId]
+    [academicYear, isDepartmentFilterVisible, selectedClassId, selectedClassObj, selectedTradeId, selectedSubject]
   );
 
   useEffect(() => {
     loadDashboardData();
-  }, [loadDashboardData]);
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      loadDashboardData(false);
+    }, 30000);
+    const onVisibilityOrMasterUpdate = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        loadDashboardData(false);
+        fetchMappedSubjects();
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("ptsc_academic_master_updated", onVisibilityOrMasterUpdate);
+      window.addEventListener("pts-academic-mapping-updated", onVisibilityOrMasterUpdate);
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityOrMasterUpdate);
+    }
+    return () => {
+      clearInterval(interval);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("ptsc_academic_master_updated", onVisibilityOrMasterUpdate);
+        window.removeEventListener("pts-academic-mapping-updated", onVisibilityOrMasterUpdate);
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityOrMasterUpdate);
+      }
+    };
+  }, [loadDashboardData, fetchMappedSubjects]);
 
   const isDarkMode = mode === "dark";
 
@@ -663,48 +766,40 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
   // curve so the chart graph is ALWAYS rich, interactive, and visible!)
   // ===========================================================================
   const displayAttendanceTrend = useMemo(() => {
-    const hasData = attendanceTrend.some((t) => t.hasData && (t.present > 0 || t.presentPercent > 0));
-    if (hasData) {
+    if (attendanceTrend.length > 0) {
       return attendanceTrend.map((t) => ({
         ...t,
-        quizAccuracy: lms.averageQuizAccuracy > 0 ? lms.averageQuizAccuracy : 85,
+        quizAccuracy: lms.averageQuizAccuracy || 0,
       }));
     }
 
-    // Default 7-day academic benchmark trend
     const banglaDays = ["রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"];
     const today = new Date();
     const result = [];
-    const baselineTotal = coreErp.totalStudents > 0 ? coreErp.totalStudents : 720;
-
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
-      const isWeekend = d.getDay() === 5 || d.getDay() === 6;
       const label = i === 0 ? "আজ" : banglaDays[d.getDay()];
-      const attRate = isWeekend ? 0 : 88 + ((i * 3 + 4) % 9);
-      const quizRate = isWeekend ? 0 : 82 + ((i * 4 + 2) % 11);
-
       result.push({
         day: label,
         date: d.toISOString().split("T")[0],
-        presentPercent: attRate,
-        quizAccuracy: quizRate,
-        present: Math.round(baselineTotal * (attRate / 100)),
-        absent: Math.round(baselineTotal * ((100 - attRate) / 100)),
-        late: isWeekend ? 0 : 6,
-        quizAttempts: isWeekend ? 0 : 28 + i * 3,
-        hasData: !isWeekend,
+        presentPercent: 0,
+        quizAccuracy: 0,
+        present: 0,
+        absent: 0,
+        late: 0,
+        quizAttempts: 0,
+        hasData: false,
       });
     }
     return result;
-  }, [attendanceTrend, coreErp.totalStudents, lms.averageQuizAccuracy]);
+  }, [attendanceTrend, lms.averageQuizAccuracy]);
 
   // Donut Chart Data for Overall Institutional Health
   const institutionalHealthDonut = useMemo(() => {
-    const att = coreErp.todayAttendance.percentage > 0 ? coreErp.todayAttendance.percentage : 91;
-    const lmsAcc = lms.averageQuizAccuracy > 0 ? lms.averageQuizAccuracy : 85;
-    const fee = coreErp.feeSummary.collectionRate > 0 ? coreErp.feeSummary.collectionRate : 82;
+    const att = coreErp.todayAttendance.percentage || 0;
+    const lmsAcc = lms.averageQuizAccuracy || 0;
+    const fee = coreErp.feeSummary.collectionRate || 0;
     return [
       { name: "উপস্থিতি হার", value: Math.round(att), color: "#10b981" },
       { name: "কুইজ পারফরম্যান্স", value: Math.round(lmsAcc), color: "#8b5cf6" },
@@ -712,7 +807,7 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
     ];
   }, [coreErp.todayAttendance.percentage, lms.averageQuizAccuracy, coreErp.feeSummary.collectionRate]);
 
-  // Dynamic Class Cards Data
+  // Dynamic Class Cards Data (Strictly real student counts)
   const dynamicClassCards = useMemo(() => {
     const classColorPalette = [
       { border: "border-indigo-500", text: "text-indigo-600 dark:text-indigo-400", bg: "bg-indigo-500/10", bar: "bg-indigo-500" },
@@ -728,41 +823,31 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
       return coreErp.classDistribution.map((c, i) => {
         const theme = classColorPalette[i % classColorPalette.length];
         const studentCount = c.students || 0;
-        const total = coreErp.totalStudents || 1;
-        const pct = Math.round((studentCount / total) * 100);
+        const total = coreErp.totalStudents || 0;
+        const pct = total > 0 ? Math.round((studentCount / total) * 100) : 0;
         return {
           id: c.id || i,
           name: c.nameBangla || c.name,
           code: `CL-${c.numericValue || i + 6}`,
           students: studentCount,
-          percent: pct > 0 ? pct : 14,
+          percent: pct,
           theme,
         };
       });
     }
 
-    const defaultClasses = [
-      { id: 1, name: "৬ষ্ঠ শ্রেণি", code: "CL-6", numericValue: 6, count: 110, pct: 92 },
-      { id: 2, name: "৭ম শ্রেণি", code: "CL-7", numericValue: 7, count: 105, pct: 88 },
-      { id: 3, name: "৮ম শ্রেণি", code: "CL-8", numericValue: 8, count: 115, pct: 94 },
-      { id: 4, name: "৯ম শ্রেণি", code: "CL-9", numericValue: 9, count: 135, pct: 91 },
-      { id: 5, name: "১০ম শ্রেণি", code: "CL-10", numericValue: 10, count: 125, pct: 89 },
-      { id: 6, name: "১১শ শ্রেণি (ভোকেশনাল)", code: "CL-11", numericValue: 11, count: 68, pct: 95 },
-      { id: 7, name: "১২শ শ্রেণি (ভোকেশনাল)", code: "CL-12", numericValue: 12, count: 62, pct: 93 },
-    ];
-
-    return defaultClasses.map((c, i) => {
+    return (availableClasses || []).map((c, i) => {
       const theme = classColorPalette[i % classColorPalette.length];
       return {
         id: c.id,
-        name: c.name,
-        code: c.code,
-        students: coreErp.totalStudents > 0 ? Math.round(coreErp.totalStudents / 7) : c.count,
-        percent: c.pct,
+        name: c.nameBangla || c.name,
+        code: `CL-${c.numericValue || i + 6}`,
+        students: 0,
+        percent: 0,
         theme,
       };
     });
-  }, [coreErp.classDistribution, coreErp.totalStudents]);
+  }, [coreErp.classDistribution, coreErp.totalStudents, availableClasses]);
 
   // Spotlight Search Commands
   const spotlightCommands = useMemo(() => {
@@ -982,7 +1067,15 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
           {/* Class Filter Selector */}
           <select
             value={selectedClassId || "all"}
-            onChange={(e) => setSelectedClassId(e.target.value)}
+            onChange={(e) => {
+              const nextVal = e.target.value;
+              setSelectedClassId(nextVal);
+              const parsed = parseClassNumeric(nextVal);
+              if (nextVal !== "all" && parsed > 0 && !doesClassHaveDepartment(parsed)) {
+                setSelectedTradeId("all");
+              }
+              setSelectedSubject("all");
+            }}
             className="bg-slate-100 hover:bg-slate-200/70 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1 text-[11px] font-bold outline-hidden cursor-pointer transition-colors"
             title="শ্রেণি ফিল্টার"
           >
@@ -994,17 +1087,37 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
             ))}
           </select>
 
-          {/* Trade Filter Selector */}
+          {/* Department / Trade Filter Selector — Hidden strictly for Classes 6-8 */}
+          {isDepartmentFilterVisible && (
+            <select
+              value={selectedTradeId || "all"}
+              onChange={(e) => {
+                setSelectedTradeId(e.target.value);
+                setSelectedSubject("all");
+              }}
+              className="bg-slate-100 hover:bg-slate-200/70 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1 text-[11px] font-bold outline-hidden cursor-pointer transition-colors"
+              title="ট্রেড ফিল্টার"
+            >
+              <option value="all" className="dark:bg-slate-900">সকল ট্রেড/বিভাগ</option>
+              {availableTrades?.map((t) => (
+                <option key={t.id} value={t.code || t.id} className="dark:bg-slate-900">
+                  {t.nameBangla || t.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Subject Filter Selector — Synced from Global Academic Mapping */}
           <select
-            value={selectedTradeId || "all"}
-            onChange={(e) => setSelectedTradeId(e.target.value)}
-            className="bg-slate-100 hover:bg-slate-200/70 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1 text-[11px] font-bold outline-hidden cursor-pointer transition-colors"
-            title="ট্রেড ফিল্টার"
+            value={selectedSubject || "all"}
+            onChange={(e) => setSelectedSubject(e.target.value)}
+            className="bg-slate-100 hover:bg-slate-200/70 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1 text-[11px] font-bold outline-hidden cursor-pointer transition-colors max-w-[160px]"
+            title="বিষয় ফিল্টার"
           >
-            <option value="all" className="dark:bg-slate-900">সকল ট্রেড</option>
-            {availableTrades?.map((t) => (
-              <option key={t.id} value={t.code || t.id} className="dark:bg-slate-900">
-                {t.nameBangla || t.name}
+            <option value="all" className="dark:bg-slate-900">সকল বিষয়</option>
+            {availableSubjects.map((sub) => (
+              <option key={sub.code} value={sub.name || sub.code} className="dark:bg-slate-900">
+                {sub.nameBangla || sub.name}
               </option>
             ))}
           </select>
@@ -1019,7 +1132,7 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               }`}
             />
             <span className="text-[11px] font-black text-slate-700 dark:text-slate-200">
-              {storageStatus?.mode === "MYSQL_LIVE" ? "🗄️ MySQL Live" : "⚡ Local Memory"}
+              {storageStatus?.mode === "MYSQL_LIVE" ? "🗄️ MySQL Live" : "⚡ Local Fast Mode"}
             </span>
             <button
               type="button"
@@ -1272,13 +1385,13 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </div>
             </div>
             <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-              <AnimatedCounter value={effectiveTotalStudents || 837} isBengali={false} duration={0.8} />
+              <AnimatedCounter value={effectiveTotalStudents ?? 0} isBengali={false} duration={0.8} />
               <span className="text-xs font-bold text-white/80">জন</span>
             </div>
           </div>
 
           <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-            <span>আজকের উপস্থিতি: {effectiveAttendance.percentage || 91.4}%</span>
+            <span>আজকের উপস্থিতি: {effectiveAttendance.percentage ?? 0}%</span>
             <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
               ৩৬০° ডিরেক্টরি ➔
             </span>
@@ -1302,13 +1415,13 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </div>
             </div>
             <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-              <AnimatedCounter value={moduleKpi?.learning?.courses || 3} isBengali={false} duration={0.8} />
+              <AnimatedCounter value={moduleKpi?.learning?.courses ?? 0} isBengali={false} duration={0.8} />
               <span className="text-xs font-bold text-white/80">টি কোর্স</span>
             </div>
           </div>
 
           <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-            <span>{moduleKpi?.learning?.chapters || lms.publishedChapters || 3}টি অধ্যায় • {moduleKpi?.learning?.lessonsCompleted || 42} লেসন</span>
+            <span>{moduleKpi?.learning?.chapters ?? lms.publishedChapters ?? 0}টি অধ্যায় • {moduleKpi?.learning?.lessonsCompleted ?? lms.publishedLessons ?? 0} লেসন</span>
             <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
               লার্নিং হাব ➔
             </span>
@@ -1332,13 +1445,13 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </div>
             </div>
             <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-              <AnimatedCounter value={moduleKpi?.analytics?.weakTopicsCount || 3} isBengali={false} duration={0.8} />
+              <AnimatedCounter value={moduleKpi?.analytics?.weakTopicsCount ?? 0} isBengali={false} duration={0.8} />
               <span className="text-xs font-bold text-white/80">টি দুর্বল টপিক</span>
             </div>
           </div>
 
           <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-            <span>শনাক্তকৃত এট-রিস্ক: {moduleKpi?.analytics?.atRiskCount || 3} জন</span>
+            <span>শনাক্তকৃত এট-রিস্ক: {moduleKpi?.analytics?.atRiskCount ?? 0} জন</span>
             <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
               হিটম্যাপ ➔
             </span>
@@ -1362,7 +1475,7 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </div>
             </div>
             <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-              <AnimatedCounter value={moduleKpi?.presentations?.totalDecks || 2} isBengali={false} duration={0.8} />
+              <AnimatedCounter value={moduleKpi?.presentations?.totalDecks ?? 0} isBengali={false} duration={0.8} />
               <span className="text-xs font-bold text-white/80">টি ডেক</span>
             </div>
           </div>
@@ -1396,13 +1509,13 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </div>
             </div>
             <div className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-              <AnimatedCounter value={moduleKpi?.quizzes?.totalQuizzes || 2} isBengali={false} duration={0.8} />
+              <AnimatedCounter value={moduleKpi?.quizzes?.totalQuizzes ?? 0} isBengali={false} duration={0.8} />
               <span className="text-xs font-bold text-white/80">টি কুইজ</span>
             </div>
           </div>
 
           <div className="mt-4 bg-white/15 backdrop-blur-md border border-white/25 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs font-bold text-white/95 relative z-10">
-            <span>সক্রিয় রুম: {moduleKpi?.quizzes?.activeRooms || lms.activeLiveSessions || 0}টি লাইভ</span>
+            <span>সক্রিয় রুম: {moduleKpi?.quizzes?.activeRooms ?? lms.activeLiveSessions ?? 0}টি লাইভ</span>
             <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px] font-mono font-black">
               মেনটিমিটার ➔
             </span>
@@ -1427,7 +1540,7 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
               </div>
             </div>
             <div className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-baseline gap-1.5 pt-1">
-              <span>{storageStatus?.mode === "MYSQL_LIVE" ? "MySQL Live" : "Local Memory"}</span>
+              <span>{storageStatus?.mode === "MYSQL_LIVE" ? "MySQL Live" : "Local Fast Mode"}</span>
             </div>
           </div>
 
@@ -1921,7 +2034,10 @@ export default function CleanDashboardView({ onNavigate }: CleanDashboardViewPro
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
                     <span className="text-2xl font-black text-slate-900 dark:text-white">
-                      ৯১%
+                      {Math.round(
+                        institutionalHealthDonut.reduce((sum, item) => sum + item.value, 0) /
+                          Math.max(1, institutionalHealthDonut.length)
+                      )}%
                     </span>
                     <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">
                       হেলথ স্কোর

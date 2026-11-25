@@ -67,6 +67,8 @@ function LiveQuizArenaContent() {
   // Live Session Polled State
   const [sessionState, setSessionState] = useState<any | null>(null);
   const [sessionMissing, setSessionMissing] = useState(false);
+  const [stateError, setStateError] = useState<string | null>(null);
+  const [retryTrigger, setRetryTrigger] = useState(0);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
 
@@ -103,24 +105,16 @@ function LiveQuizArenaContent() {
   const currentSlideIndexRef = useRef<number>(-1);
   const questionStartTimeRef = useRef<number>(Date.now());
 
-  // 1. Recover Identity from canonical URL params + sessionStorage + localStorage (`pgtsc_live_player_${code}`)
+  // 1. Recover Identity strictly from isolated sessionStorage (`live_v2_player_${code}`) + URL fallback
   useEffect(() => {
     try {
-      const canonicalKey = paramCode ? `pgtsc_live_player_${paramCode}` : "";
-      const codeKey = paramCode ? `live_quiz_player_${paramCode}` : "";
+      const canonicalKey = paramCode ? `live_v2_player_${paramCode}` : "";
       const rawCanonical =
-        (canonicalKey && typeof window !== "undefined" && window.sessionStorage.getItem(canonicalKey)) ||
-        (canonicalKey && typeof window !== "undefined" && window.localStorage.getItem(canonicalKey));
+        canonicalKey && typeof window !== "undefined"
+          ? window.sessionStorage.getItem(canonicalKey)
+          : null;
 
-      const rawLegacy =
-        (typeof window !== "undefined" && window.sessionStorage.getItem("live_quiz_player")) ||
-        (codeKey && typeof window !== "undefined" && window.sessionStorage.getItem(codeKey)) ||
-        (codeKey && typeof window !== "undefined" && window.localStorage.getItem(codeKey)) ||
-        (typeof window !== "undefined" && window.localStorage.getItem("pgtsc_live_quiz_player"));
-
-      const parsedCanonical = rawCanonical ? JSON.parse(rawCanonical) : null;
-      const parsedLegacy = rawLegacy ? JSON.parse(rawLegacy) : null;
-      const source = parsedCanonical || parsedLegacy;
+      const source = rawCanonical ? JSON.parse(rawCanonical) : null;
 
       const resolvedPlayerId = paramPlayerId || source?.playerId || "";
       const resolvedSessionIdFromStore = paramSessionId || source?.sessionId || "";
@@ -137,7 +131,6 @@ function LiveQuizArenaContent() {
         });
       }
     } catch {
-      // ignore parse errors; URL fallback still guards below
       if (paramPlayerId && (paramCode || paramSessionId)) {
         setIdentity({
           playerId: paramPlayerId,
@@ -174,9 +167,21 @@ function LiveQuizArenaContent() {
     return paramSessionId || effectiveIdentity?.sessionId || paramCode || "";
   }, [paramSessionId, effectiveIdentity, paramCode]);
 
-  // 2. Poll /api/live-quizzes/sessions/[id]/state every 1000ms
+  const mapV2StageToStudent = (v2Stage: string): string => {
+    const u = String(v2Stage || "LOBBY").toUpperCase();
+    if (u === "LOBBY" || u === "READY_CHECK" || u === "WELCOME_WAITING") return "LOBBY";
+    if (u === "COUNTDOWN" || u === "COUNTDOWN_321") return "COUNTDOWN_321";
+    if (u === "QUESTION" || u === "ANSWERING_ACTIVE" || u === "QUESTION_ONLY") return "ANSWERING_ACTIVE";
+    if (u === "REVEAL" || u === "RESULT_REVEAL") return "RESULT_REVEAL";
+    if (u === "LEADERBOARD" || u === "LEADERBOARD_VIEW") return "LEADERBOARD_VIEW";
+    if (u === "ENDED") return "ENDED";
+    if (u === "PAUSED") return "PAUSED";
+    return u;
+  };
+
+  // 2. Poll /api/live-v2/state every 1000ms with strict 5-second timeout guard (never spins infinitely)
   useEffect(() => {
-    if (!resolvedSessionId) {
+    if (!resolvedSessionId && !paramCode) {
       setIsInitialLoading(false);
       return;
     }
@@ -184,69 +189,123 @@ function LiveQuizArenaContent() {
     let isMounted = true;
     const pollState = async () => {
       if (typeof document !== "undefined" && document.hidden) return;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
         const activePlayerId = effectiveIdentity?.playerId;
-        const playerIdQuery = activePlayerId ? `?playerId=${encodeURIComponent(activePlayerId)}` : "";
-        const res = await fetch(`/api/live-quizzes/sessions/${resolvedSessionId}/state${playerIdQuery}`);
+        const qs = new URLSearchParams();
+        if (resolvedSessionId && !/^\d{6}$/.test(resolvedSessionId)) {
+          qs.set("sessionId", resolvedSessionId);
+        }
+        if (paramCode) qs.set("code", paramCode);
+        if (!qs.has("sessionId") && resolvedSessionId) qs.set("sessionId", resolvedSessionId);
+        if (activePlayerId) qs.set("playerId", activePlayerId);
+        qs.set("role", "student");
+
+        const res = await fetch(`/api/live-v2/state?${qs.toString()}`, {
+          signal: controller.signal,
+        });
         const data = await res.json().catch(() => ({}));
 
-        if (isMounted && res.status === 404) {
+        if (isMounted && (res.status === 404 || data?.errorCode === "SESSION_NOT_FOUND")) {
           setSessionMissing(true);
+          setStateError(data?.error || "❌ কুইজ সেশনটি খুঁজে পাওয়া যায়নি বা মেয়াদ শেষ হয়েছে।");
           return;
         }
 
-        if (isMounted && data?.success) {
-          setSessionMissing(false);
-          setSessionState(data);
+        if (isMounted && !res.ok) {
+          setStateError(data?.error || "সেশনের তথ্য লোড করতে সমস্যা হচ্ছে।");
+          return;
+        }
 
-          // Hydrate real name/avatar from server players list if needed
-          if (activePlayerId && Array.isArray(data.allPlayers || data.players)) {
-            const matchedPlayer = (data.allPlayers || data.players).find((p: any) => p.id === activePlayerId);
-            if (matchedPlayer) {
-              setIdentity((prev) => ({
-                playerId: activePlayerId,
-                playerName: matchedPlayer.displayName || matchedPlayer.name || prev?.playerName || "শিক্ষার্থী",
-                roll: matchedPlayer.roll || prev?.roll || "—",
-                avatar: matchedPlayer.avatar || prev?.avatar || "🚀",
-                sessionId: data.session?.id || prev?.sessionId || resolvedSessionId,
-                roomCode: data.session?.code || prev?.roomCode || paramCode,
-              }));
-            }
+        const sess = data?.session;
+        if (isMounted && data?.ok && sess) {
+          setSessionMissing(false);
+          setStateError(null);
+
+          const slideIdx = Number(sess.currentSlideIndex) || 0;
+          const activeSlide = sess.slides?.[slideIdx] || null;
+          const lb: any[] = Array.isArray(sess.leaderboard) ? sess.leaderboard : [];
+          const meObj = sess.me || (activePlayerId ? sess.players?.[activePlayerId] : null);
+          const myLbRow = activePlayerId ? lb.find((r) => r.playerId === activePlayerId) : null;
+          const myAns = meObj?.answers?.[String(slideIdx)] || null;
+
+          const adaptedState = {
+            ...sess,
+            session: { id: sess.id, code: sess.code, title: sess.quizTitle },
+            stage: mapV2StageToStudent(sess.stage),
+            status: sess.status,
+            isPaused: sess.stage === "PAUSED" || sess.status === "PAUSED",
+            currentSlideIndex: slideIdx,
+            currentSlide: activeSlide
+              ? {
+                  ...activeSlide,
+                  questionText: activeSlide.question,
+                  title: activeSlide.question,
+                  timeLimit: activeSlide.timeLimitSeconds,
+                  correctAnswer: activeSlide.correctIndex,
+                }
+              : null,
+            totalSlides: sess.totalQuestions || sess.slides?.length || 1,
+            totalPlayers: sess.playerCount || lb.length || 1,
+            players: lb,
+            topPlayers: lb,
+            myRank: myLbRow?.rank || 1,
+            myScore: meObj?.score || myLbRow?.score || 0,
+            correctAnswer:
+              activeSlide && typeof activeSlide.correctIndex === "number" && activeSlide.correctIndex >= 0
+                ? activeSlide.correctIndex
+                : undefined,
+            explanation: activeSlide?.explanation,
+          };
+
+          setSessionState(adaptedState);
+
+          // Hydrate real name/avatar from server session
+          if (meObj) {
+            setIdentity((prev) => ({
+              playerId: meObj.id,
+              playerName: meObj.name || prev?.playerName || "শিক্ষার্থী",
+              roll: meObj.roll || prev?.roll || "—",
+              avatar: meObj.avatar || prev?.avatar || "🚀",
+              sessionId: sess.id || prev?.sessionId || resolvedSessionId,
+              roomCode: sess.code || prev?.roomCode || paramCode,
+            }));
           }
 
-          // Calculate server clock offset
-          if (data.serverNow || data.serverTimestamp) {
-            const serverNow = Number(data.serverNow || data.serverTimestamp);
+          if (data.serverNow) {
+            const serverNow = Number(data.serverNow);
             if (Number.isFinite(serverNow)) {
               setServerOffsetMs(serverNow - Date.now());
             }
           }
 
-          // Check if server recorded readiness
-          if (activePlayerId && Array.isArray(data.readyPlayers)) {
-            const foundReady = data.readyPlayers.some((p: any) => p.playerId === activePlayerId || p.id === activePlayerId);
-            setIsReady(foundReady);
+          if (meObj) {
+            setIsReady(Boolean(meObj.isReady));
           }
 
-          // Check if server already recorded answer for current slide
-          if (data.playerAnswered && data.studentAnswerData) {
+          if (myAns) {
             setHasSubmitted(true);
-            setSelectedAnswer(data.selectedOption ?? data.studentAnswerData.answerPayload);
+            setSelectedAnswer(myAns.optionIndex !== null ? myAns.optionIndex : myAns.answerText);
             setSubmissionFeedback({
-              isCorrect: data.studentAnswerData.isCorrect,
-              earnedPoints: data.studentAnswerData.totalPoints || data.studentAnswerData.points,
-              responseTimeMs: data.studentAnswerData.responseTimeMs,
+              isCorrect: myAns.isCorrect,
+              earnedPoints: myAns.pointsEarned,
+              responseTimeMs: myAns.responseTimeMs,
             });
           }
 
-          // Trigger celebratory fireworks on completion
-          if (data.stage === "ENDED" || data.status === "ENDED" || data.stage === "LEADERBOARD_VIEW") {
+          if (sess.stage === "ENDED" || sess.stage === "LEADERBOARD") {
             triggerFireworks();
           }
         }
-      } catch {
-        // silent fallback
+      } catch (err: any) {
+        if (isMounted && err?.name === "AbortError") {
+          setStateError("⏱️ সার্ভারের সাড়া পেতে সময় বেশি লাগছে (5s timeout)। অনুগ্রহ করে পুনরায় চেষ্টা করো।");
+        } else if (isMounted && !sessionState) {
+          setStateError("নেটওয়ার্ক কানেকশন পাওয়া যায়নি। ইন্টারনেট যাচাই করে আবার চেষ্টা করো।");
+        }
       } finally {
+        clearTimeout(timeoutId);
         if (isMounted) setIsInitialLoading(false);
       }
     };
@@ -257,13 +316,13 @@ function LiveQuizArenaContent() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [resolvedSessionId, effectiveIdentity?.playerId, paramCode]);
+  }, [resolvedSessionId, effectiveIdentity?.playerId, paramCode, retryTrigger]);
 
   // 3. High-Frequency Local 100ms Timer (Strictly NaN-proof)
   useEffect(() => {
     const stageEndsAt = sessionState?.stageEndsAt;
     const interval = setInterval(() => {
-      const safeSec = computeSafeRemainingSeconds(stageEndsAt, serverOffsetMs, 20);
+      const safeSec = computeSafeRemainingSeconds(stageEndsAt, serverOffsetMs, 0);
       setDisplaySeconds(Number.isFinite(safeSec) ? safeSec : 0);
     }, 100);
 
@@ -327,26 +386,25 @@ function LiveQuizArenaContent() {
 
     try {
       setIsReady(nextReady);
-      await fetch(`/api/live-quizzes/sessions/${resolvedSessionId}/ready`, {
+      await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sessionId: resolvedSessionId,
+          code: paramCode,
+          action: "PLAYER_READY",
           playerId: effectiveIdentity.playerId,
-          studentName: effectiveIdentity.playerName,
-          roll: effectiveIdentity.roll,
-          avatar: effectiveIdentity.avatar,
           isReady: nextReady,
         }),
       });
     } catch {
-      // rollback on network fail
       setIsReady(!nextReady);
     } finally {
       setIsTappingReady(false);
     }
   };
 
-  // 6. Handle Answer Submission (Strict O(1) submission)
+  // 6. Handle Answer Submission (Strict O(1) submission to /api/live-v2/action)
   const handleSubmitAnswer = async (payload: any) => {
     if (hasSubmitted || isSubmitting || !resolvedSessionId || !effectiveIdentity) return;
     setIsSubmitting(true);
@@ -358,29 +416,44 @@ function LiveQuizArenaContent() {
       navigator.vibrate([30, 20, 30]);
     }
 
+    const optionIndex =
+      typeof payload === "number"
+        ? payload
+        : payload === true || payload === "TRUE"
+        ? 0
+        : payload === false || payload === "FALSE"
+        ? 1
+        : null;
+
+    const answerText =
+      typeof payload === "string"
+        ? payload
+        : optionIndex === null
+        ? JSON.stringify(payload)
+        : undefined;
+
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${resolvedSessionId}/secure-submit`, {
+      const res = await fetch("/api/live-v2/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sessionId: resolvedSessionId,
+          code: paramCode,
+          action: "SUBMIT_ANSWER",
           playerId: effectiveIdentity.playerId,
           slideIndex: currentSlideIndex,
-          questionId: currentSlide?.id || `slide-${currentSlideIndex}`,
-          answerPayload: payload,
-          responseTimeMs,
-          displayName: effectiveIdentity.playerName,
-          roll: effectiveIdentity.roll,
-          avatar: effectiveIdentity.avatar,
+          optionIndex,
+          answerText,
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       setHasSubmitted(true);
 
-      if (data.success) {
+      if (data.ok) {
         setSubmissionFeedback({
           isCorrect: data.isCorrect,
-          earnedPoints: data.totalPoints || data.points || 0,
+          earnedPoints: data.pointsEarned || 0,
           responseTimeMs,
         });
       }
@@ -423,8 +496,8 @@ function LiveQuizArenaContent() {
     );
   }
 
-  // Session Missing / Invalid Room Notice
-  if (sessionMissing && !sessionState) {
+  // Session Missing / Invalid Room / Network Timeout Error Notice (Zero Infinite Spinner)
+  if ((sessionMissing || stateError) && !sessionState) {
     return (
       <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col items-center justify-center bg-slate-950 p-4 sm:p-6 text-center">
         <div className="w-full max-w-md mx-auto my-auto rounded-3xl bg-slate-900/90 border border-rose-500/40 p-6 sm:p-8 space-y-5 shadow-2xl">
@@ -432,18 +505,36 @@ function LiveQuizArenaContent() {
             <AlertCircle className="w-8 h-8" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-xl font-black text-white">❌ কুইজ সেশনটি পাওয়া যায়নি</h2>
-            <p className="text-xs sm:text-sm text-slate-400">
-              রুম কোডটি সঠিক নয় অথবা কুইজ সেশনটির মেয়াদ শেষ হয়েছে। অনুগ্রহ করে সঠিক ৬ ডিজিটের কোড দিয়ে পুনরায় যোগ দাও।
+            <h2 className="text-xl font-black text-white">
+              {sessionMissing ? "❌ কুইজ সেশনটি পাওয়া যায়নি" : "⚠️ সংযোগ পাওয়া যায়নি"}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-300">
+              {stateError ||
+                "রুম কোডটি সঠিক নয় অথবা কুইজ সেশনটির মেয়াদ শেষ হয়েছে। অনুগ্রহ করে সঠিক ৬ ডিজিটের কোড দিয়ে পুনরায় যোগ দাও।"}
             </p>
           </div>
-          <a
-            href="/quiz/join"
-            className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 text-white font-black text-sm shadow-lg"
-          >
-            <span>রুম কোড দিয়ে পুনরায় জয়েন করো</span>
-            <ArrowRight className="w-4 h-4" />
-          </a>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setIsInitialLoading(true);
+                setStateError(null);
+                setSessionMissing(false);
+                setRetryTrigger((n) => n + 1);
+              }}
+              className="flex-1 py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>আবার চেষ্টা করো</span>
+            </button>
+            <a
+              href="/quiz/join"
+              className="flex-1 py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-black text-sm flex items-center justify-center gap-2"
+            >
+              <span>ফিরে যাও</span>
+              <ArrowRight className="w-4 h-4" />
+            </a>
+          </div>
         </div>
       </div>
     );

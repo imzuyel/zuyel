@@ -88,6 +88,51 @@ export async function POST(req: NextRequest) {
 
     const newCourse = chapterLearningStore.createCourse(body);
 
+    if (isPrismaAvailable()) {
+      await safePrismaQuery(async (p) => {
+        const numericCls = Number(newCourse.numericClass) || Number(newCourse.classId) || 9;
+        return await p.course.upsert({
+          where: { code: newCourse.code },
+          update: {
+            title: newCourse.title,
+            titleBangla: newCourse.titleBangla,
+            description: newCourse.description || "",
+            classId: newCourse.classId,
+            className: newCourse.className,
+            numericClass: numericCls,
+            tradeId: newCourse.tradeId ?? null,
+            tradeCode: newCourse.tradeCode ?? null,
+            tradeName: newCourse.tradeName ?? null,
+            subjectId: newCourse.subjectId ?? null,
+            subjectCode: newCourse.subjectCode ?? null,
+            subjectName: newCourse.subjectName ?? null,
+            isPublished: newCourse.isPublished,
+          },
+          create: {
+            code: newCourse.code,
+            title: newCourse.title,
+            titleBangla: newCourse.titleBangla,
+            description: newCourse.description || "",
+            classId: newCourse.classId,
+            className: newCourse.className,
+            numericClass: numericCls,
+            tradeId: newCourse.tradeId ?? null,
+            tradeCode: newCourse.tradeCode ?? null,
+            tradeName: newCourse.tradeName ?? null,
+            subjectId: newCourse.subjectId ?? null,
+            subjectCode: newCourse.subjectCode ?? null,
+            subjectName: newCourse.subjectName ?? null,
+            badgeGradient: newCourse.badgeGradient || "from-indigo-600 to-cyan-600",
+            isPublished: newCourse.isPublished ?? true,
+            orderIndex: newCourse.orderIndex || 1,
+            totalXp: newCourse.totalXp || 300,
+            estimatedHours: newCourse.estimatedHours || 10.0,
+            difficulty: newCourse.difficulty || "Intermediate",
+          },
+        });
+      }, null);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Course created successfully",

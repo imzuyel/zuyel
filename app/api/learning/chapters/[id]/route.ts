@@ -105,6 +105,23 @@ export async function PUT(
       );
     }
 
+    if (isPrismaAvailable() && !isNaN(Number(id))) {
+      await safePrismaQuery(async (p) => {
+        const existing = await p.courseChapter.findUnique({ where: { id: Number(id) } });
+        if (!existing) return null;
+        return await p.courseChapter.update({
+          where: { id: Number(id) },
+          data: {
+            title: updated.title,
+            titleBangla: updated.titleBangla,
+            description: updated.description,
+            isPublished: updated.isPublished,
+            unlockRule: updated.unlockRule,
+          },
+        });
+      }, null);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Chapter updated successfully",
@@ -139,6 +156,16 @@ export async function DELETE(
         { success: false, error: "Chapter not found" },
         { status: 404 }
       );
+    }
+
+    if (isPrismaAvailable() && !isNaN(Number(id))) {
+      await safePrismaQuery(async (p) => {
+        const existing = await p.courseChapter.findUnique({ where: { id: Number(id) } });
+        if (existing) {
+          await p.courseChapter.delete({ where: { id: Number(id) } });
+        }
+        return true;
+      }, null);
     }
 
     return NextResponse.json({

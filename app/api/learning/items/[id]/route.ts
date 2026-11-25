@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
 import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
+import { isPrismaAvailable, safePrismaQuery } from "@/lib/prisma";
 
 export async function GET(
   req: NextRequest,
@@ -52,6 +53,35 @@ export async function PUT(
       );
     }
 
+    // Sync update to Prisma MySQL if online (best-effort without failing offline mode)
+    if (isPrismaAvailable() && !isNaN(Number(id))) {
+      await safePrismaQuery(async (p) => {
+        const existing = await p.chapterContentItem.findUnique({ where: { id: Number(id) } });
+        if (!existing) return null;
+        return await p.chapterContentItem.update({
+          where: { id: Number(id) },
+          data: {
+            title: updated.title,
+            titleBangla: updated.titleBangla,
+            isPublished: updated.isPublished,
+            isMandatory: updated.isMandatory,
+            xpReward: updated.xpReward,
+            passingScore: updated.passingScore,
+            minScoreToUnlockNext: updated.minScoreToUnlockNext,
+            attemptLimit: updated.attemptLimit,
+            durationMinutes: updated.durationMinutes,
+            contentMarkdown: updated.contentMarkdown,
+            summary: updated.summary,
+            keyTakeaways: Array.isArray(updated.keyTakeaways)
+              ? updated.keyTakeaways.join("\n")
+              : (updated.keyTakeaways || ""),
+            quizQuestionsJson: updated.quizQuestions ? JSON.stringify(updated.quizQuestions) : undefined,
+            timeLimitSeconds: updated.timeLimitSeconds || 300,
+          },
+        });
+      }, null);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Content item updated successfully",
@@ -86,6 +116,16 @@ export async function DELETE(
         { success: false, error: "Content item not found" },
         { status: 404 }
       );
+    }
+
+    if (isPrismaAvailable() && !isNaN(Number(id))) {
+      await safePrismaQuery(async (p) => {
+        const existing = await p.chapterContentItem.findUnique({ where: { id: Number(id) } });
+        if (existing) {
+          await p.chapterContentItem.delete({ where: { id: Number(id) } });
+        }
+        return true;
+      }, null);
     }
 
     return NextResponse.json({

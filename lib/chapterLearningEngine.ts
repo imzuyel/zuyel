@@ -62,6 +62,10 @@ export interface ChapterContentItemData {
   shuffleQuestions?: boolean;
   showCorrectAnswersAfter?: boolean;
 
+  // Instructional emphasis tags ("📌 বোর্ড পরীক্ষায় আসার মতো" / "🛠️ ল্যাব/প্র্যাকটিক্যাল")
+  boardImportant?: boolean;
+  practicalJob?: boolean;
+
   slug?: string;
   createdAt: string;
   updatedAt: string;
@@ -2175,6 +2179,8 @@ class ChapterLearningStore {
           timeLimitSeconds: data.timeLimitSeconds || 300,
           shuffleQuestions: data.shuffleQuestions ?? true,
           showCorrectAnswersAfter: data.showCorrectAnswersAfter ?? true,
+          boardImportant: Boolean(data.boardImportant),
+          practicalJob: Boolean(data.practicalJob),
 
           createdAt: now,
           updatedAt: now,
@@ -2653,6 +2659,23 @@ class ChapterLearningStore {
     stars?: number;
     progress?: StudentItemProgressData;
     attemptsRemaining?: number | null;
+    questionFeedback?: Array<{
+      questionId: string;
+      questionText: string;
+      options: string[];
+      studentAnswer: string;
+      correctAnswer: string;
+      explanation: string;
+      isCorrect: boolean;
+      topic?: string;
+    }>;
+    courseMeta?: {
+      courseTitle: string;
+      itemTitle: string;
+      className: string;
+      tradeName: string;
+      subjectName: string;
+    };
   } {
     let targetItem: ChapterContentItemData | null = null;
     let targetCourse: CourseItem | null = null;
@@ -2718,6 +2741,16 @@ class ChapterLearningStore {
     const questions = targetItem.quizQuestions || [];
     let correctCount = 0;
     const disqualifiedQuestionIds: string[] = [];
+    const questionFeedback: Array<{
+      questionId: string;
+      questionText: string;
+      options: string[];
+      studentAnswer: string;
+      correctAnswer: string;
+      explanation: string;
+      isCorrect: boolean;
+      topic?: string;
+    }> = [];
 
     questions.forEach(q => {
       const qIdStr = String(q.id);
@@ -2726,13 +2759,67 @@ class ChapterLearningStore {
         Array.isArray(tabSwitchedQuestionIds) &&
         tabSwitchedQuestionIds.some(id => String(id) === qIdStr);
 
+      let isCorrect = false;
+      const qType = q.questionType || "MCQ";
+      let studentAnswerText = "উত্তর দেওয়া হয়নি";
+      let correctAnswerText = "";
+
+      if (qType === "TRUE_FALSE") {
+        const expectedBool = q.correctBoolean !== undefined ? q.correctBoolean : (q.correctOptionIndex === 0);
+        correctAnswerText = expectedBool ? "সত্য (True)" : "মিথ্যা (False)";
+        if (selected !== undefined && selected !== null) {
+          const sLower = String(selected).toLowerCase().trim();
+          studentAnswerText =
+            sLower === "true" || sLower === "সত্য" || sLower === "1" || selected === 0
+              ? "সত্য (True)"
+              : sLower === "false" || sLower === "মিথ্যা" || sLower === "0" || selected === 1
+                ? "মিথ্যা (False)"
+                : String(selected);
+        }
+      } else if (qType === "FILL_BLANKS") {
+        const bracketMatches = Array.from(q.questionText.matchAll(/\[(.*?)\]/g)).map(m => m[1].trim());
+        const targetBlanks = bracketMatches.length > 0
+          ? bracketMatches
+          : (q.acceptedAnswers && q.acceptedAnswers.length > 0 ? q.acceptedAnswers : (q.options || []));
+        correctAnswerText = targetBlanks.join(", ");
+        if (selected !== undefined && selected !== null) {
+          studentAnswerText = typeof selected === "object" ? Object.values(selected).join(", ") : String(selected);
+        }
+      } else if (qType === "MATCHING") {
+        const pairs = q.matchingPairs || [];
+        correctAnswerText = pairs.map((p) => `${p.left} → ${p.right}`).join(" | ");
+        if (selected && typeof selected === "object") {
+          studentAnswerText = JSON.stringify(selected);
+        }
+      } else if (qType === "REORDER") {
+        const expectedOrder = (q.correctOrder && q.correctOrder.length > 0) ? q.correctOrder : (q.options || []);
+        correctAnswerText = expectedOrder.join(" → ");
+        if (Array.isArray(selected)) studentAnswerText = selected.join(" → ");
+        else if (selected) studentAnswerText = String(selected);
+      } else {
+        const opts = q.options || [];
+        correctAnswerText = opts[q.correctOptionIndex ?? 0] || String(q.correctAnswer ?? "");
+        const selectedIdx =
+          typeof selected === "number"
+            ? selected
+            : typeof selected === "string" && selected.startsWith("opt_")
+              ? parseInt(selected.replace("opt_", ""), 10)
+              : typeof selected === "string" && !isNaN(parseInt(selected, 10))
+                ? parseInt(selected, 10)
+                : -1;
+        if (selectedIdx >= 0 && opts[selectedIdx]) {
+          studentAnswerText = opts[selectedIdx];
+        } else if (selected !== undefined && selected !== null && selected !== -1) {
+          studentAnswerText = String(selected);
+        }
+      }
+
       if (isTabSwitched) {
         // Tab was switched while this question was active:
         // Rule: Marks for this specific question MUST be 0 (zero), disqualified from score
         disqualifiedQuestionIds.push(qIdStr);
+        studentAnswerText = "ট্যাব পরিবর্তন (বাতিল)";
       } else {
-        const qType = q.questionType || "MCQ";
-        let isCorrect = false;
 
         if (qType === "TRUE_FALSE") {
           // True/False: support boolean, string ("true"/"false"/"সত্য"/"মিথ্যা"), or option index (0=true, 1=false)
@@ -2893,6 +2980,19 @@ class ChapterLearningStore {
           correctCount++;
         }
       }
+
+      questionFeedback.push({
+        questionId: qIdStr,
+        questionText: q.questionText,
+        options: Array.isArray(q.options) ? q.options : [],
+        studentAnswer: studentAnswerText,
+        correctAnswer: correctAnswerText,
+        explanation:
+          q.explanation?.trim() ||
+          `সঠিক উত্তর হলো "${correctAnswerText}" — মূল পাঠ্যাংশ থেকে ব্যাখ্যাটি দেখে নিন।`,
+        isCorrect: !isTabSwitched && isCorrect,
+        topic: (q as any).conceptTopic || targetItem.titleBangla || targetCourse.subjectName || targetCourse.titleBangla,
+      });
     });
 
     const totalQuestions = questions.length;
@@ -2964,6 +3064,14 @@ class ChapterLearningStore {
       stars: finalStars,
       progress: updatedProgress,
       attemptsRemaining,
+      questionFeedback,
+      courseMeta: {
+        courseTitle: targetCourse.titleBangla || targetCourse.title,
+        itemTitle: targetItem.titleBangla || targetItem.title,
+        className: targetCourse.className,
+        tradeName: targetCourse.tradeName || "General",
+        subjectName: targetCourse.subjectName || targetCourse.titleBangla,
+      },
     };
   }
 

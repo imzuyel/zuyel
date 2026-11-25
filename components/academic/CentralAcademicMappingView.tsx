@@ -218,6 +218,9 @@ export default function CentralAcademicMappingView() {
         setToast({ type: "success", message: "নতুন একাডেমিক ম্যাপিং সফলভাবে যুক্ত হয়েছে।" });
         setIsCreateModalOpen(false);
         fetchSnapshot(formYear);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
+        }
       } else {
         setToast({ type: "error", message: data.error || "ম্যাপিং যুক্ত করতে সমস্যা হয়েছে।" });
       }

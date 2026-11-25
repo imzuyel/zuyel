@@ -39,9 +39,18 @@ export async function GET(req: NextRequest) {
         });
 
         if (dbClasses && dbClasses.length > 0) {
+          const normalized = dbClasses.map((c: any) => {
+            const num = Number(c.numericValue);
+            const hasDept = num >= 9 && num <= 12;
+            return {
+              ...c,
+              hasTrade: hasDept,
+              hasDepartment: hasDept,
+            };
+          });
           return NextResponse.json({
             success: true,
-            classes: dbClasses,
+            classes: normalized,
             source: "database",
           });
         }
@@ -51,18 +60,23 @@ export async function GET(req: NextRequest) {
     }
 
     const snapshot = await getMasterDataSnapshot();
-    const safeClasses = (snapshot.classes || []).map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      nameBangla: c.nameBangla,
-      numericValue: c.numericValue,
-      level: c.level || (c.numericValue >= 9 ? "technical" : "general"),
-      hasTrade: Boolean(c.hasTrade),
-      sections: Array.isArray(c.defaultSections) ? c.defaultSections.join(",") : c.sections || "A,B",
-      shifts: Array.isArray(c.defaultShifts) ? c.defaultShifts.join(",") : c.shifts || "FIRST_SHIFT",
-      totalSeats: c.totalSeats || 80,
-      status: c.status || "Active",
-    }));
+    const safeClasses = (snapshot.classes || []).map((c: any) => {
+      const num = Number(c.numericValue);
+      const hasDept = num >= 9 && num <= 12;
+      return {
+        id: c.id,
+        name: c.name,
+        nameBangla: c.nameBangla,
+        numericValue: num,
+        level: c.level || (num >= 9 ? "technical" : "general"),
+        hasTrade: hasDept,
+        hasDepartment: hasDept,
+        sections: Array.isArray(c.defaultSections) ? c.defaultSections.join(",") : c.sections || "A,B",
+        shifts: Array.isArray(c.defaultShifts) ? c.defaultShifts.join(",") : c.shifts || "FIRST_SHIFT",
+        totalSeats: c.totalSeats || 80,
+        status: c.status || "Active",
+      };
+    });
 
     return NextResponse.json({
       success: true,

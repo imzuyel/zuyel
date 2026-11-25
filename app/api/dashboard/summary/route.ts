@@ -58,6 +58,8 @@ export async function GET(req: NextRequest) {
       className: classNameParam || (classIdParam && classIdParam !== "all" ? `Class ${classIdParam}` : undefined),
       trade: tradeParam || (tradeIdParam && tradeIdParam !== "all" ? tradeIdParam : undefined),
     });
+    const subjectFilterLower = (subjectParam || "").trim().toLowerCase();
+    const isSubjectFiltered = Boolean(subjectFilterLower && subjectFilterLower !== "all");
 
     // =========================================================================
     // 1. STRICT SECURITY & ROLE-BASED ACCESS CONTROL (RBAC) ENFORCEMENT
@@ -142,7 +144,7 @@ export async function GET(req: NextRequest) {
     // 2. CONTEXTUAL FILTER CLAUSES & CACHING
     // =========================================================================
 
-    const cacheKey = `${effectiveRole}_${academicYearParam}_${classIdParam || "all"}_${tradeIdParam || "all"}`;
+    const cacheKey = `${effectiveRole}_${academicYearParam}_${classIdParam || "all"}_${tradeIdParam || "all"}_${classNameParam || "all"}_${tradeParam || "all"}_${subjectParam || "all"}`;
     const nowTime = Date.now();
     const cached = dashboardMetricsCache.get(cacheKey);
 
@@ -153,7 +155,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Resolve class filter
+    // Resolve class filter (supports classId 1..7 / 6..12 and className strings)
     let resolvedNumericClass: number | null = null;
     let resolvedClassId: number | null = null;
     if (classIdParam && classIdParam !== "all" && classIdParam !== "0") {
@@ -169,18 +171,89 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+    if (!resolvedNumericClass && classNameParam && classNameParam !== "all") {
+      const banglaMap: Record<string, number> = { "৬ষ্ঠ": 6, "৭ম": 7, "৮ম": 8, "৯ম": 9, "১০ম": 10, "১১শ": 11, "১২শ": 12 };
+      const numMatch = classNameParam.match(/\d+/);
+      if (numMatch) {
+        const n = Number(numMatch[0]);
+        if (n >= 6 && n <= 12) resolvedNumericClass = n;
+      } else {
+        for (const [bn, num] of Object.entries(banglaMap)) {
+          if (classNameParam.includes(bn)) {
+            resolvedNumericClass = num;
+            break;
+          }
+        }
+      }
+    }
+
+    // Strict Rule: Classes 6-8 never have departments/trades
+    const isTradeAllowedForResolvedClass =
+      !resolvedNumericClass || (resolvedNumericClass >= 9 && resolvedNumericClass <= 12);
 
     // Resolve trade filter
     let resolvedTradeId: number | null = null;
     let resolvedTradeCode: string | null = null;
-    if (tradeIdParam && tradeIdParam !== "all" && tradeIdParam !== "0") {
-      const parsedTrade = parseInt(tradeIdParam, 10);
+    const rawTradeFilter = tradeParam && tradeParam !== "all" ? tradeParam : tradeIdParam;
+    if (isTradeAllowedForResolvedClass && rawTradeFilter && rawTradeFilter !== "all" && rawTradeFilter !== "0") {
+      const parsedTrade = parseInt(rawTradeFilter, 10);
       if (!isNaN(parsedTrade)) {
-        // Map common trade IDs: 101/1 -> IT-IoT/GE etc.
         resolvedTradeId = parsedTrade;
       } else {
-        resolvedTradeCode = tradeIdParam;
+        resolvedTradeCode = rawTradeFilter;
       }
+    }
+
+    // Recompute student filter cleanly if Class 6-8 stripped trade
+    const effectiveHybridStudents = await getStudents({
+      className: resolvedNumericClass ? `Class ${resolvedNumericClass}` : (classNameParam && classNameParam !== "all" ? classNameParam : undefined),
+      trade: isTradeAllowedForResolvedClass ? (resolvedTradeCode || (resolvedTradeId ? String(resolvedTradeId) : undefined)) : undefined,
+    });
+
+    const matchesFilterEntity = (item: any) => {
+      if (!item) return false;
+      if (resolvedNumericClass) {
+        const rawCls = String(item.numericClass ?? item.classNumeric ?? item.classId ?? item.className ?? item.classLevel ?? "");
+        const numMatch = rawCls.match(/\d+/);
+        const itemNum = numMatch ? (Number(numMatch[0]) <= 7 ? Number(numMatch[0]) + 5 : Number(numMatch[0])) : 0;
+        if (itemNum > 0 && itemNum !== resolvedNumericClass) return false;
+      }
+      if (isTradeAllowedForResolvedClass && (resolvedTradeId || resolvedTradeCode)) {
+        const tVal = String(item.tradeCode ?? item.tradeId ?? item.trade ?? item.tradeName ?? "").toLowerCase();
+        if (tVal && tVal !== "all" && tVal !== "gen" && tVal !== "0") {
+          const idMatch = resolvedTradeId && String(item.tradeId) === String(resolvedTradeId);
+          const codeMatch = resolvedTradeCode && tVal.includes(resolvedTradeCode.toLowerCase());
+          if (!idMatch && !codeMatch) return false;
+        }
+      }
+      if (isSubjectFiltered) {
+        const sVal = `${item.subject || ""} ${item.subjectName || ""} ${item.subjectCode || ""} ${item.title || ""}`.toLowerCase();
+        if (sVal && !sVal.includes(subjectFilterLower)) return false;
+      }
+      return true;
+    };
+
+    const filteredCourses = (hybridStore.courses || []).filter(matchesFilterEntity);
+    const filteredCourseIds = new Set(filteredCourses.map((c: any) => String(c.id)));
+    const filteredChapters = (hybridStore.chapters || []).filter(
+      (ch: any) => matchesFilterEntity(ch) || (ch.courseId && filteredCourseIds.has(String(ch.courseId)))
+    );
+    const filteredPresentations = (hybridStore.presentations || []).filter(matchesFilterEntity);
+    const filteredQuizzes = (hybridStore.quizzes || []).filter(matchesFilterEntity);
+    const filteredLiveSessions = Object.values(hybridStore.liveSessions || {}).filter(
+      (s: any) =>
+        s &&
+        ["active", "waiting", "paused", "in_progress"].includes(String(s.status || "").toLowerCase()) &&
+        matchesFilterEntity(s)
+    );
+    const filteredQuizResults = (hybridStore.quizResults || []).filter(matchesFilterEntity);
+    let labsCount = 0;
+    try {
+      const { getLabsList } = await import("@/lib/masterDataEngine");
+      const labs = await getLabsList();
+      labsCount = Array.isArray(labs) ? labs.length : 0;
+    } catch {
+      labsCount = 0;
     }
 
     // Build Prisma student query where clause
@@ -227,20 +300,20 @@ export async function GET(req: NextRequest) {
       recentNoticesPrisma,
       recentProgressAttempts,
     ] = await Promise.all([
-      // 1. Total Students with filter
+      // 1. Total Students with filter (strictly 0 if filter matches none — zero dummy numbers)
       safePrismaQuery(
         async (p) => p.student.count({ where: studentWhere }),
-        hybridFilteredStudents.length || hybridStore.students.length || 837
+        effectiveHybridStudents.length
       ),
       // 2. Total Faculty / Staff
       safePrismaQuery(
         async (p) => p.faculty.count(),
-        institutionalDb.faculty.length || 38
+        ((hybridStore as any).faculty || institutionalDb.faculty || []).length
       ),
       // 3. Total Published Notices
       safePrismaQuery(
         async (p) => p.notice.count(),
-        institutionalDb.notices.length || 16
+        (hybridStore.notices || institutionalDb.notices || []).length
       ),
       // 4. Student Counts Grouped by Trade
       safePrismaQuery(
@@ -285,7 +358,7 @@ export async function GET(req: NextRequest) {
             where: { date: todayStr },
             include: { class: true, entries: true },
           }),
-        []
+        (hybridStore.attendance || []).filter((r: any) => r.date === todayStr && matchesFilterEntity(r))
       ),
       // 8. Recent 7-14 Days Attendance Sheets
       safePrismaQuery(
@@ -295,7 +368,7 @@ export async function GET(req: NextRequest) {
             orderBy: { date: "desc" },
             include: { class: true, entries: true },
           }),
-        institutionalDb.attendanceRecords || []
+        (hybridStore.attendance || institutionalDb.attendanceRecords || []).filter(matchesFilterEntity)
       ),
       // 9. Fee Invoices (Collected vs Due)
       safePrismaQuery(
@@ -304,7 +377,7 @@ export async function GET(req: NextRequest) {
             where: academicYearParam ? { session: academicYearParam } : undefined,
             select: { amount: true, netAmount: true, paidAmount: true, dueAmount: true, status: true },
           }),
-        []
+        hybridStore.fees || []
       ),
       // 10. Active Live Quiz Sessions
       safePrismaQuery(
@@ -312,7 +385,7 @@ export async function GET(req: NextRequest) {
           p.liveSession.count({
             where: { status: { in: ["ACTIVE", "WAITING", "IN_PROGRESS"] } },
           }),
-        Object.keys(hybridStore.liveSessions || {}).length
+        filteredLiveSessions.length
       ),
       // 11. Active / Published Quizzes
       safePrismaQuery(
@@ -320,22 +393,22 @@ export async function GET(req: NextRequest) {
           p.quiz.count({
             where: { status: "ACTIVE" },
           }),
-        hybridStore.quizzes.length || 2
+        filteredQuizzes.length
       ),
       // 12. Published Course Chapters
       safePrismaQuery(
         async (p) => p.courseChapter.count({ where: { isPublished: true } }),
-        hybridStore.chapters.length || 3
+        filteredChapters.length
       ),
       // 13. Published Content Items (Lessons / Parts)
       safePrismaQuery(
         async (p) => p.chapterContentItem.count({ where: { isPublished: true } }),
-        hybridStore.courses.reduce((acc, c) => acc + (c.lessonsCount || 0), 0) || 60
+        filteredCourses.reduce((acc, c: any) => acc + (Number(c.lessonsCount) || 0), 0)
       ),
       // 14. Active Subject Topics / Curriculum
       safePrismaQuery(
         async (p) => p.subjectTopic.count({ where: { status: "Active" } }),
-        146
+        0
       ),
       // 15. Security & System Audit Logs
       safePrismaQuery(
@@ -383,7 +456,29 @@ export async function GET(req: NextRequest) {
     const totalStudents = dbStudentCount;
     const totalFaculty = dbFacultyCount;
     const totalNotices = dbNoticeCount;
-    const activeLiveQuizzesCountTotal = activeLiveSessionsCount + activeQuizzesCount;
+    const hasCustomFilter = Boolean(resolvedNumericClass || resolvedTradeId || resolvedTradeCode || isSubjectFiltered);
+    const effectiveActiveLiveSessions = hasCustomFilter ? filteredLiveSessions.length : activeLiveSessionsCount;
+    const effectiveQuizzesCount = hasCustomFilter ? filteredQuizzes.length : activeQuizzesCount;
+    const effectiveCoursesCount = hasCustomFilter ? filteredCourses.length : Math.max(filteredCourses.length, (hybridStore.courses || []).length);
+    const effectivePresentationsCount = filteredPresentations.length;
+    const effectiveChaptersCount = hasCustomFilter ? filteredChapters.length : Math.max(filteredChapters.length, totalCourseChapters);
+    const activeLiveQuizzesCountTotal = effectiveActiveLiveSessions + effectiveQuizzesCount;
+
+    const rawClassList =
+      dbClasses && dbClasses.length > 0
+        ? dbClasses
+        : (hybridStore.academicClasses || []).map((c: any) => ({
+            id: c.id,
+            numericValue: Number(c.numericValue),
+            name: c.name,
+            nameBangla: c.nameBangla,
+            _count: {
+              students: (hybridStore.students || []).filter((s: any) => {
+                const rawCls = String(s.className ?? s.classId ?? "");
+                return rawCls.includes(String(c.numericValue)) || rawCls === String(c.nameBangla);
+              }).length,
+            },
+          }));
 
     // A. Trade Distribution (Strict DB Counts)
     const tradeColorPalette: Record<string, string> = {
@@ -431,7 +526,7 @@ export async function GET(req: NextRequest) {
     }
 
     // B. Class Distribution Breakdown (Strict DB Counts)
-    const classDistribution = dbClasses.map((c: any) => ({
+    const classDistribution = rawClassList.map((c: any) => ({
       id: c.id,
       numericValue: c.numericValue,
       name: c.name,
@@ -563,58 +658,76 @@ export async function GET(req: NextRequest) {
       avatarUrl: p.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=student-${idx + 1}`,
     }));
 
-    // G. 7-Day & Class-wise Performance Trend for Visual Analytics Dual-Tab
-    const classPerformanceTrend = [
-      { className: "৬ষ্ঠ শ্রেণি", classNumeric: 6, attendanceRate: 92.4, quizAccuracy: 79.5, completedLessons: 24 },
-      { className: "৭ম শ্রেণি", classNumeric: 7, attendanceRate: 88.6, quizAccuracy: 81.2, completedLessons: 28 },
-      { className: "৮ম শ্রেণি", classNumeric: 8, attendanceRate: 94.1, quizAccuracy: 84.0, completedLessons: 32 },
-      { className: "৯ম শ্রেণি", classNumeric: 9, attendanceRate: 91.8, quizAccuracy: 87.5, completedLessons: 46 },
-      { className: "১০ম শ্রেণি", classNumeric: 10, attendanceRate: 89.2, quizAccuracy: 89.4, completedLessons: 52 },
-      { className: "১১শ শ্রেণি", classNumeric: 11, attendanceRate: 95.0, quizAccuracy: 91.0, completedLessons: 38 },
-      { className: "১২শ শ্রেণি", classNumeric: 12, attendanceRate: 93.6, quizAccuracy: 92.5, completedLessons: 34 },
-    ];
+    // G. Real Class-wise Performance Trend computed from live records (zero static constants)
+    const classPerformanceTrend = classDistribution.map((c: any) => {
+      const clsNum = Number(c.numericValue) || 0;
+      const clsAttRecords = recentAttendanceRecords.filter((r: any) => {
+        const rNum = Number(r.class?.numericValue ?? r.numericClass ?? r.classId ?? 0);
+        return rNum === clsNum || rNum + 5 === clsNum;
+      });
+      const clsAttSummary =
+        clsAttRecords.length > 0 && c.students > 0
+          ? calculateDeduplicatedAttendanceSummary(clsAttRecords, c.students)
+          : { percentage: 0 };
+      const clsQuizScores = filteredQuizResults
+        .filter((qr: any) => String(qr.className || "").includes(String(clsNum)))
+        .map((qr: any) => Number(qr.percentage || qr.score || 0))
+        .filter((v: number) => v > 0);
+      const clsAvgQuiz =
+        clsQuizScores.length > 0
+          ? Number((clsQuizScores.reduce((a: number, b: number) => a + b, 0) / clsQuizScores.length).toFixed(1))
+          : 0;
+      const clsLessons = (hybridStore.courses || [])
+        .filter((crs: any) => String(crs.className || crs.classId || "").includes(String(clsNum)))
+        .reduce((sum: number, crs: any) => sum + (Number(crs.lessonsCount) || 0), 0);
 
-    // H. 4 Actionable AI Smart Institutional Insights
+      return {
+        className: c.nameBangla || c.name,
+        classNumeric: clsNum,
+        attendanceRate: clsAttSummary.percentage || 0,
+        quizAccuracy: clsAvgQuiz,
+        completedLessons: clsLessons,
+      };
+    });
+
+    // H. Real Data-Driven Institutional Insights
+    const weakTopicsList = (hybridStore.analytics?.weakTopics || []).filter(matchesFilterEntity);
+    const atRiskList = (hybridStore.analytics?.atRiskStudents || []).filter(matchesFilterEntity);
     const aiInsights = [
       {
         id: "insight-att",
-        type: "success",
+        type: todayAttendance.percentage >= 80 ? "success" : "warning",
         title: "উপস্থিতি পর্যবেক্ষণ",
-        message: `কম্পিউটার ও আইওটি বিভাগের আজকের হাজিরা ৯৪.২% — এ সপ্তাহের সকল ট্রেডের মধ্যে সর্বোচ্চ!`,
-        severity: "low",
-        badge: "চমৎকার অগ্রগতি",
+        message: todayAttendance.hasRecordedToday
+          ? `আজকের উপস্থিতি হার ${todayAttendance.percentage}% (উপস্থিত: ${todayAttendance.present} জন, অনুপস্থিত: ${todayAttendance.absent} জন)।`
+          : `আজ (${todayStr}) এখন পর্যন্ত হাজিরা এন্ট্রি রেকর্ড করা হয়নি।`,
+        severity: todayAttendance.hasRecordedToday ? "low" : "medium",
+        badge: todayAttendance.hasRecordedToday ? "হাজিরা আপডেটেড" : "অপেক্ষমাণ",
         actionLabel: "হাজিরা শিট",
         actionTab: "attendance",
       },
       {
         id: "insight-quiz",
-        type: "warning",
-        title: "রিমেডিয়াল কুইজ সুপারিশ",
-        message: `১০ম শ্রেণির 'ওহমের সূত্রের গাণিতিক প্রয়োগ' টপিকে ৩৮% শিক্ষার্থী ভুল উত্তর দিয়েছে। একটি রিমেডিয়াল কুইজ আয়োজন করা উচিত।`,
-        severity: "high",
-        badge: "দুর্বল বিষয় অ্যালার্ট",
+        type: weakTopicsList.length > 0 ? "warning" : "info",
+        title: "লাইভ কুইজ ও মূল্যায়ন",
+        message:
+          weakTopicsList.length > 0
+            ? `শনাক্তকৃত ${weakTopicsList.length}টি দুর্বল টপিকে রিমেডিয়াল কুইজ আয়োজনের পরামর্শ দেওয়া হলো।`
+            : `বর্তমানে ${filteredQuizzes.length}টি কুইজ এবং ${effectiveActiveLiveSessions}টি লাইভ সেশন সক্রিয় রয়েছে।`,
+        severity: weakTopicsList.length > 0 ? "high" : "low",
+        badge: weakTopicsList.length > 0 ? "রিমেডিয়াল" : "মূল্যায়ন",
         actionLabel: "লাইভ কুইজ খুলুন",
-        actionTab: "live-quizzes",
+        actionTab: "quiz_admin",
       },
       {
         id: "insight-fees",
         type: "info",
         title: "ফি কালেকশন স্ট্যাটাস",
-        message: `${academicYearParam} শিক্ষাবর্ষের মোট আদায় হার ${feeCollectionRate}%। অবশিষ্ট বকেয়া ৳${feeDue.toLocaleString("bn-BD")} দ্রুত আদায়ের জন্য নোটিশ প্রেরণ করুন।`,
-        severity: "medium",
+        message: `${academicYearParam} শিক্ষাবর্ষের আদায় হার ${feeCollectionRate}% (মোট বকেয়া ৳${feeDue.toLocaleString("bn-BD")})।`,
+        severity: feeDue > 0 ? "medium" : "low",
         badge: "হিসাব বিভাগ",
         actionLabel: "ফি কালেকশন",
         actionTab: "fee_collection",
-      },
-      {
-        id: "insight-doubts",
-        type: "pending",
-        title: "শিক্ষার্থী জিজ্ঞাসা (Doubt)",
-        message: `শিক্ষার্থীদের পাঠানো ৩টি গুরুত্বপূর্ণ প্রশ্ন সংশ্লিষ্ট শিক্ষকদের উত্তরের অপেক্ষায় পেন্ডিং রয়েছে।`,
-        severity: "medium",
-        badge: "শিক্ষার্থী সহায়তা",
-        actionLabel: "প্রশ্নাবলী দেখুন",
-        actionTab: "student_doubts",
       },
     ];
 
@@ -712,10 +825,10 @@ export async function GET(req: NextRequest) {
           totalNotices,
         },
         learningStreak: {
-          currentStreakDays: 5,
-          totalPoints: 1240,
-          completedLessons: 18,
-          rank: 4,
+          currentStreakDays: todayQuizAttempts > 0 ? 1 : 0,
+          totalPoints: totalStarsAwarded * 10,
+          completedLessons: recentProgressAttempts.filter((p: any) => p.completedAt).length,
+          rank: top5Leaderboard.length > 0 ? 1 : 0,
         },
         top5Leaderboard,
         recentNotices: recentNoticesPrisma.slice(0, 5),
@@ -849,28 +962,31 @@ export async function GET(req: NextRequest) {
       moduleKpi: {
         students: {
           total: totalStudents,
-          attendanceRate: todayAttendance.percentage || 91.4,
-          present: todayAttendance.present || 765,
-          absent: todayAttendance.absent || 72,
+          attendanceRate: todayAttendance.percentage,
+          present: todayAttendance.present,
+          absent: todayAttendance.absent,
         },
         learning: {
-          courses: hybridStore.courses.length,
-          chapters: hybridStore.chapters.length,
-          lessonsCompleted: 42,
+          courses: effectiveCoursesCount,
+          chapters: effectiveChaptersCount,
+          lessonsCompleted: publishedLessons,
         },
         analytics: {
-          weakTopicsCount: (hybridStore.analytics?.weakTopics || []).length,
-          atRiskCount: (hybridStore.analytics?.atRiskStudents || []).length,
-          avgAccuracy: 78.5,
+          weakTopicsCount: weakTopicsList.length,
+          atRiskCount: atRiskList.length,
+          avgAccuracy: averageQuizAccuracy,
         },
         presentations: {
-          totalDecks: hybridStore.presentations.length,
-          recentDecks: hybridStore.presentations.slice(0, 3),
+          totalDecks: effectivePresentationsCount,
+          recentDecks: filteredPresentations.slice(0, 3),
         },
         quizzes: {
-          totalQuizzes: hybridStore.quizzes.length,
-          activeRooms: Object.keys(hybridStore.liveSessions || {}).length,
-          recentAttempts: 124,
+          totalQuizzes: effectiveQuizzesCount,
+          activeRooms: effectiveActiveLiveSessions,
+          recentAttempts: filteredQuizResults.length,
+        },
+        labs: {
+          total: labsCount,
         },
         storage: {
           mode: activeStorageMode,
@@ -881,7 +997,8 @@ export async function GET(req: NextRequest) {
       coreErp: {
         totalStudents,
         totalFaculty,
-        activeStaff: 12,
+        totalLabs: labsCount,
+        activeStaff: totalFaculty,
         todayAttendance,
         feeSummary: {
           billed: feeBilled,
@@ -930,7 +1047,7 @@ export async function GET(req: NextRequest) {
         presentStudentsCount: todayAttendance.present,
         absentStudentsCount: todayAttendance.absent,
         hasRecordedToday: todayAttendance.hasRecordedToday,
-        activeExamsCount: 2,
+        activeExamsCount: (hybridStore.exams || []).length,
         activeLiveQuizzesCount: activeLiveQuizzesCountTotal,
         totalNotices,
         serverStatus: "Operational",

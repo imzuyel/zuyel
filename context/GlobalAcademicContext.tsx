@@ -24,6 +24,7 @@ export interface GlobalAcademicContextType extends GlobalAcademicState {
   activeClass: AcademicClass;
   activeTrade: AcademicTrade | null;
   isTradeApplicable: boolean;
+  isDepartmentApplicable: boolean;
   availableClasses: AcademicClass[];
   availableTrades: AcademicTrade[];
   availableSections: string[];
@@ -88,7 +89,11 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
     };
     if (typeof window !== "undefined") {
       window.addEventListener("ptsc_academic_master_updated", onMasterUpdated);
-      return () => window.removeEventListener("ptsc_academic_master_updated", onMasterUpdated);
+      window.addEventListener("pts-academic-mapping-updated", onMasterUpdated);
+      return () => {
+        window.removeEventListener("ptsc_academic_master_updated", onMasterUpdated);
+        window.removeEventListener("pts-academic-mapping-updated", onMasterUpdated);
+      };
     }
   }, [refreshMasterData]);
 
@@ -270,6 +275,7 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
       activeClass,
       activeTrade,
       isTradeApplicable,
+      isDepartmentApplicable: isTradeApplicable,
       availableClasses: masterClasses,
       availableTrades,
       availableSections,
@@ -285,6 +291,7 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
     }),
     [
       state,
+      masterClasses,
       activeClass,
       activeTrade,
       isTradeApplicable,

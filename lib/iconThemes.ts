@@ -190,63 +190,6 @@ const MODULE_COLOR_MAP: Record<string, {
     },
   },
 
-  mobile_attendance: {
-    rainbow: {
-      bgGradient: "bg-gradient-to-tr from-blue-500 to-cyan-500",
-      borderColor: "border-blue-400/40",
-      iconColor: "text-white",
-      glowShadow: "group-hover:shadow-[0_0_18px_rgba(59,130,246,0.55)]",
-      animClass: "group-hover:scale-125 group-hover:-translate-y-1 transition-all duration-300",
-      activeBg: "bg-blue-500",
-      badgeClass: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-    },
-    cyber_neon: {
-      bgGradient: "bg-gradient-to-tr from-cyan-400 to-teal-500",
-      borderColor: "border-cyan-400/50",
-      iconColor: "text-slate-950",
-      glowShadow: "group-hover:shadow-[0_0_20px_rgba(6,182,212,0.7)]",
-      animClass: "group-hover:scale-125 transition-transform",
-      activeBg: "bg-cyan-400",
-      badgeClass: "bg-cyan-500/20 text-cyan-300 border-cyan-500/40",
-    },
-    golden_luxury: {
-      bgGradient: "bg-gradient-to-tr from-yellow-600 to-amber-500",
-      borderColor: "border-yellow-500/40",
-      iconColor: "text-white",
-      glowShadow: "group-hover:shadow-[0_0_18px_rgba(234,179,8,0.6)]",
-      animClass: "group-hover:scale-120 transition-transform",
-      activeBg: "bg-yellow-600",
-      badgeClass: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
-    },
-    emerald_matrix: {
-      bgGradient: "bg-gradient-to-tr from-teal-400 to-cyan-600",
-      borderColor: "border-teal-300/40",
-      iconColor: "text-white",
-      glowShadow: "group-hover:shadow-[0_0_18px_rgba(45,212,191,0.6)]",
-      animClass: "group-hover:scale-125 transition-transform",
-      activeBg: "bg-teal-500",
-      badgeClass: "bg-teal-500/20 text-teal-300 border-teal-500/30",
-    },
-    sunset_aurora: {
-      bgGradient: "bg-gradient-to-tr from-pink-500 to-rose-600",
-      borderColor: "border-pink-400/40",
-      iconColor: "text-white",
-      glowShadow: "group-hover:shadow-[0_0_18px_rgba(236,72,153,0.6)]",
-      animClass: "group-hover:scale-125 transition-transform",
-      activeBg: "bg-pink-500",
-      badgeClass: "bg-pink-500/20 text-pink-300 border-pink-500/30",
-    },
-    electric_violet: {
-      bgGradient: "bg-gradient-to-tr from-blue-600 to-violet-600",
-      borderColor: "border-blue-400/40",
-      iconColor: "text-white",
-      glowShadow: "group-hover:shadow-[0_0_18px_rgba(37,99,235,0.6)]",
-      animClass: "group-hover:scale-125 transition-transform",
-      activeBg: "bg-blue-600",
-      badgeClass: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-    },
-  },
-
   teacher_workload: {
     rainbow: {
       bgGradient: "bg-gradient-to-tr from-purple-600 to-fuchsia-600",

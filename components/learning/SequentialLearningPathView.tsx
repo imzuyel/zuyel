@@ -752,7 +752,7 @@ export default function SequentialLearningPathView() {
     }
   };
 
-  const { isAuthReady, isLoggedIn, currentUser } = useAuth();
+  const { isAuthReady, isLoggedIn, currentUser, user } = useAuth();
 
   // Prevent hydration flicker before auth restoration completes
   if (!isAuthReady) {
@@ -766,11 +766,14 @@ export default function SequentialLearningPathView() {
     );
   }
 
-  // Strict Login Guard: Do not mount protected learning roadmap if not authenticated
-  const isAuthStudent = (isLoggedIn && currentUser?.role === "student") || activeStudent !== null;
+  // Strict Login Guard: Do not mount protected learning roadmap until isAuthReady === true AND user !== null
+  const isAuthStudent =
+    isAuthReady &&
+    user !== null &&
+    ((isLoggedIn && currentUser?.role === "student") || activeStudent !== null);
   if (!isAuthStudent) {
     return (
-      <div className="min-h-[75vh] flex items-center justify-center p-4">
+      <div className="min-h-[85vh] w-full bg-[#0F172A] rounded-3xl flex items-center justify-center p-4">
         <LmsStrictLoginGuard
           onSuccessLogin={(acc) => setActiveStudent(acc)}
           title="অধ্যায়ভিত্তিক ডুওলিঙ্গো লার্নিং পাথওয়ে"

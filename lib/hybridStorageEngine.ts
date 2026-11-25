@@ -130,6 +130,63 @@ export interface HybridAttendanceSummary {
   }>;
 }
 
+export interface HybridMistakeEntry {
+  id: string;
+  studentKey: string;
+  studentId?: string;
+  studentRoll: string;
+  studentName: string;
+  className: string;
+  trade: string;
+  sourceType: "CHAPTER_QUIZ" | "LIVE_QUIZ";
+  sourceId: string;
+  sourceTitle?: string;
+  topic?: string;
+  subject?: string;
+  questionId: string;
+  questionText: string;
+  options: string[];
+  studentAnswer: string;
+  correctAnswer: string;
+  explanation: string;
+  wrongCount: number;
+  lastAttemptedAt: string;
+  createdAt: string;
+}
+
+export interface HybridStudentDoubtReply {
+  id: string;
+  sender: "student" | "teacher";
+  senderName: string;
+  text: string;
+  timestamp: string;
+}
+
+export interface HybridStudentDoubt {
+  id: string;
+  lessonId: string;
+  lessonTitle: string;
+  chapterId?: string;
+  courseId?: string;
+  studentId?: string;
+  studentName: string;
+  studentRoll: string;
+  className?: string;
+  tradeClass: string;
+  question: string;
+  status: "pending" | "answered";
+  answer?: string;
+  teacherName?: string;
+  teacherReply?: string;
+  contextType?: "lesson" | "chapter" | "quiz_question";
+  contextTitle?: string;
+  questionNumber?: string;
+  replies: HybridStudentDoubtReply[];
+  createdAt: string;
+  answeredAt?: string;
+  updatedAt?: string;
+}
+
 export interface HybridStoreCollections {
   students: HybridStudent[];
   courses: HybridCourse[];
@@ -143,6 +200,8 @@ export interface HybridStoreCollections {
   quizResults: any[];
   learningCourses?: any[];
   learningProgress?: Record<string, any[]>;
+  mistakeBank?: HybridMistakeEntry[];
+  studentDoubts?: HybridStudentDoubt[];
   unresolvedQuizEntries?: any[];
   resolvedEntityMappings?: Record<string, string>;
   analytics: {
@@ -960,6 +1019,8 @@ export function ensureStoreIntegrity(store: HybridStoreCollections): HybridStore
   if (!store.fees || store.fees.length === 0) store.fees = PTSC_INITIAL_FEE_INVOICES;
   if (!store.inventory || store.inventory.length === 0) store.inventory = PTSC_INITIAL_LAB_EQUIPMENT;
   if (!store.aiSettings) store.aiSettings = null;
+  if (!Array.isArray(store.mistakeBank)) store.mistakeBank = [];
+  if (!Array.isArray(store.studentDoubts)) store.studentDoubts = [];
   return store;
 }
 
@@ -1504,7 +1565,7 @@ export function upsertHybridPresentation(pres: Partial<HybridPresentation> & { t
       trade: pres.trade || "Computer & IT",
       subject: pres.subject || "সাধারণ পাঠ্যক্রম",
       slideCount: pres.slides ? pres.slides.length : (pres.slideCount || 5),
-      theme: pres.theme || "cyberpunk_neon",
+      theme: pres.theme || "twilight_indigo",
       slides: pres.slides || [],
       updatedAt: now,
       author: pres.author || "ইনস্ট্রাক্টর (PTSC)",
@@ -2388,4 +2449,376 @@ export function restoreFromBackup(backupJsonString: string): boolean {
     return false;
   }
 }
+
+export function getHybridSubjectMasters(): any[] {
+  const store = getHybridStore() as any;
+  return Array.isArray(store.subjectMasters) ? store.subjectMasters : [];
+}
+
+export function saveHybridSubjectMasters(masters: any[]): void {
+  const store = getHybridStore() as any;
+  store.subjectMasters = masters;
+  saveHybridStore(store);
+}
+
+export function getHybridSubjectMappings(year?: string): any[] {
+  const store = getHybridStore() as any;
+  const list = Array.isArray(store.subjectMappings) ? store.subjectMappings : [];
+  return year ? list.filter((m: any) => m.academicYear === year) : list;
+}
+
+export function saveHybridSubjectMappings(mappings: any[]): void {
+  const store = getHybridStore() as any;
+  store.subjectMappings = mappings;
+  saveHybridStore(store);
+}
+
+export function saveHybridAcademicYears(years: any[]): void {
+  const store = getHybridStore();
+  store.academicYears = years;
+  saveHybridStore(store);
+}
+
+// ---------------------------------------------------------------------------
+// Student Mistake Bank ("আমার ভুলগুলো") Helpers + MySQL Background Sync
+// ---------------------------------------------------------------------------
+export function getHybridMistakeBank(filter?: {
+  studentKey?: string;
+  studentRoll?: string;
+  className?: string;
+}): HybridMistakeEntry[] {
+  const store = getHybridStore();
+  const list = Array.isArray(store.mistakeBank) ? store.mistakeBank : [];
+  if (!filter) return list;
+
+  return list.filter((m) => {
+    if (filter.studentKey && m.studentKey === filter.studentKey) return true;
+    if (filter.studentRoll) {
+      const rollMatch = String(m.studentRoll).trim() === String(filter.studentRoll).trim();
+      if (!rollMatch) return false;
+      if (filter.className) {
+        const clsA = m.className.toLowerCase().replace(/class\s*/i, "").trim();
+        const clsB = filter.className.toLowerCase().replace(/class\s*/i, "").trim();
+        return !clsB || !clsA || clsA.includes(clsB) || clsB.includes(clsA);
+      }
+      return true;
+    }
+    return !filter.studentKey && !filter.studentRoll;
+  });
+}
+
+export function recordHybridMistake(entry: {
+  studentKey: string;
+  studentId?: string;
+  studentRoll: string;
+  studentName: string;
+  className: string;
+  trade: string;
+  sourceType: "CHAPTER_QUIZ" | "LIVE_QUIZ";
+  sourceId: string | number;
+  sourceTitle?: string;
+  topic?: string;
+  subject?: string;
+  questionId: string;
+  questionText: string;
+  options?: string[];
+  studentAnswer: string;
+  correctAnswer: string;
+  explanation?: string;
+}): HybridMistakeEntry {
+  const store = getHybridStore();
+  if (!Array.isArray(store.mistakeBank)) store.mistakeBank = [];
+  const now = new Date().toISOString();
+
+  const existingIdx = store.mistakeBank.findIndex(
+    (m) =>
+      (m.studentKey === entry.studentKey ||
+        String(m.studentRoll) === String(entry.studentRoll)) &&
+      (m.questionId === String(entry.questionId) ||
+        m.questionText.trim() === entry.questionText.trim())
+  );
+
+  if (existingIdx !== -1) {
+    const existing = store.mistakeBank[existingIdx];
+    const updated: HybridMistakeEntry = {
+      ...existing,
+      studentKey: entry.studentKey || existing.studentKey,
+      studentId: entry.studentId || existing.studentId,
+      studentName: entry.studentName || existing.studentName,
+      className: entry.className || existing.className,
+      trade: entry.trade || existing.trade,
+      studentAnswer: entry.studentAnswer,
+      correctAnswer: entry.correctAnswer || existing.correctAnswer,
+      explanation: entry.explanation || existing.explanation,
+      wrongCount: (existing.wrongCount || 1) + 1,
+      lastAttemptedAt: now,
+    };
+    store.mistakeBank[existingIdx] = updated;
+    saveHybridStore(store);
+    return updated;
+  }
+
+  const created: HybridMistakeEntry = {
+    id: `mst_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    studentKey: entry.studentKey,
+    studentId: entry.studentId,
+    studentRoll: String(entry.studentRoll),
+    studentName: entry.studentName || `শিক্ষার্থী (রোল ${entry.studentRoll})`,
+    className: entry.className || "Class 9",
+    trade: entry.trade || "General",
+    sourceType: entry.sourceType,
+    sourceId: String(entry.sourceId),
+    sourceTitle: entry.sourceTitle,
+    topic: entry.topic,
+    subject: entry.subject,
+    questionId: String(entry.questionId),
+    questionText: entry.questionText,
+    options: Array.isArray(entry.options) ? entry.options : [],
+    studentAnswer: entry.studentAnswer || "উত্তর দেওয়া হয়নি",
+    correctAnswer: entry.correctAnswer || "সঠিক উত্তর",
+    explanation: entry.explanation || "পাঠ্যবইয়ের মূল ধারণাটি পুনরায় অনুশীলন করুন।",
+    wrongCount: 1,
+    lastAttemptedAt: now,
+    createdAt: now,
+  };
+
+  store.mistakeBank.unshift(created);
+  saveHybridStore(store);
+  return created;
+}
+
+export function resolveHybridMistake(mistakeId: string): boolean {
+  const store = getHybridStore();
+  if (!Array.isArray(store.mistakeBank)) return false;
+  const before = store.mistakeBank.length;
+  store.mistakeBank = store.mistakeBank.filter((m) => m.id !== mistakeId);
+  if (store.mistakeBank.length !== before) {
+    saveHybridStore(store);
+    return true;
+  }
+  return false;
+}
+
+export async function syncMistakeBankWithMySQL(): Promise<void> {
+  if (!isPrismaAvailable() || !prisma) return;
+  try {
+    const store = getHybridStore();
+    const list = Array.isArray(store.mistakeBank) ? store.mistakeBank : [];
+    await prisma.dynamicMetadataStore.upsert({
+      where: { key: "pgtsc_mistake_bank" },
+      update: {
+        valueJson: JSON.stringify(list),
+        category: "learning_mistakes",
+      },
+      create: {
+        key: "pgtsc_mistake_bank",
+        valueJson: JSON.stringify(list),
+        category: "learning_mistakes",
+      },
+    });
+  } catch {
+    markPrismaFailure();
+  }
+}
+
+export async function hydrateMistakeBankFromMySQL(): Promise<void> {
+  if (!isPrismaAvailable() || !prisma) return;
+  try {
+    const row = await prisma.dynamicMetadataStore.findUnique({
+      where: { key: "pgtsc_mistake_bank" },
+    });
+    if (row?.valueJson) {
+      const parsed = JSON.parse(row.valueJson);
+      if (Array.isArray(parsed)) {
+        const store = getHybridStore();
+        const existingMap = new Map((store.mistakeBank || []).map((m) => [m.id, m]));
+        for (const item of parsed) {
+          if (item?.id && !existingMap.has(item.id)) {
+            existingMap.set(item.id, item);
+          }
+        }
+        store.mistakeBank = Array.from(existingMap.values());
+        saveHybridStore(store);
+      }
+    }
+  } catch {
+    markPrismaFailure();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Student Doubts ("শিক্ষকের কাছে প্রশ্ন/ডাউট") Helpers + MySQL Sync
+// ---------------------------------------------------------------------------
+export function getHybridDoubts(filters?: {
+  lessonId?: string;
+  chapterId?: string | number;
+  tradeClass?: string;
+  status?: "pending" | "answered" | "all";
+}): HybridStudentDoubt[] {
+  const store = getHybridStore();
+  const list = Array.isArray(store.studentDoubts) ? store.studentDoubts : [];
+  if (!filters) return list;
+
+  return list.filter((d) => {
+    if (filters.lessonId && String(d.lessonId) !== String(filters.lessonId)) {
+      if (!filters.chapterId || String(d.chapterId) !== String(filters.chapterId)) {
+        return false;
+      }
+    } else if (filters.chapterId && String(d.chapterId) !== String(filters.chapterId)) {
+      return false;
+    }
+    if (filters.status && filters.status !== "all" && d.status !== filters.status) return false;
+    if (filters.tradeClass && filters.tradeClass !== "all" && !d.tradeClass.includes(filters.tradeClass)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+export function saveHybridDoubt(
+  doubt: Omit<HybridStudentDoubt, "id" | "status" | "createdAt" | "replies">
+): HybridStudentDoubt {
+  const store = getHybridStore();
+  if (!Array.isArray(store.studentDoubts)) store.studentDoubts = [];
+  const now = new Date().toISOString();
+  const created: HybridStudentDoubt = {
+    ...doubt,
+    id: `doubt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    status: "pending",
+    replies: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.studentDoubts.unshift(created);
+  saveHybridStore(store);
+  return created;
+}
+
+export function answerHybridDoubt(
+  doubtId: string,
+  answer: string,
+  teacherName = "বিষয় শিক্ষক (PTSC)"
+): HybridStudentDoubt | null {
+  const store = getHybridStore();
+  if (!Array.isArray(store.studentDoubts)) return null;
+  const idx = store.studentDoubts.findIndex((d) => d.id === doubtId);
+  if (idx === -1) return null;
+
+  const now = new Date().toISOString();
+  const existing = store.studentDoubts[idx];
+  const updated: HybridStudentDoubt = {
+    ...existing,
+    status: "answered",
+    answer,
+    teacherReply: answer,
+    teacherName,
+    answeredAt: now,
+    updatedAt: now,
+    replies: [
+      ...(existing.replies || []),
+      {
+        id: `rep_${Date.now()}`,
+        sender: "teacher",
+        senderName: teacherName,
+        text: answer,
+        timestamp: "এইমাত্র",
+      },
+    ],
+  };
+  store.studentDoubts[idx] = updated;
+  saveHybridStore(store);
+  return updated;
+}
+
+export function addHybridDoubtReply(
+  doubtId: string,
+  reply: { sender: "student" | "teacher"; senderName: string; text: string }
+): HybridStudentDoubt | null {
+  const store = getHybridStore();
+  if (!Array.isArray(store.studentDoubts)) return null;
+  const idx = store.studentDoubts.findIndex((d) => d.id === doubtId);
+  if (idx === -1) return null;
+
+  const existing = store.studentDoubts[idx];
+  const now = new Date().toISOString();
+  const updated: HybridStudentDoubt = {
+    ...existing,
+    status: reply.sender === "teacher" ? "answered" : existing.status,
+    teacherReply: reply.sender === "teacher" ? reply.text : existing.teacherReply,
+    updatedAt: now,
+    replies: [
+      ...(existing.replies || []),
+      {
+        id: `rep_${Date.now()}`,
+        sender: reply.sender,
+        senderName: reply.senderName,
+        text: reply.text,
+        timestamp: "এইমাত্র",
+      },
+    ],
+  };
+  store.studentDoubts[idx] = updated;
+  saveHybridStore(store);
+  return updated;
+}
+
+export function deleteHybridDoubt(doubtId: string): boolean {
+  const store = getHybridStore();
+  if (!Array.isArray(store.studentDoubts)) return false;
+  const before = store.studentDoubts.length;
+  store.studentDoubts = store.studentDoubts.filter((d) => d.id !== doubtId);
+  if (store.studentDoubts.length !== before) {
+    saveHybridStore(store);
+    return true;
+  }
+  return false;
+}
+
+export async function syncDoubtsWithMySQL(): Promise<void> {
+  if (!isPrismaAvailable() || !prisma) return;
+  try {
+    const store = getHybridStore();
+    const list = Array.isArray(store.studentDoubts) ? store.studentDoubts : [];
+    await prisma.dynamicMetadataStore.upsert({
+      where: { key: "pgtsc_student_doubts" },
+      update: {
+        valueJson: JSON.stringify(list),
+        category: "learning_doubts",
+      },
+      create: {
+        key: "pgtsc_student_doubts",
+        valueJson: JSON.stringify(list),
+        category: "learning_doubts",
+      },
+    });
+  } catch {
+    markPrismaFailure();
+  }
+}
+
+export async function hydrateDoubtsFromMySQL(): Promise<void> {
+  if (!isPrismaAvailable() || !prisma) return;
+  try {
+    const row = await prisma.dynamicMetadataStore.findUnique({
+      where: { key: "pgtsc_student_doubts" },
+    });
+    if (row?.valueJson) {
+      const parsed = JSON.parse(row.valueJson);
+      if (Array.isArray(parsed)) {
+        const store = getHybridStore();
+        const existingMap = new Map((store.studentDoubts || []).map((d) => [d.id, d]));
+        for (const item of parsed) {
+          if (item?.id && !existingMap.has(item.id)) {
+            existingMap.set(item.id, item);
+          }
+        }
+        store.studentDoubts = Array.from(existingMap.values());
+        saveHybridStore(store);
+      }
+    }
+  } catch {
+    markPrismaFailure();
+  }
+}
+
 

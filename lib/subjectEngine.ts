@@ -13,6 +13,12 @@ import {
   parseClassNumeric,
 } from "./academicStructure";
 import { institutionalDb, FacultyMember, RoutineItem } from "./database";
+import {
+  getHybridSubjectMasters,
+  saveHybridSubjectMasters,
+  getHybridSubjectMappings,
+  saveHybridSubjectMappings,
+} from "./hybridStorageEngine";
 
 // ==========================================
 // 1. TYPES & INTERFACES
@@ -1219,11 +1225,45 @@ export function validateSubjectEligibility(context: {
 // 4. SUBJECT MASTER OPERATIONS
 // ==========================================
 
+export function hydrateSubjectEngineFromHybrid(): void {
+  try {
+    const g = globalThis as { __pgtscSubjectEngineHydrated?: boolean };
+    if (g.__pgtscSubjectEngineHydrated) return;
+    g.__pgtscSubjectEngineHydrated = true;
+
+    const hMasters = getHybridSubjectMasters();
+    if (Array.isArray(hMasters) && hMasters.length > 0) {
+      subjectMastersStore = hMasters;
+    }
+
+    const hMappings = getHybridSubjectMappings();
+    if (Array.isArray(hMappings) && hMappings.length > 0) {
+      subjectMappingsStore = hMappings.map((m: any) =>
+        parseClassNumeric(m.numericClass || m.classId) <= 8
+          ? { ...m, tradeId: undefined, tradeCode: undefined, tradeName: undefined }
+          : m
+      );
+    }
+  } catch {
+    // Safe fallback to in-memory seed
+  }
+}
+
+export function persistSubjectEngineToHybrid(): void {
+  try {
+    saveHybridSubjectMasters(subjectMastersStore);
+    saveHybridSubjectMappings(subjectMappingsStore);
+  } catch {
+    // ignore background persistence failure
+  }
+}
+
 export function getSubjectMasters(query?: {
   search?: string;
   status?: string;
   type?: string;
 }): SubjectMaster[] {
+  hydrateSubjectEngineFromHybrid();
   let list = [...subjectMastersStore];
 
   if (query?.status && query.status !== "all") {
@@ -1281,6 +1321,7 @@ export function createSubjectMaster(
   };
 
   subjectMastersStore.push(newSubject);
+  persistSubjectEngineToHybrid();
 
   logSubjectAudit({
     user,
@@ -1351,6 +1392,7 @@ export function updateSubjectMaster(
     newValue: updatedSubject,
   });
 
+  persistSubjectEngineToHybrid();
   return { success: true, subject: updatedSubject };
 }
 
@@ -1378,6 +1420,7 @@ export function deleteSubjectMaster(
   subject.status = "Archived";
   subject.updatedAt = new Date().toISOString();
   subject.updatedBy = user;
+  persistSubjectEngineToHybrid();
 
   logSubjectAudit({
     user,
@@ -1404,6 +1447,7 @@ export function getSubjectMappings(query: number | string | {
   section?: string;
   status?: string;
 }): AcademicSubjectMapping[] {
+  hydrateSubjectEngineFromHybrid();
   const queryObj = typeof query === "object" && query !== null ? query : { classId: query };
   let list = [...subjectMappingsStore];
 
@@ -1436,22 +1480,30 @@ export function saveSubjectMapping(
   mapping: Omit<AcademicSubjectMapping, "id" | "createdAt" | "updatedAt">,
   user: string = "Admin"
 ): { success: boolean; mapping?: AcademicSubjectMapping; error?: string } {
+  hydrateSubjectEngineFromHybrid();
+  const rawNum = parseClassNumeric(mapping.numericClass || mapping.classId);
+  // Strict Rule: Class 6-8 never belong to a trade/department
+  const normalizedMapping =
+    rawNum > 0 && rawNum <= 8
+      ? { ...mapping, tradeId: undefined, tradeCode: undefined, tradeName: undefined }
+      : mapping;
+
   // Validate Class & Trade rules
   const valResult = validateSubjectEligibility({
-    academicYear: mapping.academicYear,
-    classId: mapping.classId,
-    tradeId: mapping.tradeId,
-    subjectId: mapping.subjectId,
+    academicYear: normalizedMapping.academicYear,
+    classId: normalizedMapping.classId,
+    tradeId: normalizedMapping.tradeId,
+    subjectId: normalizedMapping.subjectId,
   });
 
   if (!valResult.valid) {
     return { success: false, error: valResult.errors.join(" ") };
   }
 
-  const numericClass = parseClassNumeric(mapping.classId);
-  const tradePart = mapping.tradeId ? mapping.tradeId : 0;
-  const sectionPart = mapping.section || "all";
-  const mapId = `map_${mapping.academicYear}_${mapping.classId}_${tradePart}_${sectionPart}_${mapping.subjectId}`;
+  const numericClass = parseClassNumeric(normalizedMapping.classId);
+  const tradePart = normalizedMapping.tradeId ? normalizedMapping.tradeId : 0;
+  const sectionPart = normalizedMapping.section || "all";
+  const mapId = `map_${normalizedMapping.academicYear}_${normalizedMapping.classId}_${tradePart}_${sectionPart}_${normalizedMapping.subjectId}`;
 
   const existingIdx = subjectMappingsStore.findIndex((m) => m.id === mapId);
   const now = new Date().toISOString();
@@ -1462,7 +1514,7 @@ export function saveSubjectMapping(
     // Update existing mapping
     savedRecord = {
       ...subjectMappingsStore[existingIdx],
-      ...mapping,
+      ...normalizedMapping,
       numericClass,
       updatedAt: now,
     };
@@ -1473,12 +1525,12 @@ export function saveSubjectMapping(
       action: "Subject Mapping Updated",
       entityType: "subject_mapping",
       entityId: mapId,
-      details: `ম্যাপিং আপডেট: শিক্ষাবর্ষ ${mapping.academicYear} | শ্রেণি ${mapping.className} | বিষয় [${mapping.subjectCode}]`,
+      details: `ম্যাপিং আপডেট: শিক্ষাবর্ষ ${normalizedMapping.academicYear} | শ্রেণি ${normalizedMapping.className} | বিষয় [${normalizedMapping.subjectCode}]`,
     });
   } else {
     // Create new mapping
     savedRecord = {
-      ...mapping,
+      ...normalizedMapping,
       id: mapId,
       numericClass,
       createdAt: now,
@@ -1491,10 +1543,11 @@ export function saveSubjectMapping(
       action: "Subject Mapping Created",
       entityType: "subject_mapping",
       entityId: mapId,
-      details: `নতুন ম্যাপিং: শিক্ষাবর্ষ ${mapping.academicYear} | শ্রেণি ${mapping.className} | ট্রেড: ${mapping.tradeName || "N/A"} | বিষয়: [${mapping.subjectCode}] ${mapping.subjectName}`,
+      details: `নতুন ম্যাপিং: শিক্ষাবর্ষ ${normalizedMapping.academicYear} | শ্রেণি ${normalizedMapping.className} | ট্রেড: ${normalizedMapping.tradeName || "N/A"} | বিষয়: [${normalizedMapping.subjectCode}] ${normalizedMapping.subjectName}`,
     });
   }
 
+  persistSubjectEngineToHybrid();
   return { success: true, mapping: savedRecord };
 }
 
@@ -1502,6 +1555,7 @@ export function removeSubjectMapping(
   mapId: string,
   user: string = "Admin"
 ): { success: boolean; message: string; error?: string } {
+  hydrateSubjectEngineFromHybrid();
   const index = subjectMappingsStore.findIndex((m) => m.id === mapId);
   if (index === -1) {
     return { success: false, message: "ম্যাপিং রেকর্ড পাওয়া যায়নি", error: "Mapping not found" };
@@ -1527,6 +1581,7 @@ export function removeSubjectMapping(
   }
 
   subjectMappingsStore.splice(index, 1);
+  persistSubjectEngineToHybrid();
 
   logSubjectAudit({
     user,

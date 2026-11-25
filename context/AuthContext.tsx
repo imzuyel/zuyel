@@ -50,7 +50,7 @@ interface AuthContextType {
     name: string;
     role: string;
     avatar: string;
-  };
+  } | null;
   isLoggedIn: boolean;
   login: (role?: Role | string, customUser?: UserProfile) => void;
   logout: () => void;
@@ -136,9 +136,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const savedAuth = localStorage.getItem("pgtsc_is_logged_in");
       const savedRole = localStorage.getItem("pgtsc_user_role") as Role;
       const savedProfile = localStorage.getItem("pgtsc_user_profile");
+      const activeStudentRaw = localStorage.getItem("ptsc_active_student_session");
 
       if (savedAuth === "true") {
         setIsLoggedIn(true);
+      } else if (activeStudentRaw) {
+        try {
+          const parsedStudent = JSON.parse(activeStudentRaw);
+          if (parsedStudent && parsedStudent.isLoggedIn) {
+            setIsLoggedIn(true);
+            setActiveRole("student");
+            setCurrentUserProfile({
+              id: parseInt(parsedStudent.rollNumber, 10) || 101,
+              email: `student.${parsedStudent.rollNumber}@pgtsc.gov.bd`,
+              fullName: parsedStudent.studentName,
+              nameBangla: parsedStudent.studentName,
+              role: "student",
+              designation: `শিক্ষার্থী (${parsedStudent.classLevel})`,
+              mobile: "01700-000000",
+              avatarUrl:
+                "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80",
+              roll: parsedStudent.rollNumber,
+              trade: parsedStudent.trade,
+            });
+          } else {
+            setIsLoggedIn(false);
+          }
+        } catch {
+          setIsLoggedIn(false);
+        }
       } else {
         setIsLoggedIn(false);
       }
@@ -209,6 +235,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCurrentUserProfile(user);
     setActiveRole(targetRole);
     setIsLoggedIn(true);
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "auto";
+    }
     try {
       localStorage.setItem("pgtsc_is_logged_in", "true");
       localStorage.setItem("pgtsc_user_role", targetRole);
@@ -240,6 +269,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoggedIn(false);
     setCurrentUserProfile(null);
     setActiveRole("student");
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "auto";
+    }
     try {
       localStorage.removeItem("pgtsc_is_logged_in");
       localStorage.removeItem("pgtsc_user_profile");
@@ -516,11 +548,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         isAuthReady,
         currentUser,
-        user: {
-          name: currentUser.nameBangla || currentUser.fullName,
-          role: currentUser.designation,
-          avatar: currentUser.avatarUrl,
-        },
+        user: isLoggedIn
+          ? {
+              name: currentUser.nameBangla || currentUser.fullName,
+              role: currentUser.designation,
+              avatar: currentUser.avatarUrl,
+            }
+          : null,
         isLoggedIn,
         login,
         logout,

@@ -707,11 +707,57 @@ export default function UnifiedQuizMentimeterWorkspace({
       const qs = targetQuizId
         ? `?quizId=${encodeURIComponent(targetQuizId)}&includeHistory=1`
         : `?includeHistory=1`;
-      const res = await fetch(`/api/live-quizzes/sessions${qs}`);
+      const res = await fetch(`/api/live-v2/state${qs}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.success && Array.isArray(data.sessions)) {
-          setSessionHistory(data.sessions);
+        if (data.ok && Array.isArray(data.sessions)) {
+          const mapped = data.sessions.map((s: any) => {
+            const lb: any[] = Array.isArray(s.leaderboard) ? s.leaderboard : [];
+            const playersObj = s.players || {};
+            const slidesArr: any[] = Array.isArray(s.slides) ? s.slides : [];
+            const avgScore =
+              lb.length > 0
+                ? Math.round(lb.reduce((sum, p) => sum + (Number(p.score) || 0), 0) / lb.length)
+                : 0;
+            const studentDetails = lb.map((entry: any) => {
+              const rawP = playersObj[entry.playerId] || {};
+              const ansMap = rawP.answers || {};
+              const ansList = Object.values(ansMap).map((a: any) => ({
+                slideIndex: Number(a.slideIndex) || 0,
+                questionText:
+                  slidesArr[Number(a.slideIndex)]?.question ||
+                  `প্রশ্ন ${(Number(a.slideIndex) || 0) + 1}`,
+                isCorrect: Boolean(a.isCorrect),
+                points: Number(a.pointsEarned) || 0,
+                responseTimeMs: Number(a.responseTimeMs) || 0,
+              }));
+              return {
+                id: entry.playerId,
+                name: entry.name,
+                roll: entry.roll,
+                avatar: entry.avatar,
+                score: entry.score,
+                rank: entry.rank,
+                correctCount: entry.correctCount,
+                answeredCount: ansList.length,
+                answers: ansList,
+              };
+            });
+
+            return {
+              ...s,
+              title: s.quizTitle || s.title,
+              status: s.status === "LOBBY" ? "WAITING" : s.status,
+              questionsCompleted:
+                s.stage === "ENDED"
+                  ? s.totalQuestions || slidesArr.length || 1
+                  : Number(s.currentSlideIndex) || 0,
+              topScorer: lb[0] ? { name: lb[0].name, score: lb[0].score } : null,
+              avgScore,
+              studentDetails,
+            };
+          });
+          setSessionHistory(mapped);
         }
       }
     } catch {
@@ -724,6 +770,19 @@ export default function UnifiedQuizMentimeterWorkspace({
   useEffect(() => {
     fetchDecks();
     fetchSessionHistory();
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const prefillTopic = params.get("prefillTopic");
+      const prefillClass = params.get("className");
+      const prefillTrade = params.get("trade");
+      if (prefillTopic) {
+        setAiTopic(prefillTopic);
+        setShowAiModal(true);
+        if (prefillClass) setFilterClass(prefillClass);
+        if (prefillTrade) setFilterTrade(prefillTrade);
+        showToast(`রিমেডিয়াল কুইজ টপিক লোড হয়েছে: ${prefillTopic}`, "info");
+      }
+    }
   }, []);
 
   // Dismiss open Smart Resume modal with Esc
@@ -1391,31 +1450,43 @@ export default function UnifiedQuizMentimeterWorkspace({
     }
   };
 
-  // Resume an existing PAUSED session from its saved question (Task 4 & Task 5)
+  // Resume an existing PAUSED session from its saved question (Mentimeter multi-day resume on live-v2)
   const handleResumePausedSession = async (pausedSess: any, deckOverride?: DeckItem) => {
     if (!pausedSess?.id) return;
     setIsResumingOrStarting(true);
     try {
-      const res = await fetch(`/api/live-quizzes/sessions/${pausedSess.id}/resume`, {
+      const matchedDeck =
+        deckOverride ||
+        decks.find((d) => String(d.id) === String(pausedSess.quizId)) ||
+        currentDeck;
+
+      const res = await fetch("/api/live-v2/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          resumeSessionId: pausedSess.id,
+          quizId: pausedSess.quizId || matchedDeck.id,
+          quizTitle: pausedSess.title || pausedSess.quizTitle || matchedDeck.title,
+          slides: Array.isArray(pausedSess.slides) && pausedSess.slides.length > 0
+            ? pausedSess.slides
+            : matchedDeck.slides,
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success || !data.session) {
-        showToast(data?.message || "সেশন পুনরায় চালু করতে সমস্যা হয়েছে।", "error");
+      if (!res.ok || !data?.ok || !data.session) {
+        showToast(data?.error || "সেশন পুনরায় চালু করতে সমস্যা হয়েছে।", "error");
         return;
       }
 
       const resumed = data.session;
-      const matchedDeck =
-        deckOverride ||
-        decks.find((d) => String(d.id) === String(resumed.quizId || pausedSess.quizId)) ||
-        currentDeck;
-
       const resolvedSlides =
         Array.isArray(resumed.slides) && resumed.slides.length > 0
-          ? resumed.slides
+          ? resumed.slides.map((s: any) => ({
+              ...s,
+              title: s.question || s.title,
+              correctAnswer: s.correctIndex ?? s.correctAnswer ?? 0,
+              timeLimit: s.timeLimitSeconds || s.timeLimit || 25,
+            }))
           : matchedDeck.slides;
 
       setResumePromptData(null);
@@ -1424,12 +1495,12 @@ export default function UnifiedQuizMentimeterWorkspace({
         pin: resumed.code || pausedSess.code,
         deck: {
           ...matchedDeck,
-          title: resumed.title || matchedDeck.title,
+          title: resumed.quizTitle || resumed.title || matchedDeck.title,
           slides: resolvedSlides,
         },
-        scheduledStartTime: resumed.scheduledStartTime || deckSettings.scheduledStartTime,
+        scheduledStartTime: deckSettings.scheduledStartTime,
         initialSlideIndex: Number(resumed.currentSlideIndex) || 0,
-        initialStage: resumed.stage || "READY_CHECK",
+        initialStage: resumed.stage || "LOBBY",
         initialPlayers: Object.values(resumed.players || {}),
       });
       if (onLiveStateChange) onLiveStateChange(true);
@@ -1437,6 +1508,7 @@ export default function UnifiedQuizMentimeterWorkspace({
         `▶️ প্রশ্ন ${(Number(resumed.currentSlideIndex) || 0) + 1} থেকে সেশন পুনরায় চালু হয়েছে!`,
         "success"
       );
+      void fetchSessionHistory();
     } catch {
       showToast("সেশন পুনরায় চালু করতে সমস্যা হয়েছে।", "error");
     } finally {
@@ -1444,20 +1516,20 @@ export default function UnifiedQuizMentimeterWorkspace({
     }
   };
 
-  // Launch Fullscreen Live Presentation (Task 2 + Task 4 Smart Resume Prompt)
+  // Launch Fullscreen Live Presentation on clean live-v2 engine
   const handleLaunchLivePresentation = async (deckToLaunch: DeckItem, forceFresh = false) => {
     try {
       if (!forceFresh) {
         try {
           const checkRes = await fetch(
-            `/api/live-quizzes/sessions?quizId=${encodeURIComponent(deckToLaunch.id)}`
+            `/api/live-v2/state?quizId=${encodeURIComponent(deckToLaunch.id)}&includeHistory=1`
           );
           if (checkRes.ok) {
             const checkData = await checkRes.json().catch(() => null);
             const pausedSess =
               checkData?.pausedSession ||
               (Array.isArray(checkData?.sessions)
-                ? checkData.sessions.find((s: any) => s.status === "PAUSED")
+                ? checkData.sessions.find((s: any) => s.stage === "PAUSED" || s.status === "PAUSED")
                 : null);
 
             if (pausedSess) {
@@ -1490,8 +1562,8 @@ export default function UnifiedQuizMentimeterWorkspace({
             title: "প্রথম প্রশ্ন",
             options: ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
             correctAnswer: 0,
-            timeLimit: 20,
-            points: 100,
+            timeLimit: 25,
+            points: 1000,
           },
         ];
 
@@ -1501,50 +1573,41 @@ export default function UnifiedQuizMentimeterWorkspace({
         type: ((s.type || "MCQ") as string).toUpperCase() as SlideType,
         title: s.title || (s as any).question || `প্রশ্ন ${idx + 1}`,
         question: (s as any).question || s.title || `প্রশ্ন ${idx + 1}`,
-        questionText: (s as any).question || s.title || `প্রশ্ন ${idx + 1}`,
         options: Array.isArray(s.options) ? s.options : [],
+        correctIndex: typeof s.correctAnswer === "number" ? s.correctAnswer : 0,
         correctAnswer: s.correctAnswer !== undefined ? s.correctAnswer : 0,
-        timeLimit: Math.max(5, Number(s.timeLimit) || 20),
-        points: Math.max(10, Number(s.points) || 100),
-        pairs: s.pairs || (s as any).matchingPairs || [],
-        items: s.items || (s as any).reorderItems || [],
-        acceptedAnswers: s.acceptedAnswers || [],
-        imageLeftUrl: s.imageLeftUrl || "",
-        imageRightUrl: s.imageRightUrl || "",
+        timeLimit: Math.max(5, Number(s.timeLimit) || 25),
+        timeLimitSeconds: Math.max(5, Number(s.timeLimit) || 25),
+        points: Math.max(100, Number(s.points) || 1000),
         explanation: s.explanation || "",
       }));
 
-      const res = await fetch("/api/live-quizzes/sessions", {
+      const res = await fetch("/api/live-v2/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quizId: deckToLaunch.id,
-          title: deckToLaunch.title,
+          quizTitle: deckToLaunch.title,
           slides: normalizedSlides,
-          competitionMode: "individual",
-          settings: deckSettings,
-          scheduledStartTime: deckSettings.scheduledStartTime || undefined,
-          academicYearId: deckToLaunch.academicYearId || "2026",
-          classId: deckToLaunch.classId,
           className: deckToLaunch.className,
           trade: deckToLaunch.trade || deckToLaunch.tradeName,
-          tradeId: deckToLaunch.tradeId,
-          tradeName: deckToLaunch.trade || deckToLaunch.tradeName,
           subject: deckToLaunch.subjectName,
-          subjectId: deckToLaunch.subjectId,
-          subjectName: deckToLaunch.subjectName,
-          subjectCode: deckToLaunch.subjectCode,
-          smsInterval: deckSettings.autoSmsMilestone || "EVERY_3",
+          hostName: "শ্রেণি শিক্ষক (PTSC)",
         }),
       });
 
       const data = await res.json();
-      if (data.success && data.session) {
-        const pin = data.session.sessionCode || data.session.code;
-        const sessionId = data.session.id;
+      if (data.ok && data.session) {
+        const pin = data.code || data.session.code;
+        const sessionId = data.sessionId || data.session.id;
         const finalSlides =
           Array.isArray(data.session.slides) && data.session.slides.length > 0
-            ? data.session.slides
+            ? data.session.slides.map((s: any) => ({
+                ...s,
+                title: s.question || s.title,
+                correctAnswer: s.correctIndex ?? 0,
+                timeLimit: s.timeLimitSeconds || 25,
+              }))
             : normalizedSlides;
 
         setActiveLivePresenterSession({
@@ -1555,39 +1618,17 @@ export default function UnifiedQuizMentimeterWorkspace({
             slides: finalSlides,
           },
           initialSlideIndex: 0,
-          initialStage: "READY_CHECK",
+          initialStage: "LOBBY",
           initialPlayers: [],
         });
         if (onLiveStateChange) onLiveStateChange(true);
+        void fetchSessionHistory();
         showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
       } else {
-        const pin = Math.floor(100000 + Math.random() * 900000).toString();
-        setActiveLivePresenterSession({
-          id: `session-${Date.now()}`,
-          pin,
-          deck: {
-            ...deckToLaunch,
-            slides: normalizedSlides,
-          },
-          initialSlideIndex: 0,
-          initialStage: "READY_CHECK",
-          initialPlayers: [],
-        });
-        if (onLiveStateChange) onLiveStateChange(true);
-        showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
+        showToast(data?.error || "লাইভ সেশন তৈরি করা যায়নি।", "error");
       }
     } catch {
-      const pin = Math.floor(100000 + Math.random() * 900000).toString();
-      setActiveLivePresenterSession({
-        id: `session-${Date.now()}`,
-        pin,
-        deck: deckToLaunch,
-        initialSlideIndex: 0,
-        initialStage: "READY_CHECK",
-        initialPlayers: [],
-      });
-      if (onLiveStateChange) onLiveStateChange(true);
-      showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
+      showToast("লাইভ সেশন শুরু করতে সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে।", "error");
     } finally {
       setIsResumingOrStarting(false);
     }

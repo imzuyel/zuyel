@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chapterLearningStore } from "@/lib/chapterLearningEngine";
 import { safePrismaQuery, isPrismaAvailable } from "@/lib/prisma";
-import { resolveStudentIdentity } from "@/lib/studentEntityResolver";
+import { resolveStudentIdentity, buildCanonicalStudentKey } from "@/lib/studentEntityResolver";
+import { recordHybridMistake, syncMistakeBankWithMySQL } from "@/lib/hybridStorageEngine";
 
 export async function POST(
   req: NextRequest,
@@ -13,26 +14,36 @@ export async function POST(
 
     let studentRoll = body.studentRoll;
     const isGuest = !studentRoll || studentRoll === "guest" || String(studentRoll).trim() === "";
-    
-    // Support guest session persistence tracking via guestSessionId or header
+
     if (isGuest) {
       const guestSession = body.guestSessionId || req.headers.get("x-guest-session") || "guest_session";
       studentRoll = String(guestSession).startsWith("guest") ? String(guestSession) : `guest_${guestSession}`;
     }
 
     let studentName = body.studentName || (isGuest ? "অতিথি শিক্ষার্থী (Guest)" : undefined);
-
-    // Resolve student identity against master database
-    if (!isGuest && studentRoll) {
-      const resolved = resolveStudentIdentity({ roll: studentRoll, name: studentName });
-      if (resolved.isResolved && resolved.canonicalName) {
-        studentName = resolved.canonicalName;
-      }
-    }
+    let resolvedStudentId: string | undefined;
+    let resolvedClassName: string = body.className || "";
+    let resolvedTrade: string = body.trade || "";
 
     const answers = body.answers || {};
     const timeSpentSeconds = Math.max(1, Number(body.timeSpentSeconds) || 60);
     const tabSwitchedQuestionIds = Array.isArray(body.tabSwitchedQuestionIds) ? body.tabSwitchedQuestionIds : [];
+
+    // Resolve student identity against master database using (className + trade + roll)
+    if (!isGuest && studentRoll) {
+      const resolved = resolveStudentIdentity({
+        roll: studentRoll,
+        className: resolvedClassName || undefined,
+        trade: resolvedTrade || undefined,
+        name: studentName,
+      });
+      if (resolved.isResolved && resolved.student) {
+        resolvedStudentId = resolved.student.id;
+        studentName = resolved.canonicalName || studentName;
+        resolvedClassName = resolved.className || resolvedClassName;
+        resolvedTrade = resolved.trade || resolvedTrade;
+      }
+    }
 
     const result = chapterLearningStore.submitQuizAttempt(
       id,
@@ -53,8 +64,44 @@ export async function POST(
       );
     }
 
+    // Populate Mistake Bank ("আমার ভুলগুলো") for any wrongly answered questions
+    if (Array.isArray(result.questionFeedback) && result.questionFeedback.length > 0) {
+      const wrongOnes = result.questionFeedback.filter((q) => !q.isCorrect);
+      if (wrongOnes.length > 0) {
+        const clsFinal = resolvedClassName || result.courseMeta?.className || "Class 9";
+        const tradeFinal = resolvedTrade || result.courseMeta?.tradeName || "General";
+        const canonicalKey =
+          resolvedStudentId || buildCanonicalStudentKey(clsFinal, tradeFinal, studentRoll);
+
+        for (const wrong of wrongOnes) {
+          recordHybridMistake({
+            studentKey: canonicalKey,
+            studentId: resolvedStudentId,
+            studentRoll: String(studentRoll),
+            studentName: studentName || `শিক্ষার্থী (রোল ${studentRoll})`,
+            className: clsFinal,
+            trade: tradeFinal,
+            sourceType: "CHAPTER_QUIZ",
+            sourceId: id,
+            sourceTitle: result.courseMeta?.itemTitle || "অধ্যায়ভিত্তিক কুইজ",
+            topic: wrong.topic || result.courseMeta?.itemTitle,
+            subject: result.courseMeta?.subjectName || result.courseMeta?.courseTitle,
+            questionId: wrong.questionId,
+            questionText: wrong.questionText,
+            options: wrong.options,
+            studentAnswer: wrong.studentAnswer,
+            correctAnswer: wrong.correctAnswer,
+            explanation: wrong.explanation,
+          });
+        }
+        syncMistakeBankWithMySQL().catch(() => {});
+      }
+    }
+
     // STRICT GUARANTEE: If 100% correct answers within time, MUST receive 5 stars!
-    const isPerfect = (result.scorePercentage === 100) || (result.correctCount === result.totalQuestions && (result.totalQuestions || 0) > 0);
+    const isPerfect =
+      result.scorePercentage === 100 ||
+      (result.correctCount === result.totalQuestions && (result.totalQuestions || 0) > 0);
     let finalStars = result.stars || 1;
     if (isPerfect && result.isPassed) {
       finalStars = 5;
@@ -90,12 +137,12 @@ export async function POST(
             },
           },
           update: {
-            status: result.isPassed ? "COMPLETED" : (wasPassed ? "COMPLETED" : "FAILED"),
+            status: result.isPassed ? "COMPLETED" : wasPassed ? "COMPLETED" : "FAILED",
             attemptsCount: { increment: 1 },
             bestScore: newBestScore,
             lastScore: result.scorePercentage || 0,
             isPassed: Boolean(result.isPassed || wasPassed),
-            xpEarned: (result.isPassed && !wasPassed) ? (result.xpAwarded || 50) : (existing?.xpEarned || 0),
+            xpEarned: result.isPassed && !wasPassed ? result.xpAwarded || 50 : existing?.xpEarned || 0,
             stars: newStars,
             answersJson: answers ? JSON.stringify(answers) : null,
             completedAt: result.isPassed ? new Date() : existing?.completedAt,
@@ -131,13 +178,16 @@ export async function POST(
       totalQuestions: result.totalQuestions,
       xpAwarded: result.xpAwarded,
       stars: finalStars,
+      questionFeedback: result.questionFeedback || [],
       progress: {
         ...result.progress,
         stars: finalStars,
       },
       attemptsRemaining: result.attemptsRemaining,
       message: result.isPassed
-        ? (isPerfect ? "অসাধারণ! ১০০% সঠিক উত্তর দিয়ে ৫ স্টার (★★★★★) অর্জন করেছেন!" : "অভিনন্দন! আপনি কুইজে সফলভাবে উত্তীর্ণ হয়েছেন এবং পরবর্তী ধাপ আনলক হয়েছে।")
+        ? isPerfect
+          ? "অসাধারণ! ১০০% সঠিক উত্তর দিয়ে ৫ স্টার (★★★★★) অর্জন করেছেন!"
+          : "অভিনন্দন! আপনি কুইজে সফলভাবে উত্তীর্ণ হয়েছেন এবং পরবর্তী ধাপ আনলক হয়েছে।"
         : "কুইজে পাস করতে পারেননি। নিয়ম অনুযায়ী পুনরায় চেষ্টা করুন।",
     });
   } catch (error: any) {

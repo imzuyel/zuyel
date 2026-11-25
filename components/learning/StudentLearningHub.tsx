@@ -9,11 +9,13 @@ import {
   Trophy,
   Layers,
   Flame,
+  RotateCcw,
 } from "lucide-react";
 import SequentialLearningPathView from "./SequentialLearningPathView";
 import StudentAiChatWidget from "./StudentAiChatWidget";
 import StudentProgressDashboard from "./StudentProgressDashboard";
 import StudentLearningLeaderboard from "./StudentLearningLeaderboard";
+import StudentMistakeBankView from "./StudentMistakeBankView";
 import StudentLoginModal from "@/components/auth/StudentLoginModal";
 import StudentProfileView from "./StudentProfileView";
 import LmsStrictLoginGuard from "./LmsStrictLoginGuard";
@@ -25,9 +27,9 @@ import {
 } from "@/lib/studentIntelligenceStore";
 
 export default function StudentLearningHub() {
-  const { isAuthReady, isLoggedIn, currentUser } = useAuth();
-  // Navigation tab: 'learning_path' | 'progress' | 'leaderboard' | 'profile'
-  const [activeTab, setActiveTab] = useState<"learning_path" | "progress" | "leaderboard" | "profile">("learning_path");
+  const { isAuthReady, isLoggedIn, currentUser, user } = useAuth();
+  // Navigation tab: 'learning_path' | 'mistakes' | 'progress' | 'leaderboard' | 'profile'
+  const [activeTab, setActiveTab] = useState<"learning_path" | "mistakes" | "progress" | "leaderboard" | "profile">("learning_path");
 
   // Active Logged In Student Account state
   const [activeStudent, setActiveStudent] = useState<StudentAuthAccount | null>(null);
@@ -68,11 +70,14 @@ export default function StudentLearningHub() {
     );
   }
 
-  // Strict Login Guard: Do not mount protected portal if not authenticated
-  const isAuthStudent = (isLoggedIn && currentUser?.role === "student") || activeStudent !== null;
+  // Strict Login Guard: Do not mount protected portal until isAuthReady === true AND user !== null
+  const isAuthStudent =
+    isAuthReady &&
+    user !== null &&
+    ((isLoggedIn && currentUser?.role === "student") || activeStudent !== null);
   if (!isAuthStudent) {
     return (
-      <div className="min-h-[75vh] flex items-center justify-center p-4">
+      <div className="min-h-[85vh] w-full bg-[#0F172A] rounded-3xl flex items-center justify-center p-4">
         <LmsStrictLoginGuard
           onSuccessLogin={(acc) => setActiveStudent(acc)}
           title="পিটিএসসি শিক্ষার্থী লার্নিং হাব"
@@ -142,23 +147,32 @@ export default function StudentLearningHub() {
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-1 overflow-x-auto">
         <button
           onClick={() => setActiveTab("learning_path")}
-          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === "learning_path"
-              ? "bg-gradient-to-r from-cyan-600 to-indigo-600 text-white shadow-lg shadow-cyan-600/30"
-              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
-          }`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "learning_path"
+            ? "bg-gradient-to-r from-cyan-600 to-indigo-600 text-white shadow-lg shadow-cyan-600/30"
+            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
+            }`}
         >
           <Layers className="w-4 h-4 text-cyan-300" />
           <span>🚀 SoloLearn লার্নিং পাথ</span>
         </button>
 
         <button
+          onClick={() => setActiveTab("mistakes")}
+          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "mistakes"
+            ? "bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-lg shadow-rose-600/30"
+            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
+            }`}
+        >
+          <RotateCcw className="w-4 h-4 text-rose-400" />
+          <span>🔁 আমার ভুলগুলো প্র্যাকটিস করো (Mistake Bank)</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab("progress")}
-          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === "progress"
-              ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20"
-              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
-          }`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "progress"
+            ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20"
+            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
+            }`}
         >
           <Flame className="w-4 h-4 fill-current text-amber-500" />
           <span>🔥 আমার অগ্রগতি ও লার্নিং স্ট্রিক</span>
@@ -166,11 +180,10 @@ export default function StudentLearningHub() {
 
         <button
           onClick={() => setActiveTab("leaderboard")}
-          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === "leaderboard"
-              ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
-              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
-          }`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "leaderboard"
+            ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
+            }`}
         >
           <Trophy className="w-4 h-4 text-amber-400" />
           <span>🏆 মেধা তালিকা ও লিডারবোর্ড</span>
@@ -184,11 +197,10 @@ export default function StudentLearningHub() {
               setActiveTab("profile");
             }
           }}
-          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === "profile"
-              ? "bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
-          }`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "profile"
+            ? "bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800"
+            }`}
         >
           <User className="w-4 h-4 text-cyan-400" />
           <span>👤 আমার প্রোফাইল {activeStudent ? `(${activeStudent.studentName})` : ""}</span>
@@ -197,6 +209,16 @@ export default function StudentLearningHub() {
 
       {/* TAB CONTENT: Sequential Chapter Learning Path */}
       {activeTab === "learning_path" && <SequentialLearningPathView />}
+
+      {/* TAB CONTENT: Mistake Bank ("আমার ভুলগুলো") */}
+      {activeTab === "mistakes" && (
+        <StudentMistakeBankView
+          studentRoll={activeStudent?.rollNumber || String((currentUser as any)?.roll || "")}
+          studentName={activeStudent?.studentName || currentUser?.nameBangla || currentUser?.fullName}
+          className={activeStudent?.classLevel || (currentUser as any)?.className}
+          trade={activeStudent?.trade || (currentUser as any)?.trade}
+        />
+      )}
 
       {/* TAB CONTENT: Progress Dashboard */}
       {activeTab === "progress" && <StudentProgressDashboard />}

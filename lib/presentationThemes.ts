@@ -44,13 +44,30 @@ export const PRESENTATION_THEMES: PresentationTheme[] = [
     bgColor: "141C2E",
     bgTailwind: "bg-[#141C2E]",
     textColor: "F8FAFC",
-    subTextColor: "CBD5E1",
+    subTextColor: "E2E8F0",
     accentColor: "6366F1",
     secondaryAccent: "38BDF8",
     alertBg: "1E293B",
     alertText: "FDE047",
     badgeGradient: "from-indigo-500 to-cyan-500",
     previewBorder: "border-indigo-500/60"
+  },
+  {
+    id: "twilight_slate",
+    name: "Twilight Slate",
+    nameBangla: "🌆 টুইলাইট সফট-স্লেট (হাইব্রিড)",
+    category: "Tech & Cyber",
+    isDark: true,
+    bgColor: "1E293B",
+    bgTailwind: "bg-slate-800",
+    textColor: "F8FAFC",
+    subTextColor: "E2E8F0",
+    accentColor: "38BDF8",
+    secondaryAccent: "818CF8",
+    alertBg: "0F172A",
+    alertText: "FDE047",
+    badgeGradient: "from-sky-500 to-indigo-500",
+    previewBorder: "border-sky-400/60"
   },
   {
     id: "midnight_cyber",
@@ -1025,8 +1042,123 @@ export const THEME_CATEGORIES = [
   "Vibrant & Creative"
 ] as const;
 
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = String(hex || "").replace(/[^0-9a-fA-F]/g, "");
+  if (clean.length === 3) {
+    return [
+      parseInt(clean[0] + clean[0], 16),
+      parseInt(clean[1] + clean[1], 16),
+      parseInt(clean[2] + clean[2], 16),
+    ];
+  }
+  if (clean.length >= 6) {
+    return [
+      parseInt(clean.slice(0, 2), 16),
+      parseInt(clean.slice(2, 4), 16),
+      parseInt(clean.slice(4, 6), 16),
+    ];
+  }
+  return [20, 28, 46];
+}
+
+function getRelativeLuminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function getContrastRatio(hexA: string, hexB: string): number {
+  const lumA = getRelativeLuminance(hexA);
+  const lumB = getRelativeLuminance(hexB);
+  const brightest = Math.max(lumA, lumB);
+  const darkest = Math.min(lumA, lumB);
+  return (brightest + 0.05) / (darkest + 0.05);
+}
+
+export function getContrastInkForHex(hex: string): string {
+  const lum = getRelativeLuminance(hex);
+  return lum > 0.36 ? "#0F172A" : "#F8FAFC";
+}
+
+export interface SlideSurfaceTokens {
+  colorScheme: "dark" | "light";
+  stageBg: string;
+  cardBg: string;
+  cardBorder: string;
+  mutedSurfaceBg: string;
+  mutedSurfaceBorder: string;
+  headingColor: string;
+  bodyColor: string;
+  accentColor: string;
+  secondaryAccent: string;
+  pillTextColor: string;
+  alertBg: string;
+  alertText: string;
+}
+
+export function getSlideSurfaceTokens(theme: PresentationTheme): SlideSurfaceTokens {
+  const safeTextHex =
+    getContrastRatio(theme.bgColor, theme.textColor) >= 7
+      ? theme.textColor
+      : theme.isDark
+      ? "F8FAFC"
+      : "0F172A";
+
+  const safeSubTextHex =
+    getContrastRatio(theme.bgColor, theme.subTextColor) >= 5.2
+      ? theme.subTextColor
+      : theme.isDark
+      ? "E2E8F0"
+      : "334155";
+
+  const safeAlertTextHex =
+    getContrastRatio(theme.alertBg, theme.alertText) >= 4.5
+      ? theme.alertText
+      : theme.isDark
+      ? "FDE047"
+      : "92400E";
+
+  return {
+    colorScheme: theme.isDark ? "dark" : "light",
+    stageBg: `#${theme.bgColor}`,
+    cardBg: theme.isDark ? "rgba(30, 41, 59, 0.86)" : "rgba(255, 255, 255, 0.96)",
+    cardBorder: theme.isDark ? "rgba(148, 163, 184, 0.28)" : "rgba(148, 163, 184, 0.42)",
+    mutedSurfaceBg: theme.isDark ? "rgba(15, 23, 42, 0.82)" : "rgba(241, 245, 249, 0.96)",
+    mutedSurfaceBorder: theme.isDark ? "rgba(148, 163, 184, 0.25)" : "rgba(203, 213, 225, 0.9)",
+    headingColor: `#${safeTextHex}`,
+    bodyColor: `#${safeSubTextHex}`,
+    accentColor: `#${theme.accentColor}`,
+    secondaryAccent: `#${theme.secondaryAccent}`,
+    pillTextColor: getContrastInkForHex(theme.accentColor),
+    alertBg: `#${theme.alertBg}`,
+    alertText: `#${safeAlertTextHex}`,
+  };
+}
+
 export function getPresentationThemeById(themeId?: string): PresentationTheme {
-  if (!themeId) return PRESENTATION_THEMES[0];
-  const found = PRESENTATION_THEMES.find((t) => t.id === themeId);
-  return found || PRESENTATION_THEMES[0];
+  const base = !themeId
+    ? PRESENTATION_THEMES[0]
+    : PRESENTATION_THEMES.find((t) => t.id === themeId) || PRESENTATION_THEMES[0];
+
+  const safeText =
+    getContrastRatio(base.bgColor, base.textColor) >= 7
+      ? base.textColor
+      : base.isDark
+      ? "F8FAFC"
+      : "0F172A";
+
+  const safeSubText =
+    getContrastRatio(base.bgColor, base.subTextColor) >= 5.2
+      ? base.subTextColor
+      : base.isDark
+      ? "E2E8F0"
+      : "334155";
+
+  return {
+    ...base,
+    textColor: safeText,
+    subTextColor: safeSubText,
+  };
 }

@@ -5,6 +5,9 @@ import {
   HybridPresentation,
 } from "@/lib/hybridStorageEngine";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
+import { isPrismaAvailable, safePrismaQuery } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,6 +18,49 @@ export async function GET(req: NextRequest) {
     const themeFilter = searchParams.get("theme") || "all";
 
     let presentations = getHybridPresentations();
+
+    // Hydrate & merge from MySQL Prisma Presentation table when online
+    if (isPrismaAvailable()) {
+      const dbRows = await safePrismaQuery(async (p) => {
+        return await p.presentation.findMany({
+          where: { isPublished: true },
+          orderBy: { updatedAt: "desc" },
+          take: 150,
+        });
+      }, []);
+
+      if (dbRows && dbRows.length > 0) {
+        const byId = new Map<string, HybridPresentation>();
+        for (const p of presentations) {
+          byId.set(p.id, p);
+        }
+        for (const row of dbRows) {
+          let parsedSlides: any[] = [];
+          try {
+            parsedSlides = JSON.parse(row.slidesJson || "[]");
+          } catch {}
+          const merged: HybridPresentation = {
+            id: row.id,
+            title: row.title,
+            className: row.className,
+            trade: row.trade,
+            subject: row.subject,
+            theme: row.theme || "twilight_indigo",
+            slideCount: row.slideCount || parsedSlides.length,
+            slides: parsedSlides,
+            author: row.author,
+            updatedAt: row.updatedAt.toISOString(),
+          };
+          const existing = byId.get(row.id);
+          if (!existing || new Date(merged.updatedAt) >= new Date(existing.updatedAt)) {
+            byId.set(row.id, merged);
+          }
+        }
+        presentations = Array.from(byId.values()).sort(
+          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        );
+      }
+    }
 
     if (search) {
       presentations = presentations.filter((p) => {
@@ -49,13 +95,16 @@ export async function GET(req: NextRequest) {
 
     return apiSuccess(presentations, {
       extraKeys: {
-        total: presentations.length,
         presentations,
+        count: presentations.length,
       },
     });
   } catch (error: any) {
-    console.error("Error in GET /api/presentations:", error);
-    return apiError(error, { fallbackMessage: "প্রেজেন্টেশন তালিকা লোড করতে ব্যর্থ হয়েছে" });
+    console.error("GET /api/presentations error:", error);
+    return apiError(error, {
+      fallbackMessage: "প্রেজেন্টেশন ডেটা লোড করতে সমস্যা হয়েছে",
+      status: 500,
+    });
   }
 }
 
@@ -65,9 +114,9 @@ export async function POST(req: NextRequest) {
     const {
       title,
       className = "Class 9",
-      trade = "Computer & IT",
-      subject = "কারিগরি বিষয়",
-      theme = "cyberpunk_neon",
+      trade = "All",
+      subject = "সাধারণ বিষয়",
+      theme = "twilight_indigo",
       slides = [],
       author = "শিক্ষক (PTSC)",
       id,
@@ -80,16 +129,49 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const normalizedTheme = theme === "cyberpunk_neon" ? "twilight_indigo" : theme;
+
     const saved = upsertHybridPresentation({
       id,
       title: title.trim(),
       className,
       trade,
       subject,
-      theme,
+      theme: normalizedTheme,
       slides,
       author,
     });
+
+    if (isPrismaAvailable()) {
+      await safePrismaQuery(async (p) => {
+        await p.presentation.upsert({
+          where: { id: saved.id },
+          create: {
+            id: saved.id,
+            title: saved.title,
+            className: saved.className,
+            trade: saved.trade || "All",
+            subject: saved.subject,
+            theme: saved.theme,
+            slideCount: saved.slideCount || saved.slides.length,
+            slidesJson: JSON.stringify(saved.slides || []),
+            author: saved.author,
+            isPublished: true,
+          },
+          update: {
+            title: saved.title,
+            className: saved.className,
+            trade: saved.trade || "All",
+            subject: saved.subject,
+            theme: saved.theme,
+            slideCount: saved.slideCount || saved.slides.length,
+            slidesJson: JSON.stringify(saved.slides || []),
+            author: saved.author,
+          },
+        });
+        return true;
+      }, false);
+    }
 
     return NextResponse.json({
       success: true,
@@ -97,8 +179,10 @@ export async function POST(req: NextRequest) {
       presentation: saved,
     });
   } catch (error: any) {
-    console.error("Error in POST /api/presentations:", error);
-    return apiError(error, { fallbackMessage: "প্রেজেন্টেশন সেভ করতে ব্যর্থ হয়েছে" });
+    console.error("POST /api/presentations error:", error);
+    return NextResponse.json(
+      { success: false, message: "প্রেজেন্টেশন সংরক্ষণে সমস্যা হয়েছে" },
+      { status: 500 }
+    );
   }
 }
-

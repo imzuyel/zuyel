@@ -16,59 +16,154 @@ import {
   createSubjectMaster,
   updateSubjectMaster,
   getSubjectAuditLogs,
+  hydrateSubjectEngineFromHybrid,
+  persistSubjectEngineToHybrid,
   AcademicSubjectMapping,
 } from "@/lib/subjectEngine";
 import { parseClassNumeric, doesClassHaveTrade, getApplicableTradesForClass, ALL_TRADES } from "@/lib/academicStructure";
+import { getMasterDataSnapshot, saveClassMasterRecord, saveTradeMasterRecord } from "@/lib/masterDataEngine";
+import { isPrismaAvailable, safePrismaQuery } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/serverAuthGuard";
 
 /**
  * Explicit Safe Projections for Class and Trade Configurations.
- * Prevents internal administrative metadata or teacher mapping configs from leaking.
+ * Enforces Class 6-8 (hasDepartment=false) and Class 9-12 (hasDepartment=true).
  */
 function sanitizeClassConfig(c: any) {
   if (!c) return null;
+  const numericValue = Number(c.numericValue);
+  const enforcedHasDepartment = numericValue >= 9 && numericValue <= 12;
   return {
     id: Number(c.id),
-    numericValue: Number(c.numericValue),
-    name: String(c.name || ""),
-    nameBangla: String(c.nameBangla || ""),
-    tier: c.tier,
-    hasTrade: Boolean(c.hasTrade),
+    numericValue,
+    name: String(c.name || `Class ${numericValue}`),
+    nameBangla: String(c.nameBangla || c.name || `Class ${numericValue}`),
+    tier: c.tier || (numericValue <= 8 ? "Pre-Vocational" : numericValue <= 10 ? "SSC (Vocational)" : "HSC (Vocational)"),
+    hasTrade: enforcedHasDepartment,
+    hasDepartment: enforcedHasDepartment,
     totalSeats: Number(c.totalSeats) || 0,
-    sections: Array.isArray(c.sections) ? c.sections : [],
-    shifts: Array.isArray(c.shifts) ? c.shifts : [],
+    sections: Array.isArray(c.defaultSections) ? c.defaultSections : Array.isArray(c.sections) ? c.sections : [],
+    shifts: Array.isArray(c.defaultShifts) ? c.defaultShifts : Array.isArray(c.shifts) ? c.shifts : [],
     status: c.status === "Inactive" ? "Inactive" : "Active",
   };
 }
 
-function sanitizeTradeConfig(t: any) {
+function sanitizeTradeConfig(t: any, idx = 0) {
   if (!t) return null;
   return {
     id: Number(t.id),
-    tradeNumber: t.tradeNumber,
+    tradeNumber: t.tradeNumber || ((idx % 4) + 1),
     code: String(t.code),
     name: String(t.name),
     nameBangla: String(t.nameBangla),
-    seats: Number(t.seats) || 0,
-    level: t.level,
+    seats: Number(t.seats ?? t.intakeCapacity) || 50,
+    level: t.level || "SSC",
     applicableClass: Number(t.applicableClass) || 9,
-    descriptionBangla: String(t.descriptionBangla || ""),
+    descriptionBangla: String(t.descriptionBangla ?? t.description ?? ""),
     status: t.status === "Inactive" ? "Inactive" : "Active",
   };
 }
 
+async function persistMappingToMySQL(mapping: AcademicSubjectMapping): Promise<void> {
+  if (!isPrismaAvailable() || !mapping) return;
+  await safePrismaQuery(async (client) => {
+    const dbSub = await client.subjectMaster.upsert({
+      where: { code: mapping.subjectCode },
+      update: {
+        name: mapping.subjectName,
+        nameBangla: mapping.subjectNameBangla || mapping.subjectName,
+        subjectType: mapping.subjectType,
+        fullMarks: Number(mapping.fullMarks) || 100,
+        passMarks: Number(mapping.passMarks) || 33,
+      },
+      create: {
+        code: mapping.subjectCode,
+        name: mapping.subjectName,
+        nameBangla: mapping.subjectNameBangla || mapping.subjectName,
+        nameEnglish: mapping.subjectName,
+        shortName: mapping.subjectCode,
+        subjectType: mapping.subjectType,
+        fullMarks: Number(mapping.fullMarks) || 100,
+        passMarks: Number(mapping.passMarks) || 33,
+        theoryMarks: Number(mapping.theoryMarks) || 100,
+        practicalMarks: Number(mapping.practicalMarks) || 0,
+        vivaMarks: Number(mapping.vivaMarks) || 0,
+        continuousMarks: Number(mapping.continuousMarks) || 40,
+      },
+    });
+    const cleanTradeId =
+      mapping.numericClass >= 9 && mapping.tradeId && Number(mapping.tradeId) > 0
+        ? Number(mapping.tradeId)
+        : null;
+    await client.academicSubjectMapping.upsert({
+      where: {
+        unique_year_class_trade_section_subject: {
+          academicYear: mapping.academicYear,
+          classId: Number(mapping.classId),
+          tradeId: cleanTradeId ?? 0,
+          section: mapping.section || "all",
+          subjectId: dbSub.id,
+        },
+      },
+      update: {
+        className: mapping.className,
+        numericClass: Number(mapping.numericClass),
+        tradeCode: cleanTradeId ? mapping.tradeCode || null : null,
+        tradeName: cleanTradeId ? mapping.tradeName || null : null,
+        subjectCode: mapping.subjectCode,
+        subjectName: mapping.subjectName,
+        subjectNameBangla: mapping.subjectNameBangla,
+        subjectType: mapping.subjectType,
+        weeklyPeriods: Number(mapping.weeklyPeriods) || 4,
+        status: mapping.status || "Active",
+      },
+      create: {
+        academicYear: mapping.academicYear,
+        classId: Number(mapping.classId),
+        className: mapping.className,
+        numericClass: Number(mapping.numericClass),
+        section: mapping.section || "all",
+        tradeId: cleanTradeId,
+        tradeCode: cleanTradeId ? mapping.tradeCode || null : null,
+        tradeName: cleanTradeId ? mapping.tradeName || null : null,
+        subjectId: dbSub.id,
+        subjectCode: mapping.subjectCode,
+        subjectName: mapping.subjectName,
+        subjectNameBangla: mapping.subjectNameBangla,
+        subjectType: mapping.subjectType,
+        isOptional: Boolean(mapping.isOptional),
+        weeklyPeriods: Number(mapping.weeklyPeriods) || 4,
+        theoryPeriods: Number(mapping.theoryPeriods) || 3,
+        practicalPeriods: Number(mapping.practicalPeriods) || 0,
+        labPeriods: Number(mapping.labPeriods) || 0,
+        requiredWeeklyHours: Number(mapping.requiredWeeklyHours) || 3.0,
+        fullMarks: Number(mapping.fullMarks) || 100,
+        passMarks: Number(mapping.passMarks) || 33,
+        theoryMarks: Number(mapping.theoryMarks) || 100,
+        practicalMarks: Number(mapping.practicalMarks) || 0,
+        vivaMarks: Number(mapping.vivaMarks) || 0,
+        continuousMarks: Number(mapping.continuousMarks) || 40,
+        displayOrder: Number(mapping.displayOrder) || 1,
+        status: mapping.status || "Active",
+      },
+    });
+  }, null);
+}
+
 export async function GET(req: NextRequest) {
   try {
+    hydrateSubjectEngineFromHybrid();
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action") || "overview";
     const academicYear = searchParams.get("academicYear") || "2026";
 
-    // 1. Overview summary stats
+    // 1. Overview summary stats (sourced from Single Source of Truth master snapshot)
     if (action === "overview") {
-      const rawClasses = getAllClassConfigurations();
-      const rawTrades = getAllTradeConfigurations();
+      const snapshot = await getMasterDataSnapshot(academicYear);
+      const rawClasses = snapshot.classes?.length ? snapshot.classes : getAllClassConfigurations();
+      const rawTrades = snapshot.trades?.length ? snapshot.trades : getAllTradeConfigurations();
       const classes = rawClasses.map(sanitizeClassConfig).filter(Boolean);
-      const trades = rawTrades.map(sanitizeTradeConfig).filter(Boolean);
+      const trades = rawTrades.map((t: any, i: number) => sanitizeTradeConfig(t, i)).filter(Boolean);
       const masters = getSubjectMasters({ status: "Active" });
       const mappings = getSubjectMappings({ academicYear });
 
@@ -93,8 +188,11 @@ export async function GET(req: NextRequest) {
 
     // 2. Class & Trade configurations
     if (action === "classes") {
-      const classes = getAllClassConfigurations().map(sanitizeClassConfig).filter(Boolean);
-      const trades = getAllTradeConfigurations().map(sanitizeTradeConfig).filter(Boolean);
+      const snapshot = await getMasterDataSnapshot(academicYear);
+      const rawClasses = snapshot.classes?.length ? snapshot.classes : getAllClassConfigurations();
+      const rawTrades = snapshot.trades?.length ? snapshot.trades : getAllTradeConfigurations();
+      const classes = rawClasses.map(sanitizeClassConfig).filter(Boolean);
+      const trades = rawTrades.map((t: any, i: number) => sanitizeTradeConfig(t, i)).filter(Boolean);
       return NextResponse.json({
         success: true,
         classes,
@@ -109,7 +207,9 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: "classVal parameter is required" }, { status: 400 });
       }
 
-      const tradeVal = searchParams.get("tradeVal") || searchParams.get("tradeId") || undefined;
+      const numericClass = parseClassNumeric(classVal);
+      const hasTrade = numericClass >= 9 && numericClass <= 12;
+      const tradeVal = hasTrade ? (searchParams.get("tradeVal") || searchParams.get("tradeId") || undefined) : undefined;
       const subjects = getSingleSourceSubjects({
         classVal,
         tradeVal,
@@ -117,15 +217,17 @@ export async function GET(req: NextRequest) {
         includeInactive: false,
       });
 
-      const numericClass = parseClassNumeric(classVal);
-      const hasTrade = doesClassHaveTrade(numericClass);
-      const applicableTrades = hasTrade ? getApplicableTradesForClass(numericClass) : [];
+      const snapshot = await getMasterDataSnapshot(academicYear);
+      const applicableTrades = hasTrade
+        ? (snapshot.trades?.length ? snapshot.trades : getApplicableTradesForClass(numericClass))
+        : [];
 
       return NextResponse.json({
         success: true,
         academicYear,
         classNumeric: numericClass,
         hasTrade,
+        hasDepartment: hasTrade,
         applicableTrades,
         count: subjects.length,
         subjects,
@@ -168,6 +270,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    hydrateSubjectEngineFromHybrid();
     const auth = requireAdmin(req, "academic-settings:manage");
     if (!auth.authorized) {
       return auth.errorResponse!;
@@ -186,9 +289,20 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const res = saveSubjectMapping(mapping, user);
+      const numCls = parseClassNumeric(mapping.numericClass || mapping.classId);
+      const cleanMapping =
+        numCls > 0 && numCls <= 8
+          ? { ...mapping, tradeId: undefined, tradeCode: undefined, tradeName: undefined }
+          : mapping;
+
+      const res = saveSubjectMapping(cleanMapping, user);
       if (!res.success) {
         return NextResponse.json({ success: false, error: res.error }, { status: 400 });
+      }
+
+      persistSubjectEngineToHybrid();
+      if (res.mapping) {
+        await persistMappingToMySQL(res.mapping);
       }
 
       return NextResponse.json({
@@ -210,32 +324,55 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: res.error }, { status: 400 });
       }
 
+      persistSubjectEngineToHybrid();
+
       return NextResponse.json({
         success: true,
         message: "Subject mapping removed successfully.",
       });
     }
 
-    // 3. Update Class Configuration
+    // 3. Update Class Configuration (persisted to Hybrid + MySQL, enforcing 6-8 no-department)
     if (action === "update_class") {
       const { classId, updates } = body;
       if (!classId || !updates) {
         return NextResponse.json({ success: false, error: "classId and updates are required" }, { status: 400 });
       }
 
-      const updated = updateClassConfiguration(Number(classId), updates);
-      if (!updated) {
+      const numVal = parseClassNumeric(updates.numericValue || classId);
+      const enforcedHasDept = numVal >= 9 && numVal <= 12;
+      const safeUpdates = { ...updates, hasTrade: enforcedHasDept };
+
+      const updated = updateClassConfiguration(Number(classId), safeUpdates);
+      const snapshot = await getMasterDataSnapshot();
+      const targetClass = snapshot.classes.find(
+        (c: any) => Number(c.id) === Number(classId) || Number(c.numericValue) === numVal
+      );
+
+      if (!updated && !targetClass) {
         return NextResponse.json({ success: false, error: "Class not found" }, { status: 404 });
       }
 
+      const masterRes = await saveClassMasterRecord({
+        id: targetClass?.id || Number(classId),
+        numericValue: targetClass?.numericValue || numVal,
+        name: safeUpdates.name || targetClass?.name || updated?.name,
+        nameBangla: safeUpdates.nameBangla || targetClass?.nameBangla || updated?.nameBangla,
+        hasTrade: enforcedHasDept,
+        defaultSections: Array.isArray(safeUpdates.sections) ? safeUpdates.sections : undefined,
+        defaultShifts: Array.isArray(safeUpdates.shifts) ? safeUpdates.shifts : undefined,
+        totalSeats: safeUpdates.totalSeats ? Number(safeUpdates.totalSeats) : undefined,
+        status: safeUpdates.status,
+      });
+
       return NextResponse.json({
         success: true,
-        message: "Class configuration updated successfully.",
-        classConfig: updated,
+        message: "Class configuration updated and persisted successfully.",
+        classConfig: sanitizeClassConfig(masterRes.classRecord || updated),
       });
     }
 
-    // 4. Update Trade Configuration
+    // 4. Update Trade Configuration (persisted to Hybrid + MySQL)
     if (action === "update_trade") {
       const { tradeId, updates } = body;
       if (!tradeId || !updates) {
@@ -243,14 +380,27 @@ export async function POST(req: NextRequest) {
       }
 
       const updated = updateTradeConfiguration(Number(tradeId), updates);
-      if (!updated) {
+      const snapshot = await getMasterDataSnapshot();
+      const targetTrade = snapshot.trades.find((t: any) => Number(t.id) === Number(tradeId));
+
+      if (!updated && !targetTrade) {
         return NextResponse.json({ success: false, error: "Trade not found" }, { status: 404 });
       }
 
+      const masterRes = await saveTradeMasterRecord({
+        id: targetTrade?.id || Number(tradeId),
+        code: updates.code || targetTrade?.code || updated?.code,
+        name: updates.name || targetTrade?.name || updated?.name,
+        nameBangla: updates.nameBangla || targetTrade?.nameBangla || updated?.nameBangla,
+        intakeCapacity: updates.seats ? Number(updates.seats) : undefined,
+        description: updates.descriptionBangla || updates.description,
+        status: updates.status,
+      });
+
       return NextResponse.json({
         success: true,
-        message: "Trade configuration updated successfully.",
-        tradeConfig: updated,
+        message: "Trade configuration updated and persisted successfully.",
+        tradeConfig: sanitizeTradeConfig(masterRes.trade || updated),
       });
     }
 
@@ -397,6 +547,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      persistSubjectEngineToHybrid();
+      for (const m of addedMappings) {
+        await persistMappingToMySQL(m);
+      }
+
       return NextResponse.json({
         success: true,
         message: `BTEB/NCTB preset applied successfully. ${addedMappings.length} subjects aligned.`,
@@ -416,6 +571,7 @@ export async function POST(req: NextRequest) {
         if (!res.success) {
           return NextResponse.json({ success: false, error: res.error }, { status: 400 });
         }
+        persistSubjectEngineToHybrid();
         return NextResponse.json({
           success: true,
           message: "Subject master updated successfully.",
@@ -426,6 +582,7 @@ export async function POST(req: NextRequest) {
         if (!res.success) {
           return NextResponse.json({ success: false, error: res.error }, { status: 400 });
         }
+        persistSubjectEngineToHybrid();
         return NextResponse.json({
           success: true,
           message: "New master subject created successfully.",

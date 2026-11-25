@@ -36,6 +36,7 @@ import { InternationalStoryLessonRenderer } from "@/components/learning/Internat
 import { CurvedPathwayRoadmap } from "@/components/learning/CurvedPathwayRoadmap";
 import { AdvancedQuizArena } from "@/components/learning/AdvancedQuizArena";
 import { CourseCertificateModal } from "@/components/learning/CourseCertificateModal";
+import StudentDoubtBox from "@/components/learning/StudentDoubtBox";
 import confetti from "canvas-confetti";
 import { triggerBlockCompletionCelebration } from "@/lib/confetti";
 import { toast } from "sonner";
@@ -1018,6 +1019,16 @@ export default function SplitScreenChapterLearningView({
                           <Zap className="w-3.5 h-3.5" />
                           <span>+{activeItem.xpReward} XP</span>
                         </span>
+                        {(activeItem as any).boardImportant && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30">
+                            📌 বোর্ড পরীক্ষায় আসার মতো (Board Important)
+                          </span>
+                        )}
+                        {(activeItem as any).practicalJob && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30">
+                            🛠️ ল্যাব/প্র্যাকটিক্যাল (Practical Job)
+                          </span>
+                        )}
                       </div>
 
                       <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-snug">
@@ -1254,6 +1265,20 @@ export default function SplitScreenChapterLearningView({
                       />
                     </div>
                   )}
+
+                  {/* Per-Chapter Lightweight Ask Doubt Box */}
+                  <div className="pt-4">
+                    <StudentDoubtBox
+                      lessonId={`chapter-${chapter.id}-item-${activeItem.id}`}
+                      lessonTitle={activeItem.titleBangla || activeItem.title}
+                      chapterTitle={chapter.titleBangla || chapter.title}
+                      contextType={activeItem.itemType === "QUIZ" ? "quiz_question" : "chapter"}
+                      contextTitle={`${chapter.titleBangla} · ${activeItem.titleBangla}`}
+                      tradeClass={`${course.className}${course.tradeName ? ` (${course.tradeName})` : ""}`}
+                      defaultStudentName={activeStudent?.studentName || ""}
+                      defaultStudentRoll={activeStudent?.rollNumber || ""}
+                    />
+                  </div>
                 </div>
               </section>
             </div>

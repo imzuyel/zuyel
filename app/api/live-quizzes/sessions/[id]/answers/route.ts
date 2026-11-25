@@ -5,6 +5,8 @@ import { ScoringService } from "@/lib/scoringService";
 import { SecurityService } from "@/lib/reconnectService";
 import { invalidateSessionCache } from "@/lib/sessionCache";
 import { sanitizeUserTextInput } from "@/lib/textSanitizer";
+import { recordHybridMistake, syncMistakeBankWithMySQL } from "@/lib/hybridStorageEngine";
+import { resolveStudentIdentity, buildCanonicalStudentKey } from "@/lib/studentEntityResolver";
 
 export async function POST(
   req: NextRequest,
@@ -111,6 +113,70 @@ export async function POST(
     };
 
     recordPlayerAnswer(sessionId, targetSlideIdx, playerId, answerRecord);
+
+    // Record wrong graded live quiz answers into Student Mistake Bank ("আমার ভুলগুলো")
+    const slideTypeUpper = String(currentSlide?.type || "MCQ").toUpperCase();
+    const isGradedLiveSlide = ["MCQ", "TRUE_FALSE", "FILL_BLANKS", "MATCHING", "REORDER"].includes(slideTypeUpper);
+    if (!evaluation.isCorrect && isGradedLiveSlide && currentSlide) {
+      try {
+        const resolved = resolveStudentIdentity({
+          roll: player.roll && player.roll !== "—" ? player.roll : undefined,
+          className: (session as any).className,
+          trade: (session as any).trade,
+          name: player.name,
+        });
+        const studentRollStr = String(resolved.canonicalRoll || player.roll || playerId);
+        const clsStr = resolved.className || (session as any).className || "Class 9";
+        const tradeStr = resolved.trade || (session as any).trade || "General";
+        const canonicalKey = resolved.student?.id || buildCanonicalStudentKey(clsStr, tradeStr, studentRollStr);
+
+        let correctAnsText = "";
+        if (slideTypeUpper === "MCQ" && Array.isArray(currentSlide.options)) {
+          const cIdx = Number(currentSlide.correctAnswer ?? 0);
+          correctAnsText = currentSlide.options[cIdx] || String(currentSlide.correctAnswer ?? "");
+        } else if (slideTypeUpper === "TRUE_FALSE") {
+          correctAnsText = String(currentSlide.correctAnswer).toLowerCase() === "true" || currentSlide.correctAnswer === 0
+            ? "সত্য (True)"
+            : "মিথ্যা (False)";
+        } else {
+          correctAnsText = typeof currentSlide.correctAnswer === "string"
+            ? currentSlide.correctAnswer
+            : JSON.stringify(currentSlide.correctAnswer ?? "");
+        }
+
+        let studentAnsText = "";
+        if (slideTypeUpper === "MCQ" && Array.isArray(currentSlide.options) && !isNaN(Number(answerPayload))) {
+          studentAnsText = currentSlide.options[Number(answerPayload)] || String(answerPayload ?? "");
+        } else {
+          studentAnsText = typeof answerPayload === "string" ? answerPayload : JSON.stringify(answerPayload ?? "উত্তর দেওয়া হয়নি");
+        }
+
+        recordHybridMistake({
+          studentKey: canonicalKey,
+          studentId: resolved.student?.id,
+          studentRoll: studentRollStr,
+          studentName: resolved.canonicalName || player.name,
+          className: clsStr,
+          trade: tradeStr,
+          sourceType: "LIVE_QUIZ",
+          sourceId: session.id,
+          sourceTitle: (session as any).title || "লাইভ ক্লাস কুইজ",
+          topic: (currentSlide as any).topic || (session as any).subject || (session as any).title,
+          subject: (session as any).subjectName || (session as any).subject,
+          questionId: String(questionId || currentSlide.id || `slide-${targetSlideIdx}`),
+          questionText: currentSlide.title || currentSlide.content || "লাইভ কুইজ প্রশ্ন",
+          options: Array.isArray(currentSlide.options) ? currentSlide.options : [],
+          studentAnswer: studentAnsText || "সময় শেষ / উত্তর দেওয়া হয়নি",
+          correctAnswer: correctAnsText || "সঠিক উত্তর",
+          explanation:
+            (currentSlide as any).explanation ||
+            `সঠিক উত্তর হলো "${correctAnsText}" — লাইভ ক্লাস নোটটি পুনরায় দেখে নিন।`,
+        });
+        syncMistakeBankWithMySQL().catch(() => {});
+      } catch (mstErr) {
+        console.warn("[Live Answer] Mistake Bank sync skipped:", mstErr);
+      }
+    }
 
     // Sync to institutionalDb.liveAnswers
     const legacyAns: LiveAnswer = {

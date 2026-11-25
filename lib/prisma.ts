@@ -81,7 +81,7 @@ export function withPoolParameters(url: string): string {
     params.push(`pool_timeout=${process.env.PRISMA_POOL_TIMEOUT || "20"}`);
   }
   if (!/[?&]connect_timeout=/i.test(url)) {
-    params.push(`connect_timeout=${process.env.PRISMA_CONNECT_TIMEOUT || "10"}`);
+    params.push(`connect_timeout=${process.env.PRISMA_CONNECT_TIMEOUT || (process.env.NODE_ENV === "production" ? "5" : "2")}`);
   }
 
   if (params.length === 0) return url;
@@ -224,11 +224,17 @@ export const mockPrisma: PrismaLike = new Proxy(rootDelegates, {
 
 const DB_RETRY_COOLDOWN_MS = 60_000; // 60s cooldown before retrying an exhausted database
 
+export function getMysqlOfflineUntil(): number {
+  return (globalForPrisma as { mysqlOfflineUntil?: number }).mysqlOfflineUntil ?? 0;
+}
+
 /**
  * Trips the 60-second circuit breaker so all callers immediately route to local memory cache.
  */
 export function markPrismaFailure(): void {
-  globalForPrisma.prismaFailureAt = Date.now();
+  const now = Date.now();
+  globalForPrisma.prismaFailureAt = now;
+  (globalForPrisma as { mysqlOfflineUntil?: number }).mysqlOfflineUntil = now + DB_RETRY_COOLDOWN_MS;
 }
 
 /**
@@ -236,8 +242,13 @@ export function markPrismaFailure(): void {
  * and the database is not in an active connection failure cooldown.
  */
 export function isPrismaAvailable(): boolean {
+  const now = Date.now();
+  const offlineUntil = (globalForPrisma as { mysqlOfflineUntil?: number }).mysqlOfflineUntil ?? 0;
+  if (offlineUntil > now) {
+    return false;
+  }
   const failedAt = globalForPrisma.prismaFailureAt ?? 0;
-  if (failedAt > 0 && Date.now() - failedAt < DB_RETRY_COOLDOWN_MS) {
+  if (failedAt > 0 && now - failedAt < DB_RETRY_COOLDOWN_MS) {
     return false;
   }
   return prismaOperational && prismaClientInstance !== null;
@@ -381,7 +392,7 @@ export async function safePrismaQuery<T>(
     if (isConnectionFailure(err)) {
       // Shared across route bundles so all callers back off together instead
       // of hammering an already-exhausted pool.
-      globalForPrisma.prismaFailureAt = Date.now();
+      markPrismaFailure();
       if (process.env.NODE_ENV === "production") {
         console.error(
           "[Prisma SafeQuery CRITICAL] Database connection error caught. Entering 60s cooldown:",

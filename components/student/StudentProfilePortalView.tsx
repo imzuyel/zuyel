@@ -84,7 +84,7 @@ const AVATAR_PRESETS = [
 
 export default function StudentProfilePortalView() {
   const router = useRouter();
-  const { isAuthReady, isLoggedIn, currentUser, logout, showToast, updateCurrentUser } = useAuth();
+  const { isAuthReady, isLoggedIn, currentUser, user, logout, showToast, updateCurrentUser } = useAuth();
 
   const [student, setStudent] = useState<StudentData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -198,8 +198,13 @@ export default function StudentProfilePortalView() {
   };
 
   useEffect(() => {
+    if (!isAuthReady) return;
+    if (!isLoggedIn && !getActiveStudentAccount()) {
+      setLoading(false);
+      return;
+    }
     fetchProfile();
-  }, []);
+  }, [isAuthReady, isLoggedIn]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,11 +272,14 @@ export default function StudentProfilePortalView() {
     );
   }
 
-  // Strict Login Guard: Do not mount protected profile if not authenticated
-  const isAuthStudent = (isLoggedIn && currentUser?.role === "student") || student !== null;
+  // Strict Login Guard: Do not mount protected profile until isAuthReady === true AND user !== null
+  const isAuthStudent =
+    isAuthReady &&
+    user !== null &&
+    ((isLoggedIn && currentUser?.role === "student") || student !== null);
   if (!isAuthStudent) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-between">
+      <div className="min-h-screen bg-[#0F172A] flex flex-col justify-between">
         <PublicHeader />
         <div className="flex-1 flex items-center justify-center p-4">
           <LmsStrictLoginGuard

@@ -48,7 +48,8 @@ export function QuizSmartResumeModal({
   const slidesTotal = Math.max(1, pausedSession.totalQuestions || totalSlides || 1);
   const rawIdx = Number(pausedSession.currentSlideIndex) || 0;
   const nextQIdx =
-    pausedSession.stage === "RESULT_REVEAL" && rawIdx + 1 < slidesTotal
+    (pausedSession.stage === "RESULT_REVEAL" || pausedSession.stage === "REVEAL") &&
+    rawIdx + 1 < slidesTotal
       ? rawIdx + 1
       : rawIdx;
   const displayQuestionNum = Math.min(slidesTotal, nextQIdx + 1);

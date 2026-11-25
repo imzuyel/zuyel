@@ -15,14 +15,14 @@ export default function AdminPromotionPage() {
   }, [router]);
 
   return (
-    <div className="flex h-screen max-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
+    <div className="flex min-h-dvh bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-x-hidden font-sans">
       <AdminSidebar
         activeTab="student_promotion"
         onSelectTab={(tab: AdminTab) => router.push(`/admin?tab=${tab}`)}
         mobileOpen={false}
         onCloseMobile={() => {}}
       />
-      <div className="flex-1 min-h-0 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="flex-1 min-h-dvh flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
         <Header onToggleSidebar={() => {}} />
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 lg:p-8">
           <StudentPromotionView />

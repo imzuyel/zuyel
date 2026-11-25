@@ -5,6 +5,9 @@ import {
   deleteHybridPresentation,
 } from "@/lib/hybridStorageEngine";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
+import { isPrismaAvailable, safePrismaQuery } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
   req: NextRequest,
@@ -12,7 +15,30 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const presentation = getHybridPresentationById(id);
+    let presentation = getHybridPresentationById(id);
+
+    if (!presentation && isPrismaAvailable()) {
+      const dbRow = await safePrismaQuery(async (p) => {
+        return await p.presentation.findUnique({ where: { id } });
+      }, null);
+
+      if (dbRow) {
+        let parsedSlides: any[] = [];
+        try {
+          parsedSlides = JSON.parse(dbRow.slidesJson || "[]");
+        } catch {}
+        presentation = upsertHybridPresentation({
+          id: dbRow.id,
+          title: dbRow.title,
+          className: dbRow.className,
+          trade: dbRow.trade,
+          subject: dbRow.subject,
+          theme: dbRow.theme || "twilight_indigo",
+          slides: parsedSlides,
+          author: dbRow.author,
+        });
+      }
+    }
 
     if (!presentation) {
       return NextResponse.json(
@@ -25,8 +51,8 @@ export async function GET(
       extraKeys: { presentation },
     });
   } catch (error: any) {
-    console.error("Error in GET /api/presentations/[id]:", error);
-    return apiError(error, { fallbackMessage: "প্রেজেন্টেশন লোড করতে ব্যর্থ হয়েছে" });
+    console.error("GET /api/presentations/[id] error:", error);
+    return apiError(error, { fallbackMessage: "প্রেজেন্টেশন লোড করতে সমস্যা হয়েছে" });
   }
 }
 
@@ -39,7 +65,7 @@ export async function PUT(
     const body = await req.json();
 
     const existing = getHybridPresentationById(id);
-    if (!existing) {
+    if (!existing && !isPrismaAvailable()) {
       return NextResponse.json(
         { success: false, message: "হালনাগাদ করার জন্য প্রেজেন্টেশন পাওয়া যায়নি" },
         { status: 404 }
@@ -47,10 +73,41 @@ export async function PUT(
     }
 
     const updated = upsertHybridPresentation({
-      ...existing,
+      ...(existing || { title: body.title || "প্রেজেন্টেশন ডেক" }),
       ...body,
       id,
     });
+
+    if (isPrismaAvailable()) {
+      await safePrismaQuery(async (p) => {
+        await p.presentation.upsert({
+          where: { id },
+          create: {
+            id: updated.id,
+            title: updated.title,
+            className: updated.className,
+            trade: updated.trade || "All",
+            subject: updated.subject,
+            theme: updated.theme,
+            slideCount: updated.slideCount || updated.slides.length,
+            slidesJson: JSON.stringify(updated.slides || []),
+            author: updated.author,
+            isPublished: true,
+          },
+          update: {
+            title: updated.title,
+            className: updated.className,
+            trade: updated.trade || "All",
+            subject: updated.subject,
+            theme: updated.theme,
+            slideCount: updated.slideCount || updated.slides.length,
+            slidesJson: JSON.stringify(updated.slides || []),
+            author: updated.author,
+          },
+        });
+        return true;
+      }, false);
+    }
 
     return NextResponse.json({
       success: true,
@@ -59,7 +116,7 @@ export async function PUT(
     });
   } catch (error: any) {
     console.error("Error in PUT /api/presentations/[id]:", error);
-    return apiError(error, { fallbackMessage: "প্রেজেন্টেশন আপডেট করতে ব্যর্থ হয়েছে" });
+    return apiError(error, { fallbackMessage: "প্রেজেন্টেশন আপডেট করতে সমস্যা হয়েছে" });
   }
 }
 
@@ -70,8 +127,16 @@ export async function DELETE(
   try {
     const { id } = await params;
     const deleted = deleteHybridPresentation(id);
+    let dbDeleted = false;
 
-    if (!deleted) {
+    if (isPrismaAvailable()) {
+      dbDeleted = await safePrismaQuery(async (p) => {
+        await p.presentation.delete({ where: { id } });
+        return true;
+      }, false);
+    }
+
+    if (!deleted && !dbDeleted) {
       return NextResponse.json(
         { success: false, message: "প্রেজেন্টেশন পাওয়া যায়নি বা ডিলিট করা যায়নি" },
         { status: 404 }
@@ -87,4 +152,3 @@ export async function DELETE(
     return apiError(error, { fallbackMessage: "প্রেজেন্টেশন মুছতে ব্যর্থ হয়েছে" });
   }
 }
-

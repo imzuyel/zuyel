@@ -195,6 +195,12 @@ export default function ClassesAndTradesView({
     }
   };
 
+  const notifyMasterUpdated = () => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ptsc_academic_master_updated"));
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
@@ -407,6 +413,7 @@ export default function ClassesAndTradesView({
         showToast(data.message || "শ্রেণি সফলভাবে সংরক্ষিত হয়েছে");
         setIsModalOpen(false);
         loadData();
+        notifyMasterUpdated();
       } else if (activeTab === "trades") {
         if (!tradeCode.trim() || !tradeNameBangla.trim()) {
           showToast("ট্রেডের কোড ও বাংলা নাম আবশ্যক", "error");
@@ -443,6 +450,7 @@ export default function ClassesAndTradesView({
         showToast(data.message || "কারিগরি ট্রেড সফলভাবে সংরক্ষিত হয়েছে");
         setIsModalOpen(false);
         loadData();
+        notifyMasterUpdated();
       } else if (activeTab === "labs") {
         if (!labName.trim() || !labCode.trim()) {
           showToast("ল্যাবের নাম ও কোড আবশ্যক", "error");

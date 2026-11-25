@@ -52,7 +52,17 @@ export default function TeacherDoubtReviewView() {
   const [teacherNameInput, setTeacherNameInput] = useState("প্রকৌ: মো: রফিকুল ইসলাম (চিফ ইন্সট্রাক্টর)");
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
-  const refreshDoubts = () => {
+  const refreshDoubts = async () => {
+    try {
+      const res = await fetch("/api/learning/doubts");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.doubts)) {
+          setDoubts(data.doubts);
+          return;
+        }
+      }
+    } catch {}
     setDoubts(getStudentDoubts());
   };
 
@@ -65,13 +75,12 @@ export default function TeacherDoubtReviewView() {
     setTimeout(() => setNotificationMsg(null), 3000);
   };
 
-  // Optimistic Answer / Reply Publication
-  const handlePublishAnswer = (doubtId: string) => {
+  // Optimistic Answer / Reply Publication + API Sync
+  const handlePublishAnswer = async (doubtId: string) => {
     if (!answerInputText.trim()) return;
     const textToPublish = answerInputText.trim();
     const tName = teacherNameInput.trim() || "PTSC বিষয়ভিত্তিক শিক্ষক";
 
-    // Optimistic UI state
     setDoubts((prev) =>
       prev.map((d) => {
         if (d.id === doubtId) {
@@ -99,36 +108,49 @@ export default function TeacherDoubtReviewView() {
     setAnswerInputText("");
     showNotification("উত্তর সফলভাবে প্রকাশিত হয়েছে এবং শিক্ষার্থীর চ্যাট থ্রেডে যুক্ত হয়েছে!");
 
-    // Background store sync
-    setTimeout(() => {
-      const updated = answerStudentDoubt(doubtId, textToPublish, tName);
-      setDoubts(updated);
-    }, 150);
+    try {
+      await fetch("/api/learning/doubts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doubtId, answer: textToPublish, teacherName: tName }),
+      });
+      answerStudentDoubt(doubtId, textToPublish, tName);
+    } catch {}
   };
 
-  // Optimistic Quick Resolve
-  const handleQuickResolve = (doubtId: string) => {
+  // Optimistic Quick Resolve + API Sync
+  const handleQuickResolve = async (doubtId: string) => {
     setDoubts((prev) =>
       prev.map((d) => (d.id === doubtId ? { ...d, status: "answered" as const } : d))
     );
     showNotification("প্রশ্নটি সমাধানকৃত হিসেবে চিহ্নিত করা হয়েছে।");
 
-    setTimeout(() => {
-      const updated = resolveStudentDoubt(doubtId);
-      setDoubts(updated);
-    }, 150);
+    try {
+      await fetch("/api/learning/doubts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          doubtId,
+          answer: "শিক্ষক দ্বারা ক্লাসে সরাসরি সমাধান প্রদান করা হয়েছে।",
+          teacherName: teacherNameInput.trim() || "PTSC বিষয়ভিত্তিক শিক্ষক",
+        }),
+      });
+      resolveStudentDoubt(doubtId);
+    } catch {}
   };
 
-  // Delete Doubt with Optimistic Update
-  const handleDeleteDoubt = (doubtId: string) => {
+  // Delete Doubt with Optimistic Update + API Sync
+  const handleDeleteDoubt = async (doubtId: string) => {
     if (confirm("আপনি কি নিশ্চিতভাবে এই প্রশ্নটি অপসারণ করতে চান?")) {
       setDoubts((prev) => prev.filter((d) => d.id !== doubtId));
       showNotification("প্রশ্নটি অপসারণ করা হয়েছে।");
 
-      setTimeout(() => {
-        const updated = deleteStudentDoubt(doubtId);
-        setDoubts(updated);
-      }, 150);
+      try {
+        await fetch(`/api/learning/doubts?id=${encodeURIComponent(doubtId)}`, {
+          method: "DELETE",
+        });
+        deleteStudentDoubt(doubtId);
+      } catch {}
     }
   };
 
@@ -224,11 +246,11 @@ export default function TeacherDoubtReviewView() {
             className="w-full text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white/80 dark:bg-slate-800/80 p-2.5 text-slate-800 dark:text-slate-200 focus:outline-none"
           >
             <option value="all">সব ট্রেড ও শ্রেণি</option>
-            <option value="ইলেকট্রিক্যাল">ইলেকট্রিক্যাল</option>
-            <option value="কম্পিউটার">কম্পিউটার ও আইওটি</option>
-            <option value="অটোমোবাইল">অটোমোবাইল</option>
-            <option value="আরএসি">রেফ্রিজারেশন (RAC)</option>
-            <option value="সিভিল">সিভিল কনস্ট্রাকশন</option>
+            <option value="General">৬ষ্ঠ–৮ম (সাধারণ / প্রি-ভোকেশনাল)</option>
+            <option value="IT Support">আইটি সাপোর্ট এন্ড আইওটি বেসিক্স</option>
+            <option value="Electrical">জেনারেল ইলেকট্রিক্যাল ওয়ার্কশপ</option>
+            <option value="Electronics">কনজিউমার ইলেকট্রনিক্স</option>
+            <option value="Apparel">এপারেল ম্যানুফ্যাকচারিং বেসিক্স</option>
           </select>
         </div>
 

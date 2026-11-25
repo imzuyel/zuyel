@@ -143,8 +143,21 @@ export default function Sidebar({
     const interval = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
       fetchStorageStatus();
-    }, 45000);
-    return () => clearInterval(interval);
+    }, 30000);
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        fetchStorageStatus();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    return () => {
+      clearInterval(interval);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+    };
   }, []);
 
   // 1-Click Sync to MySQL Action
@@ -477,7 +490,7 @@ export default function Sidebar({
                     }`}
                 />
                 <span className="text-[11px] font-black text-white truncate">
-                  {storageStatus?.mode === "MYSQL_LIVE" ? "🗄️ MySQL Live DB" : "⚡ Local Memory DB"}
+                  {storageStatus?.mode === "MYSQL_LIVE" ? "🗄️ MySQL Live" : "⚡ Local Fast Mode"}
                 </span>
               </div>
 
@@ -585,7 +598,7 @@ export default function Sidebar({
         onMouseLeave={() => {
           if (isCollapsed) setIsHovered(false);
         }}
-        className={`hidden md:flex h-screen max-h-screen sticky top-0 bg-[#101726]/95 dark:bg-[#101726]/95 [data-mode=dark]:bg-slate-950/95 text-slate-200 border-r border-slate-700/40 flex-col select-none font-sans shrink-0 z-30 shadow-2xl overflow-hidden ${!isVisuallyExpanded ? "p-2.5" : "p-3.5"
+        className={`hidden md:flex h-dvh max-h-dvh sticky top-0 bg-[#101726]/95 dark:bg-[#101726]/95 [data-mode=dark]:bg-slate-950/95 text-slate-200 border-r border-slate-700/40 flex-col select-none font-sans shrink-0 z-30 shadow-2xl overflow-y-auto overflow-x-hidden ${!isVisuallyExpanded ? "p-2.5" : "p-3.5"
           } ${className}`}
         aria-label="Institutional Unified Master Sidebar"
       >

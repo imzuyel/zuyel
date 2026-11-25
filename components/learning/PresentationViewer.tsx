@@ -36,6 +36,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import AiSlideToBlogModal from "./AiSlideToBlogModal";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import { doesClassHaveDepartment, ACADEMIC_CLASSES, ALL_TRADES } from "@/lib/academicConfig";
+import {
+  getPresentationThemeById,
+  getSlideSurfaceTokens,
+} from "@/lib/presentationThemes";
+import HostLiveFullscreenStage from "@/components/quiz/HostLiveFullscreenStage";
 
 export interface SlideData {
   id: string;
@@ -87,11 +94,34 @@ export default function PresentationViewer() {
   const [showExplanation, setShowExplanation] = useState<boolean>(false);
 
   // Bridges & Modals
+  const { selectedClassId: globalClassId, activeClassName } = useGlobalAcademic();
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [isBridgeQuizModalOpen, setIsBridgeQuizModalOpen] = useState<boolean>(false);
   const [createdLiveDeck, setCreatedLiveDeck] = useState<any | null>(null);
+  const [activeLiveHostSession, setActiveLiveHostSession] = useState<{
+    sessionId: string;
+    code: string;
+    title: string;
+    className?: string;
+    trade?: string;
+    subject?: string;
+    slides: any[];
+  } | null>(null);
   const [isBridgeSavingChapter, setIsBridgeSavingChapter] = useState<boolean>(false);
+  const [newThemeId, setNewThemeId] = useState<string>("twilight_indigo");
+
+  useEffect(() => {
+    if (selectedClassFilter !== "all" && !doesClassHaveDepartment(selectedClassFilter)) {
+      setSelectedTradeFilter("all");
+    }
+  }, [selectedClassFilter]);
+
+  useEffect(() => {
+    if (globalClassId && activeClassName && selectedClassFilter === "all") {
+      // Keep "all" by default unless filtering, or respect class-trade constraints
+    }
+  }, [globalClassId, activeClassName, selectedClassFilter]);
 
   // New Upload Form State
   const [newTitle, setNewTitle] = useState("");
@@ -193,64 +223,155 @@ export default function PresentationViewer() {
     setIsProjectionMode(true);
   };
 
-  // Bridge 1: 🚀 Start Live Quiz from this Presentation
+  // Bridge 1: 🚀 Start Live Quiz from this Presentation (Creates live-v2 room immediately)
   const handleBridgeStartLiveQuiz = async (pres: PresentationDeck) => {
     try {
-      const res = await fetch("/api/learning/teacher-analytics", {
+      const sourceSlides = Array.isArray(pres.slides) ? pres.slides : [];
+      const extractedMcqs = sourceSlides
+        .filter((s) => s.type === "MCQ" && Array.isArray(s.options) && s.options.length >= 2)
+        .map((s, idx) => ({
+          id: s.id || `pres_q_${idx + 1}`,
+          type: "MCQ",
+          question: s.question || s.interactiveQuestion || s.title || `প্রশ্ন ${idx + 1}`,
+          options: s.options!.slice(0, 4),
+          correctIndex: typeof s.correctAnswer === "number" ? s.correctAnswer : 0,
+          explanation: s.explanation || s.takeaway || "",
+          timeLimitSeconds: Number(s.timeLimit) || 25,
+          points: 1000,
+          subjectName: pres.subject,
+        }));
+
+      const fallbackQuestions =
+        extractedMcqs.length > 0
+          ? extractedMcqs
+          : sourceSlides.slice(0, 5).map((s, idx) => {
+              const correctPt =
+                s.takeaway ||
+                s.contentPoints?.[0] ||
+                `${s.title} সম্পর্কে সঠিক কারিগরি ধারণা`;
+              const dist1 = s.contentPoints?.[1] || "প্রয়োজনীয় সুরক্ষা ছাড়াই সরাসরি কাজ করা";
+              const dist2 = "নির্ধারিত মানদণ্ড ও নির্দেশনা উপেক্ষা করা";
+              const dist3 = "কোনো পরিমাপ বা পরীক্ষা ছাড়াই সমাপ্ত করা";
+              return {
+                id: s.id || `pres_conv_${idx + 1}`,
+                type: "MCQ",
+                question:
+                  s.interactiveQuestion ||
+                  `${pres.title}: "${s.title}" বিষয়ে কোন তথ্যটি সঠিক?`,
+                options: [correctPt, dist1, dist2, dist3],
+                correctIndex: 0,
+                explanation: s.takeaway || s.speakerNotes || correctPt,
+                timeLimitSeconds: 25,
+                points: 1000,
+                subjectName: pres.subject,
+              };
+            });
+
+      const res = await fetch("/api/live-v2/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "remedial_quiz",
-          topic: pres.title,
+          quizId: `pres_${pres.id}`,
+          quizTitle: `${pres.title} (লাইভ কুইজ)`,
           className: pres.className,
           trade: pres.trade,
+          subject: pres.subject,
+          hostName: pres.author || "শ্রেণি শিক্ষক",
+          slides: fallbackQuestions,
         }),
       });
-      const json = await res.json();
-      if (json.success && json.deck) {
-        setCreatedLiveDeck(json.deck);
+      const json = await res.json().catch(() => ({}));
+      if (json.ok && json.sessionId && json.code) {
+        setCreatedLiveDeck({
+          id: json.sessionId,
+          code: json.code,
+          title: pres.title,
+          className: pres.className,
+          trade: pres.trade,
+          subject: pres.subject,
+          slides: json.session?.slides || fallbackQuestions,
+        });
         setIsBridgeQuizModalOpen(true);
-        toast.success(`'${pres.title}' থেকে লাইভ কুইজ ডেক সফলভাবে তৈরি হয়েছে!`);
+        toast.success(`'${pres.title}' থেকে লাইভ কুইজ রুম (PIN: ${json.code}) তৈরি হয়েছে!`);
       } else {
-        toast.error("লাইভ কুইজ তৈরিতে সমস্যা হয়েছে");
+        toast.error(json?.error || "লাইভ কুইজ তৈরিতে সমস্যা হয়েছে");
       }
     } catch {
       toast.error("সার্ভার যোগাযোগে ত্রুটি হয়েছে");
     }
   };
 
-  // Bridge 2: 📖 Add to Chapter-wise Learning
+  // Bridge 2: 📖 Add to Chapter-wise Learning (Real Learning Hub chapter item API)
   const handleBridgeAddToChapterLearning = async (pres: PresentationDeck) => {
     setIsBridgeSavingChapter(true);
     try {
-      // Create blog lesson item in chapter learning store
-      const lessonTitle = `[স্লাইড ডেক] ${pres.title}`;
-      const res = await fetch("/api/learning/items", {
+      const coursesRes = await fetch("/api/learning/courses");
+      const coursesJson = await coursesRes.json().catch(() => ({}));
+      const coursesList: any[] = Array.isArray(coursesJson?.courses)
+        ? coursesJson.courses
+        : [];
+
+      const presClassNum = (pres.className || "").match(/\d+/)?.[0];
+      const matchedCourse =
+        coursesList.find((c) =>
+          presClassNum && String(c.className || "").includes(presClassNum)
+        ) || coursesList.find((c) => Array.isArray(c.chapters) && c.chapters.length > 0);
+
+      const targetChapter = matchedCourse?.chapters?.[0];
+      if (!targetChapter?.id) {
+        toast.error("লার্নিং হাবে যুক্ত করার মতো কোনো অধ্যায় পাওয়া যায়নি।");
+        return;
+      }
+
+      const lessonTitle = `[স্লাইড লেসন] ${pres.title}`;
+      const slidesList = Array.isArray(pres.slides) ? pres.slides : [];
+      const contentMarkdown = [
+        `# ${pres.title}`,
+        `**শ্রেণি:** ${pres.className} • **বিষয়:** ${pres.subject}`,
+        "",
+        ...slidesList.flatMap((s, i) => [
+          `## স্লাইড ${i + 1}: ${s.title}`,
+          s.subtitle ? `*${s.subtitle}*` : "",
+          ...(s.contentPoints || []).map((pt) => `- ${pt}`),
+          s.takeaway ? `\n> **সারসংক্ষেপ:** ${s.takeaway}` : "",
+          s.safetyInstruction ? `\n> ⚠️ **সতর্কতা:** ${s.safetyInstruction}` : "",
+          "",
+        ]),
+      ]
+        .filter((line) => line !== undefined)
+        .join("\n");
+
+      const res = await fetch(`/api/learning/chapters/${targetChapter.id}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: lessonTitle,
           titleBangla: lessonTitle,
           itemType: "BLOG_PART",
-          chapterId: 1, // Default to chapter 1 of IT course
-          content: JSON.stringify({
-            presentationId: pres.id,
-            title: pres.title,
-            slides: pres.slides,
-            summary: `${pres.className} (${pres.trade}) শিক্ষার্থীদের জন্য শ্রেণিকক্ষ স্লাইড লেসন।`,
-          }),
+          contentMarkdown,
+          summary: `${pres.className} শিক্ষার্থীদের জন্য "${pres.title}" প্রেজেন্টেশন পাঠ।`,
+          keyTakeaways: slidesList
+            .map((s) => s.takeaway)
+            .filter(Boolean)
+            .slice(0, 6),
+          readTimeMinutes: Math.max(3, slidesList.length),
+          xpReward: 25,
+          isPublished: true,
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (json.success) {
-        toast.success(`'${pres.title}' সফলভাবে অধ্যায়ভিত্তিক লার্নিংয়ে যুক্ত হয়েছে!`, {
-          description: "শিক্ষার্থীরা তাদের স্টুডেন্ট পোর্টাল থেকে এই স্লাইড লেসন পড়তে পারবে।",
-        });
+        toast.success(
+          `'${pres.title}' সফলভাবে "${targetChapter.titleBangla || targetChapter.title}" অধ্যায়ে যুক্ত হয়েছে!`,
+          {
+            description: "শিক্ষার্থীরা এখন স্টুডেন্ট লার্নিং পোর্টাল থেকে এই স্লাইড পাঠ পড়তে পারবে।",
+          }
+        );
       } else {
-        toast.success(`'${pres.title}' অধ্যায়ভিত্তিক লার্নিং মডিউলে সংরক্ষিত হয়েছে!`);
+        toast.error(json?.error || "অধ্যায়ে যুক্ত করতে সমস্যা হয়েছে।");
       }
     } catch {
-      toast.success(`'${pres.title}' অধ্যায়ভিত্তিক লার্নিংয়ে সফলভাবে সিঙ্ক হয়েছে!`);
+      toast.error("সার্ভারে সংযোগ করে অধ্যায়ে যুক্ত করা যায়নি।");
     } finally {
       setIsBridgeSavingChapter(false);
     }
@@ -278,13 +399,16 @@ export default function PresentationViewer() {
     if (!newTitle.trim()) return;
 
     try {
+      const resolvedTrade = doesClassHaveDepartment(newClassLevel)
+        ? newTrade
+        : "সাধারণ শিক্ষা";
       const newDeck: Partial<PresentationDeck> = {
         title: newTitle.trim(),
         className: newClassLevel,
-        trade: newTrade,
+        trade: resolvedTrade,
         subject: newSubject || "কারিগরি বিষয়",
         slideCount: 5,
-        theme: "cyberpunk_neon",
+        theme: newThemeId || "twilight_indigo",
         author: newAuthor,
         slides: [
           {
@@ -446,20 +570,28 @@ export default function PresentationViewer() {
             onChange={(e) => setSelectedClassFilter(e.target.value)}
             className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden"
           >
-            <option value="all">সকল শ্রেণি (Class 9 - 12)</option>
-            <option value="Class 9">শ্রেণি ৯ (ভোকেশনাল)</option>
-            <option value="Class 10">শ্রেণি ১০ (ভোকেশনাল)</option>
+            <option value="all">সকল শ্রেণি (Class 6 - 12)</option>
+            {ACADEMIC_CLASSES.map((c) => (
+              <option key={c.id} value={c.name}>
+                {c.nameBangla}
+              </option>
+            ))}
           </select>
 
-          <select
-            value={selectedTradeFilter}
-            onChange={(e) => setSelectedTradeFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden"
-          >
-            <option value="all">সকল টেকনোলজি / ট্রেড</option>
-            <option value="Computer">কম্পিউটার ও আইটি</option>
-            <option value="Electrical">ইলেকট্রিক্যাল ও ইলেকট্রনিক্স</option>
-          </select>
+          {(selectedClassFilter === "all" || doesClassHaveDepartment(selectedClassFilter)) && (
+            <select
+              value={selectedTradeFilter}
+              onChange={(e) => setSelectedTradeFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-hidden"
+            >
+              <option value="all">সকল টেকনোলজি / ট্রেড</option>
+              {Array.from(new Map(ALL_TRADES.map((t) => [t.name, t])).values()).map((t) => (
+                <option key={t.code} value={t.name.split(" ")[0]}>
+                  {t.nameBangla}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex items-center gap-2 text-xs font-mono font-bold text-slate-500">
@@ -593,11 +725,19 @@ export default function PresentationViewer() {
       {/* ========================================================
           FULLSCREEN CLASSROOM PROJECTOR STAGE
          ======================================================== */}
-      {isProjectionMode && activePres && (
+      {isProjectionMode && activePres && (() => {
+        const activePresTheme = getPresentationThemeById(activePres.theme);
+        const tokens = getSlideSurfaceTokens(activePresTheme);
+        return (
         <div
           ref={projectionContainerRef}
           onMouseMove={handleMouseMove}
-          className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white select-none overflow-hidden animate-fade-in"
+          className="fixed inset-0 z-50 flex flex-col select-none overflow-hidden animate-fade-in"
+          style={{
+            colorScheme: tokens.colorScheme,
+            backgroundColor: tokens.stageBg,
+            color: tokens.headingColor,
+          }}
         >
           {/* Virtual Laser Pointer Cursor */}
           {isLaserPointerActive && (
@@ -608,20 +748,42 @@ export default function PresentationViewer() {
           )}
 
           {/* Projector Top Control Bar */}
-          <div className="px-6 py-3.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div
+            className="px-6 py-3.5 backdrop-blur-md border-b flex items-center justify-between shrink-0"
+            style={{
+              backgroundColor: tokens.mutedSurfaceBg,
+              borderColor: tokens.mutedSurfaceBorder,
+              color: tokens.headingColor,
+            }}
+          >
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
+              <div
+                className="p-2 rounded-xl"
+                style={{
+                  backgroundColor: `${tokens.accentColor}25`,
+                  color: tokens.accentColor,
+                }}
+              >
                 <Monitor className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-sm font-black text-white flex items-center gap-2">
+                <h2
+                  className="text-sm font-black flex items-center gap-2"
+                  style={{ color: tokens.headingColor }}
+                >
                   <span>{activePres.title}</span>
-                  <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-cyan-300 text-[10px] font-mono">
-                    {activePres.className} • {activePres.trade}
+                  <span
+                    className="px-2 py-0.5 rounded-full text-[10px] font-mono"
+                    style={{
+                      backgroundColor: `${tokens.accentColor}22`,
+                      color: tokens.accentColor,
+                    }}
+                  >
+                    {activePres.className} {activePres.trade ? `• ${activePres.trade}` : ""}
                   </span>
                 </h2>
-                <p className="text-[11px] text-slate-400 font-mono">
-                  স্লাইড {currentSlideIndex + 1} / {activePres.slides?.length || 1}
+                <p className="text-[11px] font-mono" style={{ color: tokens.bodyColor }}>
+                  স্লাইড {currentSlideIndex + 1} / {activePres.slides?.length || 1} • {activePresTheme.name}
                 </p>
               </div>
             </div>
@@ -631,11 +793,16 @@ export default function PresentationViewer() {
               {/* Virtual Laser Pointer Toggle */}
               <button
                 onClick={() => setIsLaserPointerActive((prev) => !prev)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border"
+                style={
                   isLaserPointerActive
-                    ? "bg-rose-600 text-white shadow-lg shadow-rose-600/40"
-                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                }`}
+                    ? { backgroundColor: "#E11D48", color: "#FFFFFF", borderColor: "#FB7185" }
+                    : {
+                        backgroundColor: tokens.cardBg,
+                        color: tokens.headingColor,
+                        borderColor: tokens.cardBorder,
+                      }
+                }
                 title="লেজার পয়েন্টার অন/অফ (শর্টকাট: L)"
               >
                 <div className={`w-2 h-2 rounded-full ${isLaserPointerActive ? "bg-white animate-ping" : "bg-rose-500"}`} />
@@ -645,21 +812,31 @@ export default function PresentationViewer() {
               {/* Speaker Notes Toggle */}
               <button
                 onClick={() => setIsSpeakerNotesOpen((prev) => !prev)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border"
+                style={
                   isSpeakerNotesOpen
-                    ? "bg-amber-600 text-white shadow-lg shadow-amber-600/40"
-                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                }`}
+                    ? { backgroundColor: "#D97706", color: "#FFFFFF", borderColor: "#FBBF24" }
+                    : {
+                        backgroundColor: tokens.cardBg,
+                        color: tokens.headingColor,
+                        borderColor: tokens.cardBorder,
+                      }
+                }
                 title="শিক্ষকের লেকচার নোটস (শর্টকাট: N)"
               >
-                <FileText className="w-3.5 h-3.5 text-amber-300" />
+                <FileText className="w-3.5 h-3.5" />
                 <span>স্পিকার নোটস</span>
               </button>
 
               {/* Fullscreen Toggle */}
               <button
                 onClick={toggleFullscreen}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer"
+                className="p-2 rounded-xl border cursor-pointer transition"
+                style={{
+                  backgroundColor: tokens.cardBg,
+                  color: tokens.headingColor,
+                  borderColor: tokens.cardBorder,
+                }}
                 title="ফুলস্ক্রিন টগল (শর্টকাট: F)"
               >
                 {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -671,7 +848,12 @@ export default function PresentationViewer() {
                   setIsProjectionMode(false);
                   setIsFullscreen(false);
                 }}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white transition cursor-pointer"
+                className="p-2 rounded-xl border hover:bg-rose-600 hover:text-white transition cursor-pointer"
+                style={{
+                  backgroundColor: tokens.cardBg,
+                  color: tokens.headingColor,
+                  borderColor: tokens.cardBorder,
+                }}
                 title="প্রজেক্টর মোড থেকে বের হন (Esc)"
               >
                 <X className="w-4 h-4" />
@@ -680,20 +862,36 @@ export default function PresentationViewer() {
           </div>
 
           {/* Slide Center Canvas */}
-          <div className="flex-1 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-6 sm:p-12 flex flex-col justify-center items-center relative overflow-y-auto">
+          <div
+            className="flex-1 p-6 sm:p-12 flex flex-col justify-center items-center relative overflow-y-auto"
+            style={{ backgroundColor: tokens.stageBg, color: tokens.headingColor }}
+          >
             <div className="max-w-4xl w-full my-auto space-y-6 text-center animate-scale-up">
-              <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 text-xs font-mono font-bold">
+              <div
+                className="inline-flex items-center gap-2 px-4 py-1 rounded-full border text-xs font-mono font-bold"
+                style={{
+                  backgroundColor: `${tokens.accentColor}22`,
+                  borderColor: `${tokens.accentColor}55`,
+                  color: tokens.accentColor,
+                }}
+              >
                 <span>স্লাইড {currentSlideIndex + 1}</span>
                 <span>•</span>
                 <span>{currentSlide.type || "CONTENT"}</span>
               </div>
 
-              <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight leading-tight">
+              <h1
+                className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight"
+                style={{ color: tokens.headingColor }}
+              >
                 {currentSlide.title}
               </h1>
 
               {currentSlide.subtitle && (
-                <p className="text-base sm:text-xl text-cyan-300 font-semibold font-mono">
+                <p
+                  className="text-base sm:text-xl font-semibold font-mono"
+                  style={{ color: tokens.accentColor }}
+                >
                   {currentSlide.subtitle}
                 </p>
               )}
@@ -702,8 +900,15 @@ export default function PresentationViewer() {
               {currentSlide.type === "MCQ" ? (
                 /* Interactive Quiz Slide */
                 <div className="max-w-2xl mx-auto space-y-4 text-left pt-4">
-                  <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-400/30 text-amber-200 text-base font-bold flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-amber-400 shrink-0" />
+                  <div
+                    className="p-4 rounded-2xl border text-base font-bold flex items-center gap-2"
+                    style={{
+                      backgroundColor: tokens.alertBg,
+                      borderColor: `${tokens.alertText}55`,
+                      color: tokens.alertText,
+                    }}
+                  >
+                    <Zap className="w-5 h-5 shrink-0" />
                     <span>{currentSlide.question || currentSlide.interactiveQuestion}</span>
                   </div>
 
@@ -724,8 +929,17 @@ export default function PresentationViewer() {
                               ? "bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-500/30"
                               : showExplanation && isPicked && !isCorrect
                               ? "bg-rose-600 text-white border-rose-400"
-                              : "bg-slate-900/80 border-slate-700 hover:border-cyan-400 text-slate-200"
+                              : "hover:opacity-95"
                           }`}
+                          style={
+                            showExplanation && (isCorrect || isPicked)
+                              ? undefined
+                              : {
+                                  backgroundColor: tokens.cardBg,
+                                  borderColor: tokens.cardBorder,
+                                  color: tokens.headingColor,
+                                }
+                          }
                         >
                           <span>{opt}</span>
                           {showExplanation && isCorrect && <CheckCircle2 className="w-4 h-4 text-white" />}
@@ -735,8 +949,15 @@ export default function PresentationViewer() {
                   </div>
 
                   {showExplanation && currentSlide.explanation && (
-                    <div className="p-3.5 rounded-2xl bg-indigo-950/60 border border-indigo-500/30 text-xs text-indigo-200 animate-fade-in">
-                      <strong className="text-cyan-400 block mb-0.5">ব্যাখ্যা:</strong>
+                    <div
+                      className="p-3.5 rounded-2xl border text-xs animate-fade-in"
+                      style={{
+                        backgroundColor: tokens.cardBg,
+                        borderColor: tokens.cardBorder,
+                        color: tokens.bodyColor,
+                      }}
+                    >
+                      <strong className="block mb-0.5" style={{ color: tokens.accentColor }}>ব্যাখ্যা:</strong>
                       {currentSlide.explanation}
                     </div>
                   )}
@@ -749,9 +970,17 @@ export default function PresentationViewer() {
                       {currentSlide.contentPoints.map((pt: string, pIdx: number) => (
                         <li
                           key={pIdx}
-                          className="flex items-start gap-3 text-sm sm:text-base text-slate-200 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800"
+                          className="flex items-start gap-3 text-sm sm:text-base p-3.5 rounded-2xl border"
+                          style={{
+                            backgroundColor: tokens.cardBg,
+                            borderColor: tokens.cardBorder,
+                            color: tokens.headingColor,
+                          }}
                         >
-                          <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0 mt-2" />
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0 mt-2"
+                            style={{ backgroundColor: tokens.accentColor }}
+                          />
                           <span>{pt}</span>
                         </li>
                       ))}
@@ -759,18 +988,25 @@ export default function PresentationViewer() {
                   )}
 
                   {currentSlide.takeaway && (
-                    <div className="p-4 rounded-2xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-200 text-xs sm:text-sm font-semibold flex items-start gap-2.5">
-                      <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                    <div
+                      className="p-4 rounded-2xl border text-xs sm:text-sm font-semibold flex items-start gap-2.5"
+                      style={{
+                        backgroundColor: tokens.mutedSurfaceBg,
+                        borderColor: `${tokens.accentColor}50`,
+                        color: tokens.bodyColor,
+                      }}
+                    >
+                      <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: tokens.accentColor }} />
                       <div>
-                        <strong className="text-white block font-bold">মূল টেক-অ্যাওয়ে (Key Takeaway):</strong>
+                        <strong className="block font-bold" style={{ color: tokens.headingColor }}>মূল টেক-অ্যাওয়ে (Key Takeaway):</strong>
                         {currentSlide.takeaway}
                       </div>
                     </div>
                   )}
 
                   {currentSlide.safetyInstruction && (
-                    <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/30 text-rose-200 text-xs font-semibold flex items-start gap-2.5">
-                      <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="p-4 rounded-2xl bg-rose-950/85 border border-rose-400/50 text-rose-100 text-xs font-semibold flex items-start gap-2.5">
+                      <ShieldAlert className="w-5 h-5 text-rose-300 shrink-0 mt-0.5" />
                       <div>
                         <strong className="text-white block font-bold">ল্যাব নিরাপত্তা নির্দেশিকা:</strong>
                         {currentSlide.safetyInstruction}
@@ -783,7 +1019,7 @@ export default function PresentationViewer() {
 
             {/* Collapsible Speaker Notes Drawer */}
             {isSpeakerNotesOpen && (
-              <div className="absolute bottom-20 left-6 right-6 max-w-3xl mx-auto p-4 rounded-2xl bg-amber-950/90 backdrop-blur-xl border border-amber-500/40 text-amber-100 text-xs shadow-2xl animate-slide-up">
+              <div className="absolute bottom-20 left-6 right-6 max-w-3xl mx-auto p-4 rounded-2xl bg-amber-950/95 backdrop-blur-xl border border-amber-500/40 text-amber-100 text-xs shadow-2xl animate-slide-up">
                 <div className="flex items-center justify-between pb-2 border-b border-amber-500/30 mb-2">
                   <span className="font-black text-amber-300 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
                     <FileText className="w-3.5 h-3.5" />
@@ -804,7 +1040,14 @@ export default function PresentationViewer() {
           </div>
 
           {/* Projector Bottom Scrubber & Navigation Bar */}
-          <div className="px-6 py-3.5 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 flex items-center justify-between shrink-0">
+          <div
+            className="px-6 py-3.5 backdrop-blur-md border-t flex items-center justify-between shrink-0"
+            style={{
+              backgroundColor: tokens.mutedSurfaceBg,
+              borderColor: tokens.mutedSurfaceBorder,
+              color: tokens.headingColor,
+            }}
+          >
             <button
               onClick={() => {
                 setCurrentSlideIndex((prev) => Math.max(0, prev - 1));
@@ -812,7 +1055,12 @@ export default function PresentationViewer() {
                 setShowExplanation(false);
               }}
               disabled={currentSlideIndex === 0}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 rounded-xl border font-bold text-xs disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+              style={{
+                backgroundColor: tokens.cardBg,
+                borderColor: tokens.cardBorder,
+                color: tokens.headingColor,
+              }}
             >
               <ChevronLeft className="w-4 h-4" />
               <span>পূর্ববর্তী স্লাইড (←)</span>
@@ -829,10 +1077,11 @@ export default function PresentationViewer() {
                     setShowExplanation(false);
                   }}
                   className={`h-2.5 rounded-full transition-all cursor-pointer ${
-                    currentSlideIndex === idx
-                      ? "bg-cyan-400 w-8"
-                      : "bg-slate-700 hover:bg-slate-600 w-2.5"
+                    currentSlideIndex === idx ? "w-8" : "w-2.5 opacity-45 hover:opacity-80"
                   }`}
+                  style={{
+                    backgroundColor: currentSlideIndex === idx ? tokens.accentColor : tokens.bodyColor,
+                  }}
                   title={`স্লাইড ${idx + 1}`}
                 />
               ))}
@@ -847,14 +1096,19 @@ export default function PresentationViewer() {
                 setShowExplanation(false);
               }}
               disabled={currentSlideIndex >= (activePres.slides?.length || 1) - 1}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+              style={{
+                backgroundColor: tokens.accentColor,
+                color: tokens.pillTextColor,
+              }}
             >
               <span>পরবর্তী স্লাইড (→)</span>
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* AI Slide-to-Blog Modal */}
       <AiSlideToBlogModal
@@ -882,32 +1136,65 @@ export default function PresentationViewer() {
             </div>
 
             <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-1">
-              <div className="font-bold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>লাইভ কুইজ ডেক আইডি: {createdLiveDeck.id}</span>
+              <div className="font-bold flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>লাইভ রুম PIN: <strong className="font-mono text-sm tracking-widest text-indigo-600 dark:text-amber-300">{createdLiveDeck.code}</strong></span>
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {createdLiveDeck.slides?.length || 0} টি প্রশ্ন
+                </span>
               </div>
               <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                শ্রেণি: {createdLiveDeck.className} • ট্রেড: {createdLiveDeck.trade}
+                শ্রেণি: {createdLiveDeck.className} {createdLiveDeck.trade ? `• ট্রেড: ${createdLiveDeck.trade}` : ""}
               </p>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex items-center gap-2.5 pt-2">
               <button
+                type="button"
                 onClick={() => setIsBridgeQuizModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-200 cursor-pointer"
+                className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-200 cursor-pointer"
               >
                 বন্ধ করুন
               </button>
-              <a
-                href="/admin?tab=quiz_admin"
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer hover:scale-102 transition-transform"
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveLiveHostSession({
+                    sessionId: createdLiveDeck.id,
+                    code: createdLiveDeck.code,
+                    title: createdLiveDeck.title,
+                    className: createdLiveDeck.className,
+                    trade: createdLiveDeck.trade,
+                    subject: createdLiveDeck.subject,
+                    slides: createdLiveDeck.slides || [],
+                  });
+                  setIsBridgeQuizModalOpen(false);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer hover:scale-[1.02] transition-transform"
               >
-                <span>🚀 লাইভ স্টুডিওতে যান</span>
-                <ArrowUpRight className="w-4 h-4" />
-              </a>
+                <Zap className="w-4 h-4" />
+                <span>🚀 সরাসরি লাইভ হোস্ট করুন</span>
+              </button>
             </div>
           </div>
         </div>
+      )}
+
+      {activeLiveHostSession && (
+        <HostLiveFullscreenStage
+          sessionId={activeLiveHostSession.sessionId}
+          sessionCode={activeLiveHostSession.code}
+          deckTitle={activeLiveHostSession.title}
+          slides={activeLiveHostSession.slides}
+          className={activeLiveHostSession.className}
+          tradeName={activeLiveHostSession.trade}
+          subjectName={activeLiveHostSession.subject}
+          initialStage="LOBBY"
+          onClose={() => setActiveLiveHostSession(null)}
+          onEnded={() => setActiveLiveHostSession(null)}
+        />
       )}
 
       {/* Upload / Create Presentation Modal */}
@@ -942,7 +1229,7 @@ export default function PresentationViewer() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={`grid ${doesClassHaveDepartment(newClassLevel) ? "grid-cols-2" : "grid-cols-1"} gap-3`}>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-800 dark:text-slate-200">শ্রেণি</label>
                   <select
@@ -950,26 +1237,45 @@ export default function PresentationViewer() {
                     onChange={(e) => setNewClassLevel(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white focus:outline-hidden"
                   >
-                    <option value="Class 9">শ্রেণি ৯ (ভোকেশনাল)</option>
-                    <option value="Class 10">শ্রেণি ১০ (ভোকেশনাল)</option>
-                    <option value="Class 11">একাদশ শ্রেণি</option>
-                    <option value="Class 12">দ্বাদশ শ্রেণি</option>
+                    {ACADEMIC_CLASSES.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.nameBangla}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-800 dark:text-slate-200">ট্রেড</label>
-                  <select
-                    value={newTrade}
-                    onChange={(e) => setNewTrade(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white focus:outline-hidden"
-                  >
-                    <option value="Computer & IT">কম্পিউটার ও আইটি</option>
-                    <option value="Electrical & Electronics">ইলেকট্রিক্যাল ও ইলেকট্রনিক্স</option>
-                    <option value="Civil & Construction">সিভিল অ্যান্ড কনস্ট্রাকশন</option>
-                    <option value="Automobile">অটোমোবাইল টেকনোলজি</option>
-                  </select>
-                </div>
+                {doesClassHaveDepartment(newClassLevel) && (
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-800 dark:text-slate-200">ট্রেড</label>
+                    <select
+                      value={newTrade}
+                      onChange={(e) => setNewTrade(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white focus:outline-hidden"
+                    >
+                      {Array.from(new Map(ALL_TRADES.map((t) => [t.name, t])).values()).map((t) => (
+                        <option key={t.code} value={t.name}>
+                          {t.nameBangla}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 dark:text-slate-200">স্লাইড থিম (Contrast-Paired)</label>
+                <select
+                  value={newThemeId}
+                  onChange={(e) => setNewThemeId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white focus:outline-hidden"
+                >
+                  <option value="twilight_indigo">🌌 Twilight Indigo (Default)</option>
+                  <option value="twilight_slate">🌆 Twilight Slate (Hybrid)</option>
+                  <option value="midnight_cyber">⚡ Midnight Cyber (Dark)</option>
+                  <option value="emerald_tech">🌿 Emerald Tech (Dark)</option>
+                  <option value="clean_academic_light">🏛️ Clean Academic Light (Light)</option>
+                </select>
               </div>
 
               <div className="space-y-1">

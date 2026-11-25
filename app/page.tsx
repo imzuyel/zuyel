@@ -68,11 +68,11 @@ export default function HomePage() {
   const [noticesLoading, setNoticesLoading] = useState(true);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [stats, setStats] = useState({
-    students: 1250,
-    teachers: 42,
-    trades: 4,
-    labs: 9,
-    passRate: "98.6%"
+    students: 0,
+    teachers: 0,
+    trades: 0,
+    labs: 0,
+    passRate: "0%"
   });
 
   useEffect(() => {
@@ -80,6 +80,26 @@ export default function HomePage() {
     safeFetchJson("/api/cms").then((data) => {
       if (data.success && data.config) {
         setCmsConfig(data.config);
+      }
+    });
+
+    // Fetch real institutional summary counts
+    safeFetchJson<any>("/api/dashboard/summary?view=public").then((res) => {
+      const payload = res?.data || res;
+      if (payload?.coreErp) {
+        const passPct =
+          Number(payload?.coreErp?.todayAttendance?.percentage) > 0
+            ? `${payload.coreErp.todayAttendance.percentage}%`
+            : "0%";
+        setStats({
+          students: Number(payload.coreErp.totalStudents) || 0,
+          teachers: Number(payload.coreErp.totalFaculty) || 0,
+          trades: Array.isArray(payload.coreErp.tradeDistribution)
+            ? payload.coreErp.tradeDistribution.filter((t: any) => t.code !== "GEN").length
+            : 0,
+          labs: Number(payload.coreErp.totalLabs ?? payload.moduleKpi?.labs?.total) || 0,
+          passRate: passPct,
+        });
       }
     });
 
@@ -349,11 +369,11 @@ export default function HomePage() {
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <StaggerContainer staggerDelay={0.08} className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[
-              { label: "মোট শিক্ষার্থী", num: 1250, suffix: "+", icon: Users, variant: "cyan" as const, color: "text-cyan-500" },
-              { label: "দক্ষ শিক্ষক ও কর্মকর্তা", num: 42, suffix: " জন", icon: Award, variant: "indigo" as const, color: "text-indigo-500" },
-              { label: "কারিগরি ট্রেড", num: 4, suffix: "টি", icon: Cpu, variant: "emerald" as const, color: "text-emerald-500" },
-              { label: "ব্যবহারিক ল্যাব ও ওয়ার্কশপ", num: 13, suffix: "টি", icon: Layers, variant: "amber" as const, color: "text-amber-500" },
-              { label: "বোর্ড পাসের হার", num: 98.6, decimals: 1, suffix: "%", icon: CheckCircle2, variant: "teal" as const, color: "text-teal-500" },
+              { label: "মোট শিক্ষার্থী", num: stats.students, suffix: "+", icon: Users, variant: "cyan" as const, color: "text-cyan-500" },
+              { label: "দক্ষ শিক্ষক ও কর্মকর্তা", num: stats.teachers, suffix: " জন", icon: Award, variant: "indigo" as const, color: "text-indigo-500" },
+              { label: "কারিগরি ট্রেড", num: stats.trades, suffix: "টি", icon: Cpu, variant: "emerald" as const, color: "text-emerald-500" },
+              { label: "ব্যবহারিক ল্যাব ও ওয়ার্কশপ", num: stats.labs, suffix: "টি", icon: Layers, variant: "amber" as const, color: "text-amber-500" },
+              { label: "আজকের উপস্থিতি", num: parseFloat(String(stats.passRate)) || 0, decimals: 1, suffix: "%", icon: CheckCircle2, variant: "teal" as const, color: "text-teal-500" },
             ].map((stat, i) => {
               const Icon = stat.icon;
               return (

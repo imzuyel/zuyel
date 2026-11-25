@@ -72,8 +72,8 @@ export default function StudentDoubtBox({
     (resolvedContextType === "quiz_question"
       ? `কুইজ প্রশ্ন: ${quizQuestionText?.slice(0, 48)}...`
       : resolvedContextType === "chapter"
-      ? `অধ্যায়: ${chapterTitle || effectiveLessonTitle}`
-      : `পাঠ: ${effectiveLessonTitle}`);
+        ? `অধ্যায়: ${chapterTitle || effectiveLessonTitle}`
+        : `পাঠ: ${effectiveLessonTitle}`);
 
   const [doubts, setDoubts] = useState<StudentDoubtItem[]>([]);
   const [studentName, setStudentName] = useState(defaultStudentName);
@@ -84,25 +84,46 @@ export default function StudentDoubtBox({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedToast, setSubmittedToast] = useState<string | null>(null);
 
-  // Sync doubts from store on mount or context change
+  // Sync doubts from API (Hybrid Store + MySQL) merged with local cache on mount or context change
   useEffect(() => {
-    const all = getStudentDoubts();
-    const filtered = all.filter(
-      (d) =>
-        d.lessonId === effectiveLessonId ||
-        (contextTitle && d.contextTitle === contextTitle) ||
-        (chapterTitle && d.contextTitle?.includes(chapterTitle))
-    );
-    setDoubts(filtered);
+    let active = true;
+    const loadDoubts = async () => {
+      try {
+        const res = await fetch(
+          `/api/learning/doubts?lessonId=${encodeURIComponent(effectiveLessonId)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (active && data.success && Array.isArray(data.doubts)) {
+            setDoubts(data.doubts);
+            return;
+          }
+        }
+      } catch { }
+      if (!active) return;
+      const all = getStudentDoubts();
+      const filtered = all.filter(
+        (d) =>
+          d.lessonId === effectiveLessonId ||
+          (contextTitle && d.contextTitle === contextTitle) ||
+          (chapterTitle && d.contextTitle?.includes(chapterTitle))
+      );
+      setDoubts(filtered);
+    };
+    loadDoubts();
+    return () => {
+      active = false;
+    };
   }, [effectiveLessonId, contextTitle, chapterTitle]);
 
-  // Handle new question submission with Optimistic UI updates
+  // Handle new question submission with Optimistic UI updates + Server Persistence
   const handleSubmitDoubt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!questionText.trim()) return;
 
     const sName = studentName.trim() || "PTSC শিক্ষার্থী";
-    const sRoll = studentRoll.trim() ? `রোল: ${studentRoll.trim()}` : "রোল: উল্লেখহীন";
+    const sRollClean = studentRoll.trim();
+    const sRollDisplay = sRollClean ? `রোল: ${sRollClean}` : "রোল: উল্লেখহীন";
     const textToSubmit = questionText.trim();
     const tempId = `temp-doubt-${Date.now()}`;
 
@@ -112,7 +133,7 @@ export default function StudentDoubtBox({
       lessonId: effectiveLessonId,
       lessonTitle: effectiveLessonTitle,
       studentName: sName,
-      studentRoll: sRoll,
+      studentRoll: sRollDisplay,
       tradeClass: effectiveTradeClass,
       question: textToSubmit,
       status: "pending",
@@ -126,15 +147,30 @@ export default function StudentDoubtBox({
     setDoubts((prev) => [optimisticDoubt, ...prev]);
     setQuestionText("");
     setIsSubmitting(true);
-    setSubmittedToast("প্রশ্নটি শিক্ষকের ইনবক্সে পৌঁছানো হচ্ছে...");
+    setSubmittedToast("প্রশ্নটি শিক্ষকের ইনবক্সে সংরক্ষণ করা হচ্ছে...");
 
-    // 2. Persist to storage with small natural async delay
-    setTimeout(() => {
-      const updatedAll = saveStudentDoubt({
+    try {
+      const apiRes = await fetch("/api/learning/doubts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lessonId: effectiveLessonId,
+          lessonTitle: effectiveLessonTitle,
+          studentName: sName,
+          studentRoll: sRollClean,
+          tradeClass: effectiveTradeClass,
+          question: textToSubmit,
+          contextType: resolvedContextType,
+          contextTitle: resolvedContextTitle,
+          questionNumber: quizQuestionId ? String(quizQuestionId) : undefined,
+        }),
+      });
+      const apiData = await apiRes.json();
+      saveStudentDoubt({
         lessonId: effectiveLessonId,
         lessonTitle: effectiveLessonTitle,
         studentName: sName,
-        studentRoll: sRoll,
+        studentRoll: sRollDisplay,
         tradeClass: effectiveTradeClass,
         question: textToSubmit,
         contextType: resolvedContextType,
@@ -142,29 +178,26 @@ export default function StudentDoubtBox({
         questionNumber: quizQuestionId ? String(quizQuestionId) : undefined,
       });
 
-      const refreshed = updatedAll.filter(
-        (d) =>
-          d.lessonId === effectiveLessonId ||
-          (contextTitle && d.contextTitle === contextTitle) ||
-          (chapterTitle && d.contextTitle?.includes(chapterTitle))
-      );
-
-      setDoubts(refreshed);
-      setIsSubmitting(false);
+      if (apiRes.ok && apiData.success && apiData.doubt) {
+        setDoubts((prev) => [apiData.doubt, ...prev.filter((d) => d.id !== tempId)]);
+      }
       setSubmittedToast("✅ প্রশ্নটি সফলভাবে জমা হয়েছে! বিষয় শিক্ষক সমাধান দিলে সরাসরি দেখতে পাবেন।");
+    } catch {
+      setSubmittedToast("⚠️ লোকাল ইনবক্সে সংরক্ষিত হয়েছে।");
+    } finally {
+      setIsSubmitting(false);
       setTimeout(() => setSubmittedToast(null), 4000);
-    }, 350);
+    }
   };
 
-  // Handle follow-up reply submission with Optimistic UI updates
-  const handleSendReply = (doubtId: string) => {
+  // Handle follow-up reply submission with Optimistic UI updates + Server Persistence
+  const handleSendReply = async (doubtId: string) => {
     if (!replyInputText.trim()) return;
 
     const textToReply = replyInputText.trim();
     const sName = studentName.trim() || "PTSC শিক্ষার্থী";
     const tempReplyId = `temp-reply-${Date.now()}`;
 
-    // 1. Optimistic Reply
     const optimisticReply: StudentDoubtReply = {
       id: tempReplyId,
       sender: "student",
@@ -178,22 +211,24 @@ export default function StudentDoubtBox({
     );
     setReplyInputText("");
 
-    // 2. Persist to storage
-    setTimeout(() => {
-      const updated = addDoubtReply(doubtId, {
+    try {
+      await fetch("/api/learning/doubts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reply",
+          doubtId,
+          sender: "student",
+          senderName: sName,
+          text: textToReply,
+        }),
+      });
+      addDoubtReply(doubtId, {
         sender: "student",
         senderName: sName,
         text: textToReply,
       });
-
-      const refreshed = updated.filter(
-        (d) =>
-          d.lessonId === effectiveLessonId ||
-          (contextTitle && d.contextTitle === contextTitle) ||
-          (chapterTitle && d.contextTitle?.includes(chapterTitle))
-      );
-      setDoubts(refreshed);
-    }, 250);
+    } catch { }
   };
 
   return (
@@ -352,11 +387,10 @@ export default function StudentDoubtBox({
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-400 font-mono">{d.createdAt}</span>
                       <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 ${
-                          isAnswered
-                            ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800/50"
-                            : "bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-300/60 dark:border-amber-800/50"
-                        }`}
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 ${isAnswered
+                          ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800/50"
+                          : "bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-300/60 dark:border-amber-800/50"
+                          }`}
                       >
                         {isAnswered ? (
                           <>
@@ -414,20 +448,18 @@ export default function StudentDoubtBox({
                         return (
                           <div key={reply.id} className="flex items-start gap-2.5">
                             <div
-                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5 ${
-                                isTeacher
-                                  ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-600"
-                                  : "bg-indigo-100 dark:bg-indigo-950 text-indigo-600"
-                              }`}
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5 ${isTeacher
+                                ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-600"
+                                : "bg-indigo-100 dark:bg-indigo-950 text-indigo-600"
+                                }`}
                             >
                               {isTeacher ? "T" : "S"}
                             </div>
                             <div
-                              className={`flex-1 rounded-2xl p-3 text-xs leading-relaxed border ${
-                                isTeacher
-                                  ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/60 text-slate-800 dark:text-slate-200"
-                                  : "bg-white/80 dark:bg-slate-900/80 border-slate-200/60 text-slate-800 dark:text-slate-200"
-                              }`}
+                              className={`flex-1 rounded-2xl p-3 text-xs leading-relaxed border ${isTeacher
+                                ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/60 text-slate-800 dark:text-slate-200"
+                                : "bg-white/80 dark:bg-slate-900/80 border-slate-200/60 text-slate-800 dark:text-slate-200"
+                                }`}
                             >
                               <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 mb-1 font-mono">
                                 <span className={isTeacher ? "text-emerald-600 dark:text-emerald-400" : "text-indigo-600 dark:text-indigo-400"}>

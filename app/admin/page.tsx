@@ -251,9 +251,15 @@ export default function AdminPage() {
   React.useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get("tab") as AdminTab;
-      if (tabParam) {
-        setActiveTab(tabParam);
+      const rawTab = params.get("tab") as string | null;
+      if (rawTab) {
+        const mappedTab =
+          rawTab === "database"
+            ? "mysql_workbench"
+            : rawTab === "mobile_attendance"
+            ? "attendance"
+            : rawTab;
+        setActiveTab(mappedTab as AdminTab);
       }
     }
   }, []);
@@ -293,12 +299,19 @@ export default function AdminPage() {
     );
   }
 
-  const handleTabChange = (tab: AdminTab) => {
+  const handleTabChange = (tab: AdminTab | string) => {
+    if (String(tab).startsWith("/")) {
+      if (typeof window !== "undefined") {
+        window.location.assign(String(tab));
+      }
+      return;
+    }
+    const nextTab = (String(tab) === "database" ? "mysql_workbench" : tab) as AdminTab;
     startLoading("মডিউলের ডাটা লোড হচ্ছে...");
-    setActiveTab(tab);
+    setActiveTab(nextTab);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
-      url.searchParams.set("tab", tab);
+      url.searchParams.set("tab", nextTab);
       window.history.replaceState({}, "", url.toString());
     }
     setTimeout(() => {
@@ -307,7 +320,7 @@ export default function AdminPage() {
   };
 
   return (
-    <div className={`h-screen max-h-screen w-full max-w-full overflow-hidden ${isQuizLive ? "bg-slate-950" : "bg-slate-100 dark:bg-slate-950"} text-slate-900 dark:text-slate-100 flex flex-col`}>
+    <div className={`min-h-dvh w-full max-w-full overflow-x-hidden ${isQuizLive ? "bg-slate-950" : "bg-slate-100 dark:bg-slate-950"} text-slate-900 dark:text-slate-100 flex flex-col`}>
       {!isQuizLive && (
         <header className="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2 w-full max-w-full overflow-hidden">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -422,7 +435,7 @@ export default function AdminPage() {
         onClose={() => setHeaderIconModalOpen(false)}
       />
 
-      <div className={`flex-1 min-h-0 min-w-0 w-full max-w-full flex ${isQuizLive ? "p-0 overflow-y-auto" : "overflow-hidden"}`}>
+      <div className={`flex-1 min-h-dvh min-w-0 w-full max-w-full flex ${isQuizLive ? "p-0 overflow-y-auto" : "overflow-y-auto overflow-x-hidden"}`}>
         {!isQuizLive && (
           <AdminSidebar
             activeTab={activeTab}
@@ -443,7 +456,6 @@ export default function AdminPage() {
               )}
               {activeTab === "student_promotion" && <StudentPromotionView />}
               {activeTab === "attendance" && <AdvancedAttendanceKhata initialTab="daily" />}
-              {activeTab === "mobile_attendance" && <AdvancedAttendanceKhata initialTab="daily" />}
               {activeTab === "teacher_dashboard" && <TeacherDashboardView />}
               {activeTab === "teacher_profile_settings" && <TeacherProfileSettings />}
               {activeTab === "teacher_workload" && <AdvancedAttendanceKhata initialTab="staff" />}

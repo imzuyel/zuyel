@@ -667,8 +667,44 @@ export async function hydrateMasterData(): Promise<void> {
   if (isHydratedFromPersistentStore) return;
 
   try {
+    // 1. Always seed baseline from hybridStorageEngine (temp snapshot cache) first
+    try {
+      const hybrid = await import("./hybridStorageEngine");
+      const hYears = hybrid.getHybridAcademicYears();
+      if (Array.isArray(hYears) && hYears.length > 0) memoryAcademicYears = hYears;
+
+      const hClasses = hybrid.getHybridAcademicClasses();
+      if (Array.isArray(hClasses) && hClasses.length > 0) {
+        memoryClasses = hClasses.map((c: any) => {
+          const numVal = Number(c.numericValue) || 6;
+          return {
+            ...c,
+            numericValue: numVal,
+            hasTrade: numVal >= 9 && numVal <= 12,
+          };
+        });
+      }
+
+      const hTrades = hybrid.getHybridAcademicTrades();
+      if (Array.isArray(hTrades) && hTrades.length > 0) memoryTrades = hTrades;
+
+      const hMappings = hybrid.getHybridAcademicMappings("");
+      if (Array.isArray(hMappings) && hMappings.length > 0) {
+        memoryMappings = hMappings.map((m: any) =>
+          Number(m.classNumeric) <= 8
+            ? { ...m, tradeId: null, tradeCode: null, tradeName: null }
+            : m
+        );
+      }
+
+      const hInst = hybrid.getHybridInstitutionSettings();
+      if (hInst) memoryInstitutionSettings = { ...memoryInstitutionSettings, ...hInst };
+    } catch {
+      // ignore local hydration edge case
+    }
+
     if (isPrismaAvailable()) {
-      // 1. Load Academic Years from native Prisma model if populated
+      // 2. Load Academic Years, Classes & Trades from native Prisma models if populated
       try {
         const dbYears = await prisma.academicYear.findMany({ orderBy: { id: "asc" } });
         if (dbYears && dbYears.length > 0) {
@@ -685,11 +721,64 @@ export async function hydrateMasterData(): Promise<void> {
             updatedAt: y.updatedAt ? new Date(y.updatedAt).toISOString() : new Date().toISOString(),
           }));
         }
-      } catch (err) {
+      } catch {
         // Safe fallback
       }
 
-      // 2. Load Dynamic Stores
+      try {
+        const dbClasses = await prisma.academicClass.findMany({ orderBy: { numericValue: "asc" } });
+        if (dbClasses && dbClasses.length > 0) {
+          memoryClasses = dbClasses.map((c: any) => {
+            const numVal = Number(c.numericValue);
+            return {
+              id: c.id,
+              numericValue: numVal,
+              code: `CLS-${numVal}`,
+              name: c.name || `Class ${numVal}`,
+              nameBangla: c.nameBangla || `Class ${numVal}`,
+              programCode: numVal <= 8 ? "PRE_VOC" : numVal <= 10 ? "SSC_VOC" : "HSC_VOC",
+              programId: numVal <= 8 ? 1 : numVal <= 10 ? 2 : 3,
+              displayOrder: numVal,
+              hasTrade: numVal >= 9 && numVal <= 12,
+              defaultSections: typeof c.sections === "string" ? c.sections.split(",").map((s: string) => s.trim()).filter(Boolean) : ["A", "B"],
+              defaultShifts: typeof c.shifts === "string" ? c.shifts.split(",").map((s: string) => s.trim()).filter(Boolean) : ["FIRST_SHIFT"],
+              totalSeats: 80,
+              status: "Active",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+          });
+        }
+      } catch {
+        // Safe fallback
+      }
+
+      try {
+        const dbTrades = await prisma.trade.findMany({ orderBy: { id: "asc" } });
+        if (dbTrades && dbTrades.length > 0) {
+          memoryTrades = dbTrades.map((t: any, idx: number) => ({
+            id: t.id,
+            code: t.code,
+            tradeNumber: ((idx % 4) + 1) as any,
+            name: t.name,
+            nameBangla: t.nameBangla,
+            shortName: t.shortName || t.nameBangla,
+            description: t.description || "",
+            programCodes: ["SSC_VOC", "HSC_VOC"],
+            intakeCapacity: Number(t.intakeCapacity) || 50,
+            totalLabs: Number(t.totalLabs) || 2,
+            badgeGradient: t.badgeGradient || "from-indigo-600 to-cyan-600",
+            iconName: t.iconName || "Cpu",
+            status: t.status === "Inactive" ? "Inactive" : "Active",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }));
+        }
+      } catch {
+        // Safe fallback
+      }
+
+      // 3. Load Dynamic Stores
       try {
         const metadataStores = await prisma.dynamicMetadataStore.findMany({
           where: {
@@ -705,19 +794,26 @@ export async function hydrateMasterData(): Promise<void> {
             } else if (store.key === METADATA_KEY_PROGRAMS && Array.isArray(parsed)) {
               memoryPrograms = parsed;
             } else if (store.key === METADATA_KEY_CLASSES && Array.isArray(parsed)) {
-              memoryClasses = parsed;
+              memoryClasses = parsed.map((c: any) => ({
+                ...c,
+                hasTrade: Number(c.numericValue) >= 9 && Number(c.numericValue) <= 12,
+              }));
             } else if (store.key === METADATA_KEY_TRADES && Array.isArray(parsed)) {
               memoryTrades = parsed;
             } else if (store.key === METADATA_KEY_LABS && Array.isArray(parsed)) {
               memoryLabs = parsed;
             } else if (store.key === METADATA_KEY_MAPPINGS && Array.isArray(parsed)) {
-              memoryMappings = parsed;
+              memoryMappings = parsed.map((m: any) =>
+                Number(m.classNumeric) <= 8
+                  ? { ...m, tradeId: null, tradeCode: null, tradeName: null }
+                  : m
+              );
             }
           } catch (e) {
             console.warn(`[MasterDataEngine] Failed parsing store ${store.key}:`, e);
           }
         }
-      } catch (err) {
+      } catch {
         // Safe fallback
       }
     }
@@ -729,26 +825,43 @@ export async function hydrateMasterData(): Promise<void> {
 }
 
 /**
- * Persists updated store into DynamicMetadataStore safely
+ * Persists updated store into hybridStorageEngine & DynamicMetadataStore safely
  */
 async function persistStoreSlice(key: string, data: any): Promise<void> {
+  try {
+    const hybrid = await import("./hybridStorageEngine");
+    if (key === METADATA_KEY_CLASSES && Array.isArray(data)) {
+      hybrid.saveHybridAcademicClasses(data);
+    } else if (key === METADATA_KEY_TRADES && Array.isArray(data)) {
+      hybrid.saveHybridAcademicTrades(data);
+    } else if (key === METADATA_KEY_MAPPINGS && Array.isArray(data)) {
+      hybrid.saveHybridAcademicMappings(data);
+    } else if (key === METADATA_KEY_YEARS && Array.isArray(data)) {
+      hybrid.saveHybridAcademicYears(data);
+    } else if (key === METADATA_KEY_INSTITUTION && data) {
+      hybrid.saveHybridInstitutionSettings(data);
+    }
+  } catch {}
+
   if (!isPrismaAvailable()) return;
 
   try {
-    await prisma.dynamicMetadataStore.upsert({
-      where: { key },
-      update: {
-        valueJson: JSON.stringify(data),
-        category: "academic_master_data",
-        updatedBy: "Admin",
-      },
-      create: {
-        key,
-        valueJson: JSON.stringify(data),
-        category: "academic_master_data",
-        updatedBy: "Admin",
-      },
-    });
+    await safePrismaQuery(async (client) => {
+      await client.dynamicMetadataStore.upsert({
+        where: { key },
+        update: {
+          valueJson: JSON.stringify(data),
+          category: "academic_master_data",
+          updatedBy: "Admin",
+        },
+        create: {
+          key,
+          valueJson: JSON.stringify(data),
+          category: "academic_master_data",
+          updatedBy: "Admin",
+        },
+      });
+    }, null);
   } catch (err) {
     console.warn(`[MasterDataEngine] Could not persist slice ${key} to DB:`, err);
   }
@@ -847,12 +960,21 @@ export async function getMasterDataSnapshot(selectedYear?: string): Promise<Mast
   const filteredMappings = memoryMappings.filter((m) => m.academicYear === yearToFilter);
   const activeMappings = filteredMappings.filter((m) => m.status === "Active");
 
+  const normalizedClasses = memoryClasses.map((c) => {
+    const hasDepartment = c.numericValue >= 9 && c.numericValue <= 12;
+    return {
+      ...c,
+      hasTrade: hasDepartment,
+      hasDepartment,
+    };
+  });
+
   return {
     institution: memoryInstitutionSettings,
     academicYears: memoryAcademicYears,
     activeYear: activeYearObj,
     programs: memoryPrograms,
-    classes: memoryClasses,
+    classes: normalizedClasses,
     trades: memoryTrades,
     labs: memoryLabs,
     sectionsShifts: memorySectionsShifts,
@@ -1031,6 +1153,7 @@ export async function saveClassMasterRecord(
   }
 
   const numVal = Number(classData.numericValue);
+  const enforcedHasTrade = numVal >= 9 && numVal <= 12;
   const existingIdx = memoryClasses.findIndex((c) => c.id === classData.id || c.numericValue === numVal);
 
   let savedCls: ClassMasterRecord;
@@ -1039,6 +1162,7 @@ export async function saveClassMasterRecord(
       ...memoryClasses[existingIdx],
       ...classData,
       numericValue: numVal,
+      hasTrade: enforcedHasTrade,
       updatedAt: new Date().toISOString(),
     };
     memoryClasses[existingIdx] = savedCls;
@@ -1052,7 +1176,7 @@ export async function saveClassMasterRecord(
       programCode: classData.programCode || (numVal <= 8 ? "PRE_VOC" : numVal <= 10 ? "SSC_VOC" : "HSC_VOC"),
       programId: classData.programId || (numVal <= 8 ? 1 : numVal <= 10 ? 2 : 3),
       displayOrder: classData.displayOrder || numVal,
-      hasTrade: classData.hasTrade !== undefined ? Boolean(classData.hasTrade) : numVal >= 9,
+      hasTrade: enforcedHasTrade,
       defaultSections: classData.defaultSections || ["A", "B"],
       defaultShifts: classData.defaultShifts || ["FIRST_SHIFT"],
       totalSeats: Number(classData.totalSeats) || 80,
@@ -1178,27 +1302,33 @@ export async function saveAcademicMappingRecord(
 ): Promise<{ success: boolean; mapping: AcademicMappingRecord; errors?: string[] }> {
   await hydrateMasterData();
 
-  const targetId = mappingData.originalId || mappingData.id;
+  const clsNum = Number(mappingData.classNumeric);
+  // Strict enforcement: Class 6-8 have NO department/trade; only 9-12 have departments
+  const normalizedMappingData: Partial<AcademicMappingRecord> & { originalId?: string } =
+    clsNum <= 8
+      ? { ...mappingData, tradeId: null, tradeCode: null, tradeName: null }
+      : mappingData;
+
+  const targetId = normalizedMappingData.originalId || normalizedMappingData.id;
   // Validate structural integrity
   const validation = validateAcademicMapping(
-    { ...mappingData, id: targetId },
+    { ...normalizedMappingData, id: targetId },
     memoryMappings
   );
   if (!validation.valid) {
     return { success: false, mapping: null as any, errors: validation.errors };
   }
 
-  const year = mappingData.academicYear || "2026";
-  const clsNum = Number(mappingData.classNumeric);
+  const year = normalizedMappingData.academicYear || "2026";
   const progObj =
-    memoryPrograms.find((p) => p.id === mappingData.programId || p.code === mappingData.programCode) ||
+    memoryPrograms.find((p) => p.id === normalizedMappingData.programId || p.code === normalizedMappingData.programCode) ||
     memoryPrograms.find((p) => (clsNum <= 8 ? p.code === "PRE_VOC" : clsNum <= 10 ? p.code === "SSC_VOC" : p.code === "HSC_VOC")) ||
     memoryPrograms[1];
   const clsObj = memoryClasses.find((c) => c.numericValue === clsNum) || memoryClasses[3];
 
   let tradeObj: TradeMasterRecord | null = null;
-  if (clsNum >= 9 && mappingData.tradeId) {
-    tradeObj = memoryTrades.find((t) => t.id === Number(mappingData.tradeId)) || null;
+  if (clsNum >= 9 && normalizedMappingData.tradeId) {
+    tradeObj = memoryTrades.find((t) => t.id === Number(normalizedMappingData.tradeId)) || null;
   }
 
   const sec = (mappingData.section || "A").trim().toUpperCase();

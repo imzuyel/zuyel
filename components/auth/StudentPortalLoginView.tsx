@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -27,13 +27,20 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
+import { DEFAULT_TRADES } from "@/lib/masterDataEngine";
 import {
   loginStudentAccount,
   updateStudentPassword,
+  syncStudentAccountSession,
   StudentAuthAccount,
   UNIVERSAL_DEFAULT_PASSWORD,
   STUDENT_LOGIN_CLASSES,
 } from "@/lib/studentIntelligenceStore";
+
+function requiresTradeSelection(classId: string): boolean {
+  const norm = classId.toLowerCase();
+  return !(norm.includes("6") || norm.includes("7") || norm.includes("8"));
+}
 
 interface StudentPortalLoginViewProps {
   initialCallbackUrl?: string;
@@ -52,12 +59,19 @@ export default function StudentPortalLoginView({
   // Mode: 'login' | 'change_password'
   const [mode, setMode] = useState<"login" | "change_password">("login");
   const [selectedClass, setSelectedClass] = useState("class-10");
+  const [selectedTrade, setSelectedTrade] = useState(DEFAULT_TRADES[1]?.name || "IT Support & IoT Basics");
   const [rollNumber, setRollNumber] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "auto";
+    }
+  }, []);
   const [devHintsOpen, setDevHintsOpen] = useState(false);
 
   // First-login password change states
@@ -85,8 +99,11 @@ export default function StudentPortalLoginView({
 
     setLoading(true);
 
+    const showTradeSelector = requiresTradeSelection(selectedClass);
+    const activeTradePayload = showTradeSelector ? selectedTrade : "";
+
     try {
-      // 1. First attempt login via secure backend API
+      // 1. First attempt login via secure backend API (matches Class + Trade + Roll)
       const apiRes = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -94,6 +111,7 @@ export default function StudentPortalLoginView({
           identifier: cleanRoll,
           password: cleanPass,
           classLevel: selectedClass,
+          trade: activeTradePayload,
           source: "student",
         }),
       }).catch(() => null);
@@ -101,6 +119,20 @@ export default function StudentPortalLoginView({
       if (apiRes && apiRes.ok) {
         const apiData = await apiRes.json();
         if (apiData.success && apiData.user) {
+          if (typeof document !== "undefined") {
+            document.body.style.overflow = "auto";
+          }
+          syncStudentAccountSession({
+            rollNumber: String(apiData.user.roll || cleanRoll),
+            studentName: apiData.user.nameBangla || apiData.user.fullName,
+            classLevel: selectedClass,
+            trade: showTradeSelector ? (apiData.user.trade || selectedTrade) : "General",
+            password: cleanPass,
+            createdAt: new Date().toISOString().split("T")[0],
+            isLoggedIn: true,
+            hasChangedDefaultPassword: cleanPass !== UNIVERSAL_DEFAULT_PASSWORD,
+            academicYear: "2026",
+          });
           login("student", apiData.user);
           showToast(`স্বাগতম ${apiData.user.nameBangla || apiData.user.fullName}! লগইন সফল হয়েছে।`, "success");
           router.push(apiData.redirectUrl || callbackUrl);
@@ -109,7 +141,7 @@ export default function StudentPortalLoginView({
       }
 
       // 2. Client-side intelligence store verification & first-time password change handling
-      const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass);
+      const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass, activeTradePayload);
 
       if (res.success) {
         if (res.requiresPasswordChange && res.account) {
@@ -120,11 +152,15 @@ export default function StudentPortalLoginView({
             "প্রথমবার লগইনে ডিফল্ট পাসওয়ার্ড পরিবর্তন করে আপনার নতুন ব্যক্তিগত পাসওয়ার্ড নির্ধারণ করুন।"
           );
         } else if (res.account) {
+          if (typeof document !== "undefined") {
+            document.body.style.overflow = "auto";
+          }
           // Set student session cookies
           document.cookie = "ptsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
           document.cookie = "pgtsc_user_role=student; path=/; max-age=86400; SameSite=Lax";
           document.cookie = `ptsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
           document.cookie = `pgtsc_student_roll=${res.account.rollNumber}; path=/; max-age=86400; SameSite=Lax`;
+          syncStudentAccountSession(res.account);
 
           // Sync context
           login("student", {
@@ -436,10 +472,40 @@ export default function StudentPortalLoginView({
                     </div>
                   </div>
 
+                  {/* Conditional Trade Selector: Hidden for Class 6-8, Shown for Class 9-12 */}
+                  {requiresTradeSelection(selectedClass) && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <label htmlFor="student-portal-trade" className="font-bold text-slate-200 flex items-center gap-1.5">
+                          <span>ট্রেড / বিভাগ (Trade / Department)</span>
+                          <span className="text-rose-400">*</span>
+                        </label>
+                        <span className="text-[10px] font-mono text-slate-500">BTEB 4 Trades</span>
+                      </div>
+                      <div className="relative">
+                        <select
+                          id="student-portal-trade"
+                          value={selectedTrade}
+                          onChange={(e) => setSelectedTrade(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-900/90 border border-slate-800 rounded-2xl text-sm text-slate-100 focus:outline-none focus:border-cyan-500/80 focus:ring-4 focus:ring-cyan-500/15 transition-all duration-300 font-bold cursor-pointer appearance-none pr-9"
+                        >
+                          {DEFAULT_TRADES.map((t) => (
+                            <option key={t.code} value={t.name} className="bg-slate-900 text-slate-100">
+                              {t.nameBangla} ({t.name})
+                            </option>
+                          ))}
+                        </select>
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                          ▼
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Roll Number Input with Neon Glow Focus Ring */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
-                      <label className="font-bold text-slate-200 flex items-center gap-1.5">
+                      <label htmlFor="student-portal-roll" className="font-bold text-slate-200 flex items-center gap-1.5">
                         <span>শ্রেণি রোল নম্বর (Class Roll Number)</span>
                         <span className="text-rose-400">*</span>
                       </label>
@@ -451,11 +517,15 @@ export default function StudentPortalLoginView({
                         <User className="w-4 h-4" />
                       </div>
                       <input
+                        id="student-portal-roll"
+                        name="studentRoll"
                         type="text"
+                        autoComplete="username"
+                        spellCheck={false}
                         value={rollNumber}
                         onChange={(e) => setRollNumber(e.target.value)}
                         placeholder="যেমন: 101, 102"
-                        className="w-full pl-10 pr-4 py-3 bg-slate-900/80 border border-slate-800 rounded-2xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/80 focus:ring-4 focus:ring-cyan-500/15 focus:shadow-[0_0_25px_rgba(6,182,212,0.2)] transition-all duration-300 font-mono font-bold"
+                        className="w-full pl-10 pr-4 py-3 bg-slate-900/80 border border-slate-800 user-invalid:border-rose-500 rounded-2xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/80 focus:ring-4 focus:ring-cyan-500/15 focus:shadow-[0_0_25px_rgba(6,182,212,0.2)] transition-all duration-300 font-mono font-bold"
                         required
                       />
                     </div>
@@ -464,7 +534,7 @@ export default function StudentPortalLoginView({
                   {/* Password Input with Neon Glow Focus Ring */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
-                      <label className="font-bold text-slate-200 flex items-center gap-1.5">
+                      <label htmlFor="student-portal-password" className="font-bold text-slate-200 flex items-center gap-1.5">
                         <span>গোপনীয় পাসওয়ার্ড (Password)</span>
                         <span className="text-rose-400">*</span>
                       </label>
@@ -481,16 +551,21 @@ export default function StudentPortalLoginView({
                         <KeyRound className="w-4 h-4" />
                       </div>
                       <input
+                        id="student-portal-password"
+                        name="studentPassword"
                         type={showPassword ? "text" : "password"}
+                        autoComplete="current-password"
+                        spellCheck={false}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="••••••••••••"
-                        className="w-full pl-10 pr-12 py-3 bg-slate-900/80 border border-slate-800 rounded-2xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/80 focus:ring-4 focus:ring-cyan-500/15 focus:shadow-[0_0_25px_rgba(6,182,212,0.2)] transition-all duration-300 font-medium"
+                        className="w-full pl-10 pr-12 py-3 bg-slate-900/80 border border-slate-800 user-invalid:border-rose-500 rounded-2xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/80 focus:ring-4 focus:ring-cyan-500/15 focus:shadow-[0_0_25px_rgba(6,182,212,0.2)] transition-all duration-300 font-medium"
                         required
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
+                        aria-label={showPassword ? "পাসওয়ার্ড লুকান" : "পাসওয়ার্ড দেখুন"}
                         className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
                         title={showPassword ? "পাসওয়ার্ড লুকান" : "পাসওয়ার্ড দেখুন"}
                       >

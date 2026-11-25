@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateWithFailover } from "@/lib/aiFailoverPipeline";
 import { safeParseAiObject } from "@/lib/safeJsonParser";
 import { upsertHybridPresentation } from "@/lib/hybridStorageEngine";
+import { isPrismaAvailable, safePrismaQuery } from "@/lib/prisma";
 
 // Standardize Lucide icon options for better rendering safety
 const VALID_ICONS = [
@@ -207,13 +208,42 @@ Return ONLY the JSON response without any Markdown formatting or backticks.`;
       const savedDeck = upsertHybridPresentation({
         title: topic,
         className,
-        trade: trade || "কারিগরি শাখা",
+        trade: trade || "সাধারণ পাঠ্যক্রম",
         subject: topic,
         theme: "twilight_indigo",
         slides: data.slides,
         author: "PTSC AI Presentation Studio",
       });
       data.id = savedDeck.id;
+      if (isPrismaAvailable()) {
+        void safePrismaQuery(async (p) => {
+          await p.presentation.upsert({
+            where: { id: savedDeck.id },
+            create: {
+              id: savedDeck.id,
+              title: savedDeck.title,
+              className: savedDeck.className,
+              trade: savedDeck.trade || "All",
+              subject: savedDeck.subject,
+              theme: savedDeck.theme,
+              slideCount: savedDeck.slideCount,
+              slidesJson: JSON.stringify(savedDeck.slides || []),
+              author: savedDeck.author,
+              isPublished: true,
+            },
+            update: {
+              title: savedDeck.title,
+              className: savedDeck.className,
+              trade: savedDeck.trade || "All",
+              subject: savedDeck.subject,
+              theme: savedDeck.theme,
+              slideCount: savedDeck.slideCount,
+              slidesJson: JSON.stringify(savedDeck.slides || []),
+            },
+          });
+          return true;
+        }, false);
+      }
     } catch (saveErr) {
       console.warn("Could not auto-save generated presentation to hybridStore:", saveErr);
     }
