@@ -13,13 +13,14 @@ import {
 } from "lucide-react";
 import {
   ACADEMIC_CLASSES,
-  getApplicableTradesForClass,
-  doesClassHaveTrade,
+  doesClassHaveDepartment,
+  getDepartmentsForClass,
+  getSubjectsForClassAndDepartment,
   parseClassNumeric,
-  getSubjectsForClass,
   type AcademicTrade,
   type SubjectItem,
-} from "@/lib/academicStructure";
+} from "@/lib/academicConfig";
+import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
 import { getSingleSourceSubjects } from "@/lib/globalSubjectMappingHub";
 import { AttendanceRecordType } from "@/lib/database";
 import { ATTENDANCE_TYPES_CONFIG, correlateRoutineContext } from "@/lib/attendanceEngine";
@@ -422,12 +423,14 @@ const FilterControls = memo(function FilterControls({
       <AcademicYearSelect session={session} onChange={onSessionChange} />
       <ClassSelect classId={classId} onChange={onClassChange} />
       <SectionSelect section={section} onChange={onSectionChange} />
-      <TradeSelect
-        tradeId={tradeId}
-        tradeApplies={tradeApplies}
-        applicableTrades={applicableTrades}
-        onChange={onTradeChange}
-      />
+      {tradeApplies && (
+        <TradeSelect
+          tradeId={tradeId}
+          tradeApplies={tradeApplies}
+          applicableTrades={applicableTrades}
+          onChange={onTradeChange}
+        />
+      )}
       <DateInput date={date} isHoliday={isHoliday} onChange={onDateChange} />
       <PeriodSelect periodNo={periodNo} onChange={onPeriodChange} />
       <SubjectSelect
@@ -579,19 +582,21 @@ function DynamicAttendanceContextBar({
     onOpenExcelHubRef.current = onOpenExcelHub;
   });
 
+  const { availableTrades: globalTrades } = useGlobalAcademic();
+
   const numericClass = useMemo(
     () => parseClassNumeric(filter.classId),
     [filter.classId]
   );
 
   const tradeApplies = useMemo(
-    () => doesClassHaveTrade(filter.classId),
+    () => doesClassHaveDepartment(filter.classId),
     [filter.classId]
   );
 
   const applicableTrades = useMemo<AcademicTrade[]>(
-    () => (tradeApplies ? getApplicableTradesForClass(filter.classId) : []),
-    [tradeApplies, filter.classId]
+    () => (tradeApplies ? getDepartmentsForClass(filter.classId, globalTrades) : []),
+    [tradeApplies, filter.classId, globalTrades]
   );
 
   const subjects = useMemo<SubjectItem[]>(() => {
@@ -616,7 +621,7 @@ function DynamicAttendanceContextBar({
       }));
     }
 
-    return getSubjectsForClass(filter.classId, filter.tradeId);
+    return getSubjectsForClassAndDepartment(filter.classId, filter.tradeId);
   }, [filter.classId, filter.tradeId, filter.session, numericClass]);
 
   const dayType = useMemo(() => getDayType(filter.date), [filter.date]);
@@ -706,15 +711,15 @@ function DynamicAttendanceContextBar({
   const handleClassChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const newClassId = Number(event.target.value);
-      const hasTrades = doesClassHaveTrade(newClassId);
+      const hasTrades = doesClassHaveDepartment(newClassId);
       let newTradeId: number | undefined = undefined;
 
       if (hasTrades) {
-        const trades = getApplicableTradesForClass(newClassId);
-        newTradeId = trades.length > 0 ? trades[0].id : 2;
+        const trades = getDepartmentsForClass(newClassId, globalTrades);
+        newTradeId = trades.length > 0 ? trades[0].id : 101;
       }
 
-      const availableSubjects = getSubjectsForClass(newClassId, newTradeId);
+      const availableSubjects = getSubjectsForClassAndDepartment(newClassId, newTradeId);
       const firstSubject = availableSubjects.length > 0 ? availableSubjects[0] : null;
 
       updateFilter({
@@ -726,7 +731,7 @@ function DynamicAttendanceContextBar({
           : "সাধারণ বিষয়",
       });
     },
-    [updateFilter]
+    [updateFilter, globalTrades]
   );
 
   const currentClassIdRef = useRef(filter.classId);
@@ -739,7 +744,7 @@ function DynamicAttendanceContextBar({
   const handleTradeChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const newTradeId = Number(event.target.value);
-      const availableSubjects = getSubjectsForClass(currentClassIdRef.current, newTradeId);
+      const availableSubjects = getSubjectsForClassAndDepartment(currentClassIdRef.current, newTradeId);
       const firstSubject = availableSubjects.length > 0 ? availableSubjects[0] : null;
 
       updateFilter({
@@ -832,6 +837,65 @@ function DynamicAttendanceContextBar({
         onSubjectChange={handleSubjectChange}
         onAttendanceTypeChange={handleAttendanceTypeChange}
       />
+
+      {/* Quick 4-Department Pills for Class 9-12 & Period Selector Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/70">
+        {tradeApplies ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1">
+              বিভাগ/ট্রেড:
+            </span>
+            {applicableTrades.map((t) => {
+              const active = Number(filter.tradeId) === Number(t.id);
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() =>
+                    handleTradeChange({ target: { value: String(t.id) } } as any)
+                  }
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    active
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {t.nameBangla}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-[11px] font-bold text-cyan-600 dark:text-cyan-400">
+            প্রাক-ভোকেশনাল (৬ষ্ঠ–৮ম শ্রেণি: কোনো বিভাগ/ট্রেড নেই)
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1">
+            পিরিয়ড:
+          </span>
+          {PERIODS.map((p) => {
+            const active = Number(filter.periodNo) === p.no;
+            return (
+              <button
+                key={p.no}
+                type="button"
+                onClick={() =>
+                  handlePeriodChange({ target: { value: String(p.no) } } as any)
+                }
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                  active
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Routine Correlated Intelligence Banner */}
       <RoutineBanner

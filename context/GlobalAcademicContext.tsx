@@ -6,10 +6,10 @@ import {
   ALL_TRADES,
   AcademicClass,
   AcademicTrade,
-  doesClassHaveTrade,
-  getApplicableTradesForClass,
+  doesClassHaveDepartment,
+  getDepartmentsForClass,
   parseClassNumeric,
-} from "@/lib/academicStructure";
+} from "@/lib/academicConfig";
 
 export interface GlobalAcademicState {
   academicYear: string;
@@ -52,6 +52,45 @@ const GlobalAcademicContext = createContext<GlobalAcademicContextType | undefine
 export function GlobalAcademicProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<GlobalAcademicState>(DEFAULT_STATE);
   const [isHydrated, setIsHydrated] = useState<boolean>(false);
+  const [masterClasses, setMasterClasses] = useState<AcademicClass[]>(ACADEMIC_CLASSES);
+  const [masterTrades, setMasterTrades] = useState<AcademicTrade[]>(ALL_TRADES);
+
+  // Sync Single Source of Truth from /api/academic/master-data
+  const refreshMasterData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/academic/master-data");
+      const json = await res.json();
+      const payload = json?.data || json;
+      if (json?.success && payload) {
+        if (Array.isArray(payload.classes) && payload.classes.length > 0) {
+          setMasterClasses(
+            payload.classes.map((c: any) => ({
+              ...c,
+              numericValue: Number(c.numericValue || parseClassNumeric(c.id)),
+              hasTrade: Number(c.numericValue || parseClassNumeric(c.id)) >= 9,
+              sections: Array.isArray(c.sections) ? c.sections : ["A", "B"],
+            }))
+          );
+        }
+        if (Array.isArray(payload.trades) && payload.trades.length > 0) {
+          setMasterTrades(payload.trades);
+        }
+      }
+    } catch {
+      // Keep canonical defaults if offline
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshMasterData();
+    const onMasterUpdated = () => {
+      refreshMasterData();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("ptsc_academic_master_updated", onMasterUpdated);
+      return () => window.removeEventListener("ptsc_academic_master_updated", onMasterUpdated);
+    }
+  }, [refreshMasterData]);
 
   // Restore persisted configuration from localStorage
   useEffect(() => {
@@ -95,31 +134,31 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
 
   // Active Class Object
   const activeClass = useMemo(() => {
-    const found = ACADEMIC_CLASSES.find((c) => String(c.id) === String(state.selectedClassId));
-    return found || ACADEMIC_CLASSES[3]; // Default to Class 9 (id: 4)
-  }, [state.selectedClassId]);
+    const found = masterClasses.find((c) => String(c.id) === String(state.selectedClassId));
+    return found || masterClasses[3] || ACADEMIC_CLASSES[3]; // Default to Class 9 (id: 4)
+  }, [state.selectedClassId, masterClasses]);
 
-  // Is Trade applicable for currently active class
+  // Is Trade applicable for currently active class (Strictly false for 6-8, true for 9-12)
   const isTradeApplicable = useMemo(() => {
-    return doesClassHaveTrade(state.selectedClassId);
+    return doesClassHaveDepartment(state.selectedClassId);
   }, [state.selectedClassId]);
 
-  // Available Trades for active class
+  // Available Trades (4 configurable departments) for active class
   const availableTrades = useMemo(() => {
     if (!isTradeApplicable) return [];
-    return getApplicableTradesForClass(state.selectedClassId);
-  }, [state.selectedClassId, isTradeApplicable]);
+    return getDepartmentsForClass(state.selectedClassId, masterTrades);
+  }, [state.selectedClassId, isTradeApplicable, masterTrades]);
 
   // Active Trade Object
   const activeTrade = useMemo(() => {
     if (!isTradeApplicable) return null;
     if (state.selectedTradeId === "all") return null;
     return (
-      ALL_TRADES.find((t) => String(t.id) === String(state.selectedTradeId)) ||
+      masterTrades.find((t) => String(t.id) === String(state.selectedTradeId)) ||
       availableTrades[0] ||
       null
     );
-  }, [isTradeApplicable, state.selectedTradeId, availableTrades]);
+  }, [isTradeApplicable, state.selectedTradeId, availableTrades, masterTrades]);
 
   // Available Sections for active class
   const availableSections = useMemo(() => {
@@ -137,11 +176,11 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
   const setSelectedClassId = useCallback((classId: string | number) => {
     const clsStr = String(classId);
     setState((prev) => {
-      const hasTrade = doesClassHaveTrade(clsStr);
+      const hasTrade = doesClassHaveDepartment(clsStr);
       let nextTradeId = prev.selectedTradeId;
 
       if (hasTrade) {
-        const trades = getApplicableTradesForClass(clsStr);
+        const trades = getDepartmentsForClass(clsStr, masterTrades);
         const stillValid = trades.some((t) => String(t.id) === prev.selectedTradeId);
         if (!stillValid && trades.length > 0) {
           nextTradeId = String(trades[0].id);
@@ -156,7 +195,7 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
         selectedTradeId: nextTradeId,
       };
     });
-  }, []);
+  }, [masterTrades]);
 
   // Mutator: Set Active Section
   const setSelectedSection = useCallback((section: string) => {
@@ -231,7 +270,7 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
       activeClass,
       activeTrade,
       isTradeApplicable,
-      availableClasses: ACADEMIC_CLASSES,
+      availableClasses: masterClasses,
       availableTrades,
       availableSections,
       activeClassName: activeClass.nameBangla,

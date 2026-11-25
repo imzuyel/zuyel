@@ -81,7 +81,7 @@ export default function PtscMasterRoutineStudio({
   const [schoolStartTime, setSchoolStartTime] = useState<string>("08:00");
   const [periodDuration, setPeriodDuration] = useState<number>(40);
   const [totalPeriods, setTotalPeriods] = useState<number>(8);
-  
+
   const [tiffinBreakEnabled, setTiffinBreakEnabled] = useState<boolean>(true);
   const [tiffinBreakDuration, setTiffinBreakDuration] = useState<number>(30);
   const [tiffinBreakAfterPeriod, setTiffinBreakAfterPeriod] = useState<number>(4);
@@ -1360,9 +1360,8 @@ export default function PtscMasterRoutineStudio({
       <div className="print:hidden flex items-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-2xl self-start">
         <button
           onClick={() => setActiveTab("class")}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeTab === "class" ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white hover:bg-slate-800"
-          }`}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${activeTab === "class" ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
         >
           <Grid className="w-4 h-4" />
           <span>ক্লাস-ভিত্তিক দৃষ্টিভঙ্গি (Class Matrix)</span>
@@ -1370,9 +1369,8 @@ export default function PtscMasterRoutineStudio({
 
         <button
           onClick={() => setActiveTab("teacher")}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeTab === "teacher" ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white hover:bg-slate-800"
-          }`}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${activeTab === "teacher" ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
         >
           <UserCheck className="w-4 h-4" />
           <span>শিক্ষক-ভিত্তিক দৃষ্টিভঙ্গি ও অ্যাভেইলাবিলিটি</span>
@@ -1380,9 +1378,8 @@ export default function PtscMasterRoutineStudio({
 
         <button
           onClick={() => setActiveTab("config")}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeTab === "config" ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white hover:bg-slate-800"
-          }`}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${activeTab === "config" ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
         >
           <Sliders className="w-4 h-4" />
           <span>গ্লোবাল কনফিগারেশন (Phase 1)</span>
@@ -1428,11 +1425,10 @@ export default function PtscMasterRoutineStudio({
                   <button
                     key={thm.id}
                     onClick={() => setScreenTheme(thm.id as any)}
-                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
-                      screenTheme === thm.id
-                        ? `bg-gradient-to-r ${thm.color} text-white shadow-md ring-1 ring-white/30`
-                        : "text-slate-400 hover:text-white hover:bg-slate-800"
-                    }`}
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${screenTheme === thm.id
+                      ? `bg-gradient-to-r ${thm.color} text-white shadow-md ring-1 ring-white/30`
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                      }`}
                   >
                     {thm.name}
                   </button>
@@ -1620,13 +1616,85 @@ export default function PtscMasterRoutineStudio({
                 <div className="flex items-center justify-between pb-3 border-b border-slate-800 print:hidden">
                   <div>
                     <h3 className="text-base font-bold text-white print:text-black">
-                      {cls.name} — {trade.nameBangla} ({trade.code})
+                      {cls.name} — {cls.hasTrade ? `${trade.nameBangla} (${trade.code})` : "প্রাক-ভোকেশনাল (সাধারণ)"}
                     </h3>
                     <p className="text-xs text-slate-400">শিক্ষাবর্ষ: {academicYear} | শিফট: {shift === 'morning' ? 'প্রভাতি' : 'দিবা'}</p>
                   </div>
                   <div className="text-xs font-mono bg-indigo-950 text-indigo-300 px-3 py-1 rounded-lg border border-indigo-800 print:bg-slate-100 print:text-black">
                     স্মারক: {memoNo}
                   </div>
+                </div>
+
+                {/* Inline Flexible Tiffin Break Control Bar */}
+                <div className="print:hidden my-3 p-3 rounded-2xl bg-amber-950/20 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setTiffinBreakEnabled(!tiffinBreakEnabled)}
+                      className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer ${tiffinBreakEnabled
+                        ? "bg-amber-500 text-slate-950 shadow-xs"
+                        : "bg-slate-800 text-slate-300 border border-slate-700"
+                        }`}
+                    >
+                      <Coffee className="w-3.5 h-3.5" />
+                      <span>☕ টিফিন বিরতি: {tiffinBreakEnabled ? "চালু" : "বন্ধ"}</span>
+                    </button>
+
+                    {tiffinBreakEnabled && (
+                      <>
+                        <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-700 rounded-xl p-1">
+                          <button
+                            type="button"
+                            onClick={() => setTiffinBreakAfterPeriod((p) => Math.max(1, p - 1))}
+                            disabled={tiffinBreakAfterPeriod <= 1}
+                            className="px-2 py-1 rounded-lg hover:bg-slate-800 disabled:opacity-40 text-amber-300 font-bold cursor-pointer"
+                            title="বামে সরান"
+                          >
+                            ← বামে
+                          </button>
+                          <select
+                            value={tiffinBreakAfterPeriod}
+                            onChange={(e) => setTiffinBreakAfterPeriod(Number(e.target.value))}
+                            className="px-2 py-1 bg-transparent text-amber-200 font-bold focus:outline-none cursor-pointer"
+                          >
+                            {Array.from({ length: Math.max(1, totalPeriods - 1) }, (_, i) => i + 1).map((pNo) => (
+                              <option key={pNo} value={pNo} className="bg-slate-900 text-white">
+                                {toBengaliNumerals(pNo)}ম পিরিয়ডের পর
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setTiffinBreakAfterPeriod((p) => Math.min(totalPeriods - 1, p + 1))}
+                            disabled={tiffinBreakAfterPeriod >= totalPeriods - 1}
+                            className="px-2 py-1 rounded-lg hover:bg-slate-800 disabled:opacity-40 text-amber-300 font-bold cursor-pointer"
+                            title="ডানে সরান"
+                          >
+                            ডানে →
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-amber-200/80 font-semibold">সময়কাল:</span>
+                          <select
+                            value={tiffinBreakDuration}
+                            onChange={(e) => setTiffinBreakDuration(Number(e.target.value))}
+                            className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-amber-200 font-bold"
+                          >
+                            {[15, 20, 25, 30, 40, 45].map((mins) => (
+                              <option key={mins} value={mins}>
+                                {toBengaliNumerals(mins)} মিনিট
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <span className="text-[11px] text-slate-400">
+                    যেকোনো ঘরে (Cell) ক্লিক করে বিষয়, শিক্ষক ও রুম নির্বাচন করলে সাথে সাথে MySQL-এ সেভ হবে
+                  </span>
                 </div>
 
                 <div className="overflow-x-auto print:overflow-visible">
@@ -1639,9 +1707,8 @@ export default function PtscMasterRoutineStudio({
                         {generatedTimeSlots.map((slot, idx) => (
                           <th
                             key={idx}
-                            className={`p-2.5 font-bold border-r border-slate-800 print:border-r print:border-black text-center ${
-                              slot.isBreak ? "bg-amber-950/40 text-amber-300 print:bg-slate-200 print:text-black" : ""
-                            }`}
+                            className={`p-2.5 font-bold border-r border-slate-800 print:border-r print:border-black text-center ${slot.isBreak ? "bg-amber-950/40 text-amber-300 print:bg-slate-200 print:text-black" : ""
+                              }`}
                           >
                             {slot.isBreak ? (
                               <div>
@@ -1687,9 +1754,9 @@ export default function PtscMasterRoutineStudio({
 
                               const routineItem = routines.find(
                                 (r) => r.day?.toLowerCase() === day.toLowerCase() &&
-                                       r.periodNo === slot.period &&
-                                       r.classId === cls.id &&
-                                       (r.tradeCode === trade.code || !r.tradeCode || !cls.hasTrade)
+                                  r.periodNo === slot.period &&
+                                  r.classId === cls.id &&
+                                  (r.tradeCode === trade.code || !r.tradeCode || !cls.hasTrade)
                               );
 
                               const rawSpan = routineItem ? getSlotSpan(routineItem.durationMinutes) : 1;
@@ -1716,119 +1783,114 @@ export default function PtscMasterRoutineStudio({
                                   onDragOver={handleDragOver}
                                   onDrop={(e) => handleDrop(e, day, slot.period, cls.id, trade.code)}
                                   onClick={() => handleOpenCellModal(day, slot.period, cls.id, trade.code)}
-                                  className={`p-1.5 border-r border-slate-800 print:border-r print:border-black cursor-pointer group transition-all duration-300 align-top print:p-1.5 ${
-                                    isDropZone ? "bg-emerald-950/40 border-emerald-500/80 ring-2 ring-emerald-500/30 animate-pulse" : "hover:bg-indigo-950/30"
-                                  }`}
-                                >
-                                {routineItem ? (
-                                  <div
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, routineItem.id)}
-                                    onDragEnd={handleDragEnd}
-                                    className={`p-2.5 rounded-2xl border space-y-1.5 transition-all duration-300 cursor-grab active:cursor-grabbing ${
-                                      isBeingDragged ? "opacity-40 scale-95 border-dashed border-cyan-400 bg-slate-900" : ""
-                                    } ${
-                                      hasConflict
-                                        ? "bg-rose-950/90 border-rose-500 animate-pulse shadow-lg shadow-rose-500/30 print:animate-none print:bg-rose-100 print:text-rose-950 print:border-rose-600"
-                                        : getSubjectThemeStyle(routineItem.subjectCode, routineItem.isLab, routineItem.subjectName)
+                                  className={`p-1.5 border-r border-slate-800 print:border-r print:border-black cursor-pointer group transition-all duration-300 align-top print:p-1.5 ${isDropZone ? "bg-emerald-950/40 border-emerald-500/80 ring-2 ring-emerald-500/30 animate-pulse" : "hover:bg-indigo-950/30"
                                     }`}
-                                  >
-                                    <div className="space-y-1">
-                                      {/* বিষয় (Subject) */}
-                                      <div className="flex items-center justify-between gap-1">
-                                        <div className="font-black text-white print:text-black text-xs sm:text-[13px] leading-tight truncate flex items-center gap-1">
-                                          <GripVertical className="w-3 h-3 text-slate-400 inline print:hidden shrink-0" />
-                                          <span className="truncate">
-                                            {routineItem.subjectNameBangla || routineItem.subjectName}
-                                          </span>
-                                        </div>
-                                        {hasConflict && (
-                                          <span className="text-[9px] px-1 bg-rose-600 text-white rounded font-mono print:hidden shrink-0">
-                                            কনফ্লিক্ট
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      {/* কোন স্যারের ক্লাস (Teacher Name) */}
-                                      <div className={`text-[11px] print:text-[10px] truncate font-bold ${
-                                        hasConflict ? "text-rose-200 print:text-black" : "text-cyan-300 print:text-black"
-                                      }`}>
-                                        👤 শিক্ষক: {routineItem.teacherName}
-                                      </div>
-
-                                      {/* কোন ল্যাবে বা রুমে (Room / Lab) */}
-                                      <div className="text-[10px] print:text-[9px] font-semibold text-emerald-300 print:text-black flex items-center justify-between">
-                                        <span>
-                                          {routineItem.isLab || routineItem.roomNo.includes("ল্যাব") || routineItem.roomNo.includes("Lab") ? "🔬 ল্যাব:" : "🏢 রুম:"} {routineItem.roomNo}
-                                        </span>
-                                        {routineItem.subjectCode && (
-                                          <span className="font-mono text-[9px] text-slate-400 print:text-slate-700">[{routineItem.subjectCode}]</span>
-                                        )}
-                                      </div>
-
-                                      {/* সময় (Time: যেমন ০৮:০০ - ০৮:৪০ বা ০৮:০০ - ১০:০০) */}
-                                      <div className="text-[10px] print:text-[9px] text-amber-300 print:text-black font-extrabold font-mono pt-1 border-t border-slate-700/60 print:border-black/30 flex items-center justify-between">
-                                        <span className="font-semibold text-slate-400 print:text-slate-800">সময়:</span>
-                                        <span>{toBengaliNumerals(displayTimeRange)}</span>
-                                      </div>
-
-                                      {/* Quick Hover Controls (Split / Expand / Edit) */}
-                                      <div className="print:hidden pt-1 flex items-center justify-between text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
-                                        {colSpan > 1 ? (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => handleSplitSlot(routineItem, e)}
-                                            className="px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold transition flex items-center gap-1"
-                                            title="স্প্লিট করে ৪০ মিনিটের ক্লাসে রূপান্তর করুন"
-                                          >
-                                            <span>স্প্লিট</span>
-                                          </button>
-                                        ) : (
-                                          <div className="flex items-center gap-1">
-                                            {maxSpan >= 2 && (
-                                              <button
-                                                type="button"
-                                                onClick={(e) => handleExpandSlot(routineItem, 80, e)}
-                                                className="px-1.5 py-0.5 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-800 font-bold transition"
-                                                title="৮০ মিনিট পর্যন্ত বর্ধিত করুন"
-                                              >
-                                                +৮০মি
-                                              </button>
-                                            )}
-                                            {maxSpan >= 3 && (
-                                              <button
-                                                type="button"
-                                                onClick={(e) => handleExpandSlot(routineItem, 120, e)}
-                                                className="px-1.5 py-0.5 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-800 font-bold transition"
-                                                title="১২০ মিনিট পর্যন্ত বর্ধিত করুন"
-                                              >
-                                                +১২০মি
-                                              </button>
-                                            )}
+                                >
+                                  {routineItem ? (
+                                    <div
+                                      draggable
+                                      onDragStart={(e) => handleDragStart(e, routineItem.id)}
+                                      onDragEnd={handleDragEnd}
+                                      className={`p-2.5 rounded-2xl border space-y-1.5 transition-all duration-300 cursor-grab active:cursor-grabbing ${isBeingDragged ? "opacity-40 scale-95 border-dashed border-cyan-400 bg-slate-900" : ""
+                                        } ${hasConflict
+                                          ? "bg-rose-950/90 border-rose-500 animate-pulse shadow-lg shadow-rose-500/30 print:animate-none print:bg-rose-100 print:text-rose-950 print:border-rose-600"
+                                          : getSubjectThemeStyle(routineItem.subjectCode, routineItem.isLab, routineItem.subjectName)
+                                        }`}
+                                    >
+                                      <div className="space-y-1">
+                                        {/* বিষয় (Subject) */}
+                                        <div className="flex items-center justify-between gap-1">
+                                          <div className="font-black text-white print:text-black text-xs sm:text-[13px] leading-tight truncate flex items-center gap-1">
+                                            <GripVertical className="w-3 h-3 text-slate-400 inline print:hidden shrink-0" />
+                                            <span className="truncate">
+                                              {routineItem.subjectNameBangla || routineItem.subjectName}
+                                            </span>
                                           </div>
-                                        )}
-                                        <span className="text-indigo-400 font-bold hover:underline">এডিট</span>
+                                          {hasConflict && (
+                                            <span className="text-[9px] px-1 bg-rose-600 text-white rounded font-mono print:hidden shrink-0">
+                                              কনফ্লিক্ট
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* কোন স্যারের ক্লাস (Teacher Name) */}
+                                        <div className={`text-[11px] print:text-[10px] truncate font-bold ${hasConflict ? "text-rose-200 print:text-black" : "text-cyan-300 print:text-black"
+                                          }`}>
+                                          👤 শিক্ষক: {routineItem.teacherName}
+                                        </div>
+
+                                        {/* কোন ল্যাবে বা রুমে (Room / Lab) */}
+                                        <div className="text-[10px] print:text-[9px] font-semibold text-emerald-300 print:text-black flex items-center justify-between">
+                                          <span>
+                                            {routineItem.isLab || routineItem.roomNo.includes("ল্যাব") || routineItem.roomNo.includes("Lab") ? "🔬 ল্যাব:" : "🏢 রুম:"} {routineItem.roomNo}
+                                          </span>
+                                          {routineItem.subjectCode && (
+                                            <span className="font-mono text-[9px] text-slate-400 print:text-slate-700">[{routineItem.subjectCode}]</span>
+                                          )}
+                                        </div>
+
+                                        {/* সময় (Time: যেমন ০৮:০০ - ০৮:৪০ বা ০৮:০০ - ১০:০০) */}
+                                        <div className="text-[10px] print:text-[9px] text-amber-300 print:text-black font-extrabold font-mono pt-1 border-t border-slate-700/60 print:border-black/30 flex items-center justify-between">
+                                          <span className="font-semibold text-slate-400 print:text-slate-800">সময়:</span>
+                                          <span>{toBengaliNumerals(displayTimeRange)}</span>
+                                        </div>
+
+                                        {/* Quick Hover Controls (Split / Expand / Edit) */}
+                                        <div className="print:hidden pt-1 flex items-center justify-between text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
+                                          {colSpan > 1 ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleSplitSlot(routineItem, e)}
+                                              className="px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold transition flex items-center gap-1"
+                                              title="স্প্লিট করে ৪০ মিনিটের ক্লাসে রূপান্তর করুন"
+                                            >
+                                              <span>স্প্লিট</span>
+                                            </button>
+                                          ) : (
+                                            <div className="flex items-center gap-1">
+                                              {maxSpan >= 2 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => handleExpandSlot(routineItem, 80, e)}
+                                                  className="px-1.5 py-0.5 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-800 font-bold transition"
+                                                  title="৮০ মিনিট পর্যন্ত বর্ধিত করুন"
+                                                >
+                                                  +৮০মি
+                                                </button>
+                                              )}
+                                              {maxSpan >= 3 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => handleExpandSlot(routineItem, 120, e)}
+                                                  className="px-1.5 py-0.5 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-800 font-bold transition"
+                                                  title="১২০ মিনিট পর্যন্ত বর্ধিত করুন"
+                                                >
+                                                  +১২০মি
+                                                </button>
+                                              )}
+                                            </div>
+                                          )}
+                                          <span className="text-indigo-400 font-bold hover:underline">এডিট</span>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                ) : (
-                                  <div className={`h-16 rounded-2xl border border-dashed flex flex-col items-center justify-center text-[10px] transition print:border-none print:h-7 ${
-                                    isDropZone
+                                  ) : (
+                                    <div className={`h-16 rounded-2xl border border-dashed flex flex-col items-center justify-center text-[10px] transition print:border-none print:h-7 ${isDropZone
                                       ? "border-emerald-500 text-emerald-300 bg-emerald-950/30 font-bold"
                                       : "border-slate-800 text-slate-600 dark:text-slate-400 group-hover:text-indigo-400 group-hover:border-indigo-500/50 group-hover:bg-indigo-950/20"
-                                  }`}>
-                                    <span className="print:hidden font-medium">
-                                      {isDropZone ? "এখানে ড্রপ করুন" : "+ ক্লাস যোগ করুন"}
-                                    </span>
-                                    <span className="print:hidden text-[9px] text-slate-500 dark:text-slate-400 font-mono">
-                                      {toBengaliNumerals(slot.startTime)} - {toBengaliNumerals(slot.endTime)}
-                                    </span>
-                                    <span className="hidden print:inline text-slate-400 font-bold">—</span>
-                                  </div>
-                                )}
-                              </td>
-                            );
-                          })}
+                                      }`}>
+                                      <span className="print:hidden font-medium">
+                                        {isDropZone ? "এখানে ড্রপ করুন" : "+ ক্লাস যোগ করুন"}
+                                      </span>
+                                      <span className="print:hidden text-[9px] text-slate-500 dark:text-slate-400 font-mono">
+                                        {toBengaliNumerals(slot.startTime)} - {toBengaliNumerals(slot.endTime)}
+                                      </span>
+                                      <span className="hidden print:inline text-slate-400 font-bold">—</span>
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            })}
                           </tr>
                         );
                       })}
@@ -1994,7 +2056,7 @@ export default function PtscMasterRoutineStudio({
                 const uniqueGroups = new Set(teacherRoutines.map(r => r.className)).size;
                 const practicalLoad = teacherRoutines.filter(r => r.isLab || r.subjectName.includes("TP") || r.subjectName.includes("Practical") || r.subjectName.includes("ল্যাব")).length;
                 const theoryLoad = classLoad - practicalLoad;
-                
+
                 const totalTeachingMinutes = teacherRoutines.reduce((acc, r) => acc + (r.durationMinutes || 40), 0);
                 const institutionalMaxMinutes = 1350; // max weekly capacity threshold
                 const isOverloaded = totalTeachingMinutes > institutionalMaxMinutes;
@@ -2066,9 +2128,8 @@ export default function PtscMasterRoutineStudio({
                             {generatedTimeSlots.map((slot, idx) => (
                               <th
                                 key={idx}
-                                className={`p-2.5 font-bold border-r border-slate-800 print:border-r print:border-black text-center ${
-                                  slot.isBreak ? "bg-amber-950/40 text-amber-300 print:bg-slate-200 print:text-black" : ""
-                                }`}
+                                className={`p-2.5 font-bold border-r border-slate-800 print:border-r print:border-black text-center ${slot.isBreak ? "bg-amber-950/40 text-amber-300 print:bg-slate-200 print:text-black" : ""
+                                  }`}
                               >
                                 {slot.isBreak ? (
                                   <div>
@@ -2138,13 +2199,12 @@ export default function PtscMasterRoutineStudio({
                                       className="p-1.5 border-r border-slate-800 print:border-r print:border-black align-top cursor-pointer group hover:bg-indigo-950/30 transition-all duration-300 print:p-1.5"
                                     >
                                       {routineItem ? (
-                                        <div className={`p-2.5 rounded-2xl border space-y-1.5 relative shadow transition-all duration-300 print:border print:border-black print:p-2 print:bg-white print:shadow-none ${
-                                          hasConflict
-                                            ? "bg-rose-950/90 border-rose-500 animate-pulse shadow-lg shadow-rose-500/30 print:animate-none print:border-black"
-                                            : colSpan > 1
-                                              ? "bg-gradient-to-br from-indigo-950/90 via-slate-900 to-indigo-950/70 border-indigo-500/60 shadow-md ring-1 ring-indigo-500/30"
-                                              : "bg-indigo-950/80 border-indigo-700"
-                                        }`}>
+                                        <div className={`p-2.5 rounded-2xl border space-y-1.5 relative shadow transition-all duration-300 print:border print:border-black print:p-2 print:bg-white print:shadow-none ${hasConflict
+                                          ? "bg-rose-950/90 border-rose-500 animate-pulse shadow-lg shadow-rose-500/30 print:animate-none print:border-black"
+                                          : colSpan > 1
+                                            ? "bg-gradient-to-br from-indigo-950/90 via-slate-900 to-indigo-950/70 border-indigo-500/60 shadow-md ring-1 ring-indigo-500/30"
+                                            : "bg-indigo-950/80 border-indigo-700"
+                                          }`}>
                                           {/* শ্রেণি ও ট্রেড */}
                                           <div className="font-extrabold text-indigo-300 print:text-black text-[11px] print:text-[10px] truncate flex items-center justify-between gap-1">
                                             <span className="font-black truncate">
@@ -2154,9 +2214,8 @@ export default function PtscMasterRoutineStudio({
                                           </div>
 
                                           {/* বিষয় (Subject) */}
-                                          <div className={`text-[12px] print:text-[11px] leading-tight font-black ${
-                                            hasConflict ? "text-rose-200 print:text-black" : "text-white print:text-black"
-                                          }`}>
+                                          <div className={`text-[12px] print:text-[11px] leading-tight font-black ${hasConflict ? "text-rose-200 print:text-black" : "text-white print:text-black"
+                                            }`}>
                                             📚 বিষয়: {routineItem.subjectNameBangla || routineItem.subjectName}
                                           </div>
 
@@ -2365,9 +2424,11 @@ export default function PtscMasterRoutineStudio({
                       onChange={(e) => setTiffinBreakAfterPeriod(Number(e.target.value))}
                       className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white font-bold"
                     >
-                      <option value={3}>৩য় ক্লাসের পর</option>
-                      <option value={4}>৪র্থ ক্লাসের পর (সকাল ১০:৪০)</option>
-                      <option value={5}>৫ম ক্লাসের পর</option>
+                      {Array.from({ length: Math.max(1, totalPeriods - 1) }, (_, i) => i + 1).map((pNo) => (
+                        <option key={pNo} value={pNo}>
+                          {toBengaliNumerals(pNo)}ম ক্লাসের পর
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </>
@@ -2660,11 +2721,10 @@ export default function PtscMasterRoutineStudio({
                   <select
                     value={modalTeacher}
                     onChange={(e) => setModalTeacher(e.target.value)}
-                    className={`w-full px-3 py-2 bg-slate-800 border rounded-xl text-xs font-bold transition-colors ${
-                      conflictInfo.hasConflict
-                        ? "border-rose-500 text-rose-200"
-                        : "border-slate-700 text-white"
-                    }`}
+                    className={`w-full px-3 py-2 bg-slate-800 border rounded-xl text-xs font-bold transition-colors ${conflictInfo.hasConflict
+                      ? "border-rose-500 text-rose-200"
+                      : "border-slate-700 text-white"
+                      }`}
                   >
                     <option value="">-- শিক্ষক বেছে নিন --</option>
                     {filterOnlyFreeTeachers ? (
@@ -2727,11 +2787,10 @@ export default function PtscMasterRoutineStudio({
                       <Building className="w-3.5 h-3.5 text-cyan-400" />
                       <span>রুম / ল্যাব নির্বাচন (Physical Space):</span>
                     </label>
-                    <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded ${
-                      roomConflictInfo.hasConflict
-                        ? "bg-rose-950 text-rose-300 border border-rose-800"
-                        : "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                    }`}>
+                    <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded ${roomConflictInfo.hasConflict
+                      ? "bg-rose-950 text-rose-300 border border-rose-800"
+                      : "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                      }`}>
                       {roomConflictInfo.hasConflict ? "🔴 দ্বৈত বুকিং কনফ্লিক্ট" : "🟢 রুম উপলব্ধ"}
                     </span>
                   </div>
@@ -2739,11 +2798,10 @@ export default function PtscMasterRoutineStudio({
                   <select
                     value={modalRoom}
                     onChange={(e) => setModalRoom(e.target.value)}
-                    className={`w-full px-3 py-2 bg-slate-800 border rounded-xl text-xs font-bold transition-colors ${
-                      roomConflictInfo.hasConflict
-                        ? "border-rose-500 text-rose-200"
-                        : "border-slate-700 text-white"
-                    }`}
+                    className={`w-full px-3 py-2 bg-slate-800 border rounded-xl text-xs font-bold transition-colors ${roomConflictInfo.hasConflict
+                      ? "border-rose-500 text-rose-200"
+                      : "border-slate-700 text-white"
+                      }`}
                   >
                     <option value="">-- প্রতিষ্ঠানিক রুম বা ল্যাব নির্বাচন করুন --</option>
                     <optgroup label="🔬 স্পেশালাইজড টেকনিক্যাল ল্যাব ও ওয়ার্কশপ">
@@ -2778,13 +2836,12 @@ export default function PtscMasterRoutineStudio({
                           key={roomChip}
                           type="button"
                           onClick={() => setModalRoom(roomChip)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                            isSelected
-                              ? "bg-cyan-600 text-white ring-1 ring-cyan-400 shadow-xs"
-                              : isBusy
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${isSelected
+                            ? "bg-cyan-600 text-white ring-1 ring-cyan-400 shadow-xs"
+                            : isBusy
                               ? "bg-slate-800/80 text-rose-300 border border-rose-900/60 hover:bg-rose-950/40"
                               : "bg-slate-800/80 text-slate-300 border border-slate-700 hover:bg-slate-700"
-                          }`}
+                            }`}
                         >
                           {isBusy ? "🔴 " : "🟢 "}
                           {roomChip}
@@ -2982,41 +3039,37 @@ export default function PtscMasterRoutineStudio({
               <div className="flex items-center gap-1.5 self-start sm:self-auto overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
                 <button
                   onClick={() => setWorkloadStatusFilter("all")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                    workloadStatusFilter === "all"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-800 text-slate-400 hover:text-white"
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${workloadStatusFilter === "all"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                    }`}
                 >
                   সকল শিক্ষক ({facultyWorkloadStats.length})
                 </button>
                 <button
                   onClick={() => setWorkloadStatusFilter("overloaded")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 ${
-                    workloadStatusFilter === "overloaded"
-                      ? "bg-rose-600 text-white"
-                      : "bg-slate-800 text-rose-300 hover:text-white"
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 ${workloadStatusFilter === "overloaded"
+                    ? "bg-rose-600 text-white"
+                    : "bg-slate-800 text-rose-300 hover:text-white"
+                    }`}
                 >
                   অতিরিক্ত লোড ({facultyWorkloadStats.filter((s) => s.isOverloaded).length})
                 </button>
                 <button
                   onClick={() => setWorkloadStatusFilter("normal")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                    workloadStatusFilter === "normal"
-                      ? "bg-emerald-600 text-white"
-                      : "bg-slate-800 text-emerald-300 hover:text-white"
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${workloadStatusFilter === "normal"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-slate-800 text-emerald-300 hover:text-white"
+                    }`}
                 >
                   ভারসাম্যপূর্ণ ({facultyWorkloadStats.filter((s) => s.isNormal).length})
                 </button>
                 <button
                   onClick={() => setWorkloadStatusFilter("underloaded")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                    workloadStatusFilter === "underloaded"
-                      ? "bg-amber-600 text-white"
-                      : "bg-slate-800 text-amber-300 hover:text-white"
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${workloadStatusFilter === "underloaded"
+                    ? "bg-amber-600 text-white"
+                    : "bg-slate-800 text-amber-300 hover:text-white"
+                    }`}
                 >
                   আন্ডারলোড ({facultyWorkloadStats.filter((s) => s.isUnderloaded).length})
                 </button>
@@ -3050,9 +3103,8 @@ export default function PtscMasterRoutineStudio({
                     filteredWorkloadStats.map((item, idx) => (
                       <tr
                         key={item.teacher.id}
-                        className={`hover:bg-slate-800/40 transition ${
-                          item.isOverloaded ? "bg-rose-950/15" : ""
-                        }`}
+                        className={`hover:bg-slate-800/40 transition ${item.isOverloaded ? "bg-rose-950/15" : ""
+                          }`}
                       >
                         <td className="p-3 text-center text-slate-400 font-mono">{idx + 1}</td>
                         <td className="p-3">
@@ -3067,11 +3119,10 @@ export default function PtscMasterRoutineStudio({
                         <td className="p-3 text-slate-300">{item.teacher.department || "প্রকৌশল"}</td>
                         <td className="p-3 text-center font-bold">
                           <span
-                            className={`px-2 py-0.5 rounded-md font-mono text-xs ${
-                              item.isOverloaded
-                                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
-                                : "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40"
-                            }`}
+                            className={`px-2 py-0.5 rounded-md font-mono text-xs ${item.isOverloaded
+                              ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                              : "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40"
+                              }`}
                           >
                             {toBengaliNumerals(item.totalPeriodsLoad)}টি ক্লাস
                           </span>
@@ -3102,13 +3153,12 @@ export default function PtscMasterRoutineStudio({
                             </div>
                             <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
                               <div
-                                className={`h-full rounded-full transition-all duration-500 ${
-                                  item.isOverloaded
-                                    ? "bg-rose-500"
-                                    : item.isUnderloaded
+                                className={`h-full rounded-full transition-all duration-500 ${item.isOverloaded
+                                  ? "bg-rose-500"
+                                  : item.isUnderloaded
                                     ? "bg-amber-500"
                                     : "bg-emerald-500"
-                                }`}
+                                  }`}
                                 style={{ width: `${Math.min(100, (item.totalMinutes / 960) * 100)}%` }}
                               />
                             </div>
@@ -3234,11 +3284,10 @@ export default function PtscMasterRoutineStudio({
                     <button
                       key={pTheme.id}
                       onClick={() => setPrintTheme(pTheme.id as any)}
-                      className={`p-3 rounded-2xl border text-left transition cursor-pointer ${
-                        printTheme === pTheme.id
-                          ? "bg-indigo-950/80 border-cyan-400 ring-2 ring-cyan-500/30 text-white shadow-lg"
-                          : "bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                      }`}
+                      className={`p-3 rounded-2xl border text-left transition cursor-pointer ${printTheme === pTheme.id
+                        ? "bg-indigo-950/80 border-cyan-400 ring-2 ring-cyan-500/30 text-white shadow-lg"
+                        : "bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        }`}
                     >
                       <div className="font-bold text-xs text-white">{pTheme.title}</div>
                       <div className="text-[10px] text-slate-400 mt-1">{pTheme.desc}</div>
@@ -3499,11 +3548,10 @@ export default function PtscMasterRoutineStudio({
                         </td>
                         <td className="p-3 text-center">
                           <span
-                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
-                              isBusyNow
-                                ? "bg-amber-950 text-amber-300 border border-amber-800"
-                                : "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                            }`}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${isBusyNow
+                              ? "bg-amber-950 text-amber-300 border border-amber-800"
+                              : "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                              }`}
                           >
                             {isBusyNow ? "🔴 ব্যবহৃত হচ্ছে" : "🟢 একদম খালি"}
                           </span>

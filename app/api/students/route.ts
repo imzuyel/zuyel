@@ -7,7 +7,18 @@ import {
   parseClassNumeric,
   doesStudentMatchTrade,
 } from "@/lib/academicStructure";
-import { prisma, isPrismaAvailable } from "@/lib/prisma";
+import { prisma, isPrismaAvailable, markPrismaFailure } from "@/lib/prisma";
+
+function isPrismaConnectionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code?: unknown }).code) : "";
+  return (
+    ["P1001", "P1002", "P1008", "P1017", "P2024"].includes(code) ||
+    msg.includes("ECONNREFUSED") ||
+    msg.includes("Can't reach database") ||
+    msg.includes("timed out")
+  );
+}
 import { extractRequestIdentity, requireAdmin } from "@/lib/serverAuthGuard";
 import { isAuthorizedStaff } from "@/lib/rbac";
 
@@ -475,12 +486,24 @@ export async function POST(req: Request) {
           message: "নতুন শিক্ষার্থী সফলভাবে ডাটাবেসে (MySQL) সংরক্ষিত হয়েছে।",
           source: "mysql",
         });
-      } catch (dbError) {
-        console.warn(
-          "[Hybrid API] MySQL student insertion failed, falling back to in-memory store:",
-          (dbError as Error).message
-        );
-        // Fall back to in-memory store insertion below
+      } catch (dbError: any) {
+        if (isPrismaConnectionError(dbError)) {
+          markPrismaFailure();
+          console.warn(
+            "[Hybrid API] MySQL connection unavailable, falling back to in-memory store:",
+            dbError?.message
+          );
+        } else {
+          console.error("[MySQL Student Create Error]:", dbError);
+          return NextResponse.json(
+            {
+              success: false,
+              error: `MySQL ডাটাবেস ত্রুটি: ${dbError?.message || "Student create failed"}`,
+              code: dbError?.code,
+            },
+            { status: 400 }
+          );
+        }
       }
     }
 
@@ -576,6 +599,10 @@ export async function PUT(req: Request) {
             name: updatedStudent.name,
             nameBangla: updatedStudent.nameBangla,
             roll: updatedStudent.roll,
+            gender: updatedStudent.gender,
+            dob: updatedStudent.dob,
+            bloodGroup: updatedStudent.bloodGroup,
+            photoUrl: updatedStudent.photoUrl,
             classId: updatedStudent.classId,
             tradeId: updatedStudent.tradeId || null,
             shift: updatedStudent.shift === "Second Shift" ? "SECOND_SHIFT" : "FIRST_SHIFT",
@@ -585,12 +612,27 @@ export async function PUT(req: Request) {
             fatherName: updatedStudent.fatherName,
             motherName: updatedStudent.motherName,
             guardianMobile: updatedStudent.guardianMobile,
+            studentMobile: updatedStudent.studentMobile,
+            email: updatedStudent.email,
             presentAddress: updatedStudent.presentAddress,
             permanentAddress: updatedStudent.permanentAddress,
           },
         });
-      } catch (dbErr) {
-        console.warn("[Hybrid API] Prisma update skipped/failed:", (dbErr as Error).message);
+      } catch (dbErr: any) {
+        if (isPrismaConnectionError(dbErr)) {
+          markPrismaFailure();
+          console.warn("[Hybrid API] Prisma update skipped (DB offline):", dbErr?.message);
+        } else {
+          console.error("[MySQL Student Update Error]:", dbErr);
+          return NextResponse.json(
+            {
+              success: false,
+              error: `MySQL আপডেট ব্যর্থ: ${dbErr?.message || "Student update failed"}`,
+              code: dbErr?.code,
+            },
+            { status: 400 }
+          );
+        }
       }
     }
 
@@ -624,8 +666,21 @@ export async function DELETE(req: Request) {
         await prisma.student.delete({
           where: { id: numId },
         });
-      } catch (dbErr) {
-        console.warn("[Hybrid API] Prisma delete skipped/failed:", (dbErr as Error).message);
+      } catch (dbErr: any) {
+        if (isPrismaConnectionError(dbErr)) {
+          markPrismaFailure();
+          console.warn("[Hybrid API] Prisma delete skipped (DB offline):", dbErr?.message);
+        } else {
+          console.error("[MySQL Student Delete Error]:", dbErr);
+          return NextResponse.json(
+            {
+              success: false,
+              error: `MySQL ডিলিট ব্যর্থ: ${dbErr?.message || "Student delete failed"}`,
+              code: dbErr?.code,
+            },
+            { status: 400 }
+          );
+        }
       }
     }
 

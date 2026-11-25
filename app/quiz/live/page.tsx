@@ -131,6 +131,7 @@ function LiveQuizArenaContent() {
 
     let isMounted = true;
     const pollState = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const playerIdQuery = identity?.playerId ? `?playerId=${identity.playerId}` : "";
         const res = await fetch(`/api/live-quizzes/sessions/${resolvedSessionId}/state${playerIdQuery}`);
@@ -382,10 +383,10 @@ function LiveQuizArenaContent() {
         <div className="w-full max-w-md mx-auto relative">
           <div className="relative rounded-3xl bg-slate-900/80 border border-slate-700/60 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-2xl p-6 sm:p-8 text-center space-y-6">
             {/* Glowing Emerald Confirmation Banner */}
-            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-emerald-500/20 border-2 border-emerald-400/50 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
-              <div className="flex items-center justify-center gap-2 text-emerald-300 font-black text-sm sm:text-base">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                <span>✅ তুমি সফলভাবে জয়েন হয়েছ!</span>
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/25 via-teal-500/25 to-emerald-500/25 border-2 border-emerald-400/70 shadow-[0_0_30px_rgba(16,185,129,0.35)]">
+              <div className="flex items-center justify-center gap-2 text-emerald-300 font-black text-base sm:text-lg">
+                <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                <span>✅ তুমি যুক্ত হয়েছ! (You&apos;re in!)</span>
               </div>
             </div>
 
@@ -663,17 +664,17 @@ function LiveQuizArenaContent() {
           ) : (
             /* INTERACTIVE OPTIONS BY QUESTION TYPE */
             <div className="space-y-3">
-              {/* 1. MCQ Single Choice */}
+              {/* 1. MCQ Single Choice (Kahoot Color-Coded Tactile Blocks) */}
               {qType === "MCQ" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   {options.map((opt: string, idx: number) => {
-                    const colors = [
-                      "from-cyan-500/20 to-blue-600/30 border-cyan-400/60 hover:border-cyan-300 text-cyan-200",
-                      "from-amber-500/20 to-orange-600/30 border-amber-400/60 hover:border-amber-300 text-amber-200",
-                      "from-rose-500/20 to-pink-600/30 border-rose-400/60 hover:border-rose-300 text-rose-200",
-                      "from-emerald-500/20 to-teal-600/30 border-emerald-400/60 hover:border-emerald-300 text-emerald-200",
+                    const kahootThemes = [
+                      { hex: "#E21B3C", shape: "▲" },
+                      { hex: "#1368CE", shape: "◆" },
+                      { hex: "#D89E00", shape: "●" },
+                      { hex: "#26890C", shape: "■" },
                     ];
-                    const colorClass = colors[idx % colors.length];
+                    const theme = kahootThemes[idx % kahootThemes.length];
                     const isSelected = selectedAnswer === idx;
 
                     return (
@@ -681,17 +682,18 @@ function LiveQuizArenaContent() {
                         key={idx}
                         type="button"
                         whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
+                        whileTap={{ scale: 0.96 }}
                         disabled={isSubmitting}
                         onClick={() => handleSubmitAnswer(idx)}
-                        className={`p-4 rounded-2xl bg-gradient-to-r ${colorClass} border-2 text-left font-bold text-sm sm:text-base flex items-center gap-3 cursor-pointer transition-all shadow-lg active:scale-95 ${
-                          isSelected ? "ring-4 ring-white scale-102" : ""
+                        style={{ backgroundColor: theme.hex }}
+                        className={`p-5 rounded-2xl border-b-4 border-black/35 text-left font-black text-base sm:text-lg flex items-center gap-3.5 cursor-pointer transition-all shadow-xl min-h-[76px] ${
+                          isSelected ? "ring-4 ring-white scale-[1.02]" : ""
                         }`}
                       >
-                        <span className="w-8 h-8 rounded-xl bg-slate-900/80 flex items-center justify-center font-black text-white shrink-0 text-xs">
-                          {String.fromCharCode(65 + idx)}
+                        <span className="w-10 h-10 rounded-xl bg-black/25 flex items-center justify-center font-black text-white shrink-0 text-xl">
+                          {theme.shape}
                         </span>
-                        <span className="flex-1 text-white">{opt}</span>
+                        <span className="flex-1 text-white leading-snug">{opt}</span>
                       </motion.button>
                     );
                   })}
@@ -1002,11 +1004,11 @@ function LiveQuizArenaContent() {
             {/* Verdict */}
             <div className="space-y-1">
               <h2 className="text-2xl sm:text-3xl font-black">
-                {isCorrect ? "🎉 সঠিক উত্তর!" : "❌ উত্তরটি সঠিক হয়নি"}
+                {isCorrect ? `🎉 সঠিক উত্তর! (+${earnedPoints} পয়েন্ট)` : "❌ ভুল উত্তর"}
               </h2>
               {isCorrect && (
-                <p className="text-lg font-black text-emerald-400 font-mono">
-                  +{earnedPoints} পয়েন্ট অর্জিত!
+                <p className="text-base font-black text-emerald-400 font-mono">
+                  অসাধারণ! তোমার স্কোরে +{earnedPoints} যুক্ত হয়েছে
                 </p>
               )}
             </div>

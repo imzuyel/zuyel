@@ -3,7 +3,7 @@ import { FinalResultService, QuizReportService } from "@/lib/reportService";
 import { sendSmsGateway } from "@/lib/smsGatewayEngine";
 import prisma from "@/lib/prisma";
 import { invalidateSessionCache } from "@/lib/sessionCache";
-import { archiveLiveSessionToDb } from "@/lib/liveSessionStore";
+import { archiveLiveSessionToDb, getLiveSession } from "@/lib/liveSessionStore";
 
 export async function POST(
   req: NextRequest,
@@ -18,10 +18,13 @@ export async function POST(
     const archivedResult = await archiveLiveSessionToDb(id);
 
     try {
-      await prisma.liveQuizSession.update({
-        where: { id },
-        data: { status: "COMPLETED", endedAt: new Date() }
-      });
+      const existing = await prisma.liveSession?.findFirst?.({ where: { id: Number(id) || -1 } });
+      if (existing) {
+        await prisma.liveSession.update({
+          where: { id: existing.id },
+          data: { status: "COMPLETED", endedAt: new Date() },
+        });
+      }
     } catch {}
 
     invalidateSessionCache(id);
@@ -30,11 +33,8 @@ export async function POST(
     if (body.sendFinalSummarySms) {
       try {
         const participants = QuizReportService.getParticipantsReport(id);
-        const session = await prisma.liveQuizSession.findUnique({
-          where: { id },
-          include: { quiz: true }
-        });
-        const quizTitle = session?.quiz?.title || "আজকের লাইভ কুইজ";
+        const liveSess = getLiveSession(id);
+        const quizTitle = liveSess?.title || "আজকের লাইভ কুইজ";
 
         for (const p of participants) {
           const phone = p.phone || "01700000000";

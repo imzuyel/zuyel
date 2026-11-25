@@ -352,7 +352,7 @@ model Student {
   email                String?       @db.VarChar(120)
   presentAddress       String        @db.Text
   permanentAddress     String        @db.Text
-  photoUrl             String        @db.VarChar(500)
+  photoUrl             String        @db.LongText
 
   // Academic placement
   classId              Int
@@ -451,6 +451,7 @@ model AttendanceRecord {
   shift        Shift         @default(FIRST_SHIFT)
   section      String        @default("A") @db.VarChar(20)
   session      String        @default("2026") @db.VarChar(20)
+  periodNo     Int           @default(1) // Period 1..8
   totalCount   Int           @default(0)
   presentCount Int           @default(0)
   absentCount  Int           @default(0)
@@ -463,7 +464,7 @@ model AttendanceRecord {
   // Relationships
   entries      AttendanceEntry[]
 
-  @@unique([date, classId, tradeId, shift, section, session], name: "unique_attendance_sheet")
+  @@unique([date, classId, tradeId, shift, section, session, periodNo], name: "unique_attendance_sheet")
   @@index([date, classId])
   @@index([classId, session, section])
   @@map("attendance_records")
@@ -1248,6 +1249,7 @@ model RoutineSlot {
   teacherId    Int?
   teacherName  String   @db.VarChar(150)
   roomNumber   String   @default("101") @db.VarChar(50)
+  isBreak      Boolean  @default(false)
   academicYear String   @default("2026") @db.VarChar(20)
   status       String   @default("Active") @db.VarChar(30)
   createdAt    DateTime @default(now())

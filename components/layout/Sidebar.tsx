@@ -76,7 +76,7 @@ export default function Sidebar({
   className = "",
 }: UnifiedSidebarProps) {
   const isMobileDrawerOpen = mobileOpen !== undefined ? mobileOpen : (isOpen || false);
-  const handleCloseMobile = onCloseMobile || onClose || (() => {});
+  const handleCloseMobile = onCloseMobile || onClose || (() => { });
 
   const { currentUser } = useAuth();
   const userRole = currentUser?.role || "student";
@@ -140,7 +140,10 @@ export default function Sidebar({
 
   useEffect(() => {
     fetchStorageStatus();
-    const interval = setInterval(fetchStorageStatus, 20000);
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchStorageStatus();
+    }, 45000);
     return () => clearInterval(interval);
   }, []);
 
@@ -353,9 +356,8 @@ export default function Sidebar({
                   </div>
                   {group.isCollapsible !== false && !searchQuery && (
                     <ChevronDown
-                      className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 shrink-0 ${
-                        isOpen ? "" : "-rotate-90"
-                      }`}
+                      className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 shrink-0 ${isOpen ? "" : "-rotate-90"
+                        }`}
                     />
                   )}
                 </button>
@@ -379,15 +381,13 @@ export default function Sidebar({
                     const content = (
                       <div
                         data-hierarchical-active={isActive ? "true" : "false"}
-                        className={`group relative flex items-center justify-between rounded-2xl transition-all duration-200 select-none cursor-pointer ${
-                          !isExpanded
-                            ? "p-2.5 justify-center"
-                            : "px-3 py-2.5"
-                        } ${
-                          isActive
+                        className={`group relative flex items-center justify-between rounded-2xl transition-all duration-200 select-none cursor-pointer ${!isExpanded
+                          ? "p-2.5 justify-center"
+                          : "px-3 py-2.5"
+                          } ${isActive
                             ? "bg-gradient-to-r from-indigo-900/50 via-slate-900/90 to-cyan-950/40 text-white font-black border-2 border-cyan-400/50 shadow-[0_0_20px_rgba(6,182,212,0.25)]"
                             : "text-slate-300 hover:text-white hover:bg-slate-900/70 border border-transparent hover:border-slate-800"
-                        }`}
+                          }`}
                       >
                         {/* Left Active Glow Indicator */}
                         {isActive && (
@@ -396,11 +396,10 @@ export default function Sidebar({
 
                         <div className="flex items-center gap-3 min-w-0">
                           <div
-                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110 ${
-                              isActive
-                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
-                                : item.theme?.iconBg || "bg-slate-900 border border-slate-800 text-slate-400 group-hover:text-cyan-300"
-                            }`}
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-110 ${isActive
+                              ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                              : item.theme?.iconBg || "bg-slate-900 border border-slate-800 text-slate-400 group-hover:text-cyan-300"
+                              }`}
                           >
                             <ItemIcon className={`w-4 h-4 ${dynamicThemedStyle.animClass || ""} ${dynamicThemedStyle.iconColor || ""}`} />
                           </div>
@@ -415,11 +414,10 @@ export default function Sidebar({
                         {/* Right Dynamic Count Badge */}
                         {isExpanded && dynamicBadge && (
                           <span
-                            className={`text-[9px] font-black px-2 py-0.5 rounded-full shrink-0 border ${
-                              isActive
-                                ? "bg-cyan-500/20 text-cyan-200 border-cyan-400/60 font-mono shadow-xs"
-                                : item.badgeColor || "bg-slate-800/80 text-slate-300 border-slate-700/80 font-mono"
-                            }`}
+                            className={`text-[9px] font-black px-2 py-0.5 rounded-full shrink-0 border ${isActive
+                              ? "bg-cyan-500/20 text-cyan-200 border-cyan-400/60 font-mono shadow-xs"
+                              : item.badgeColor || "bg-slate-800/80 text-slate-300 border-slate-700/80 font-mono"
+                              }`}
                           >
                             {dynamicBadge}
                           </span>
@@ -473,11 +471,10 @@ export default function Sidebar({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span
-                  className={`w-2 h-2 rounded-full ${
-                    storageStatus?.mode === "MYSQL_LIVE"
-                      ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"
-                      : "bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]"
-                  }`}
+                  className={`w-2 h-2 rounded-full ${storageStatus?.mode === "MYSQL_LIVE"
+                    ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"
+                    : "bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]"
+                    }`}
                 />
                 <span className="text-[11px] font-black text-white truncate">
                   {storageStatus?.mode === "MYSQL_LIVE" ? "🗄️ MySQL Live DB" : "⚡ Local Memory DB"}
@@ -505,11 +502,10 @@ export default function Sidebar({
               type="button"
               disabled={isSyncing}
               onClick={handleSyncToMySQL}
-              className={`w-full py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-md border ${
-                storageStatus?.mode === "MYSQL_LIVE"
-                  ? "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40"
-                  : "bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40"
-              }`}
+              className={`w-full py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-md border ${storageStatus?.mode === "MYSQL_LIVE"
+                ? "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40"
+                : "bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40"
+                }`}
             >
               {isSyncing ? (
                 <>
@@ -589,9 +585,8 @@ export default function Sidebar({
         onMouseLeave={() => {
           if (isCollapsed) setIsHovered(false);
         }}
-        className={`hidden md:flex h-screen max-h-screen sticky top-0 bg-[#101726]/95 dark:bg-[#101726]/95 [data-mode=dark]:bg-slate-950/95 text-slate-200 border-r border-slate-700/40 flex-col select-none font-sans shrink-0 z-30 shadow-2xl overflow-hidden ${
-          !isVisuallyExpanded ? "p-2.5" : "p-3.5"
-        } ${className}`}
+        className={`hidden md:flex h-screen max-h-screen sticky top-0 bg-[#101726]/95 dark:bg-[#101726]/95 [data-mode=dark]:bg-slate-950/95 text-slate-200 border-r border-slate-700/40 flex-col select-none font-sans shrink-0 z-30 shadow-2xl overflow-hidden ${!isVisuallyExpanded ? "p-2.5" : "p-3.5"
+          } ${className}`}
         aria-label="Institutional Unified Master Sidebar"
       >
         {renderNavContent(isVisuallyExpanded)}

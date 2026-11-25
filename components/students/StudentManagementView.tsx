@@ -447,7 +447,7 @@ export default function StudentManagementView({
   };
 
   // Image File Validations
-  const validateAndProcessFile = (file: File) => {
+  const validateAndProcessFile = async (file: File) => {
     setPhotoError(null);
 
     // Size limit: 2MB
@@ -463,17 +463,35 @@ export default function StudentManagementView({
       return;
     }
 
-    // Convert file to base64 for preview & persistence
+    // Optimistic preview + server upload to /api/upload/student-photo
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
         setFormData((prev) => ({ ...prev, photoUrl: reader.result as string }));
       }
     };
-    reader.onerror = () => {
-      setPhotoError("ফাইলটি প্রসেস করতে সমস্যা হয়েছে। অনুগ্রহ করে অন্য ছবি ব্যবহার করুন।");
-    };
     reader.readAsDataURL(file);
+
+    try {
+      const uploadForm = new FormData();
+      uploadForm.append("file", file);
+      uploadForm.append("roll", String(formData.roll || editingStudent?.roll || "student"));
+      if (editingStudent?.id) {
+        uploadForm.append("studentId", String(editingStudent.id));
+      }
+      const res = await fetch("/api/upload/student-photo", {
+        method: "POST",
+        body: uploadForm,
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.photoUrl) {
+        setFormData((prev) => ({ ...prev, photoUrl: data.photoUrl }));
+      } else if (data?.error) {
+        setPhotoError(data.error);
+      }
+    } catch {
+      // Preview remains active if offline
+    }
   };
 
   // Drag and Drop event triggers

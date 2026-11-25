@@ -18,7 +18,7 @@
 
 import fs from "fs";
 import path from "path";
-import { prisma, isPrismaAvailable } from "./prisma";
+import { prisma, isPrismaAvailable, markPrismaFailure } from "./prisma";
 import { institutionalDb } from "./database";
 import {
   DEFAULT_INSTITUTION_SETTINGS,
@@ -196,6 +196,10 @@ declare global {
   var __pgtscMysqlLastChecked: number | undefined;
   // eslint-disable-next-line no-var
   var __pgtscMysqlConnected: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscDiskWriteTimer: ReturnType<typeof setTimeout> | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscDiskWriteInFlight: boolean | undefined;
 }
 
 const CACHE_DIR = path.join(process.cwd(), ".next", "cache");
@@ -203,7 +207,7 @@ const DISK_FILE = path.join(CACHE_DIR, "pgtsc-hybrid-local-db.json");
 const STAGING_STUDENTS_FILE = path.join(process.cwd(), "prisma", "students-staging.json");
 
 // ---------------------------------------------------------------------------
-// Disk Persistence Helpers
+// Disk Persistence Helpers (Async Debounced 3s Background Snapshots)
 // ---------------------------------------------------------------------------
 function ensureCacheDir() {
   try {
@@ -216,16 +220,25 @@ function ensureCacheDir() {
 }
 
 function writeSnapshotToDisk(store: HybridStoreCollections) {
-  try {
-    ensureCacheDir();
-    const tempFile = `${DISK_FILE}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 6)}`;
-    fs.writeFileSync(tempFile, JSON.stringify(store, null, 2), "utf-8");
-    fs.renameSync(tempFile, DISK_FILE);
-    const stats = fs.statSync(DISK_FILE);
-    globalThis.__pgtscDiskSyncMtime = stats.mtimeMs;
-  } catch (err) {
-    console.warn("[HybridStore] Failed writing snapshot to disk:", err);
+  if (globalThis.__pgtscDiskWriteTimer) {
+    clearTimeout(globalThis.__pgtscDiskWriteTimer);
   }
+  globalThis.__pgtscDiskWriteTimer = setTimeout(async () => {
+    if (globalThis.__pgtscDiskWriteInFlight) return;
+    globalThis.__pgtscDiskWriteInFlight = true;
+    try {
+      await fs.promises.mkdir(CACHE_DIR, { recursive: true });
+      const latest = globalThis.__pgtscHybridStore || store;
+      const tempFile = `${DISK_FILE}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 6)}`;
+      await fs.promises.writeFile(tempFile, JSON.stringify(latest), "utf-8");
+      await fs.promises.rename(tempFile, DISK_FILE);
+      globalThis.__pgtscDiskSyncMtime = Date.now();
+    } catch (err) {
+      console.warn("[HybridStore] Failed async writing snapshot to disk:", err);
+    } finally {
+      globalThis.__pgtscDiskWriteInFlight = false;
+    }
+  }, 3000);
 }
 
 function readSnapshotFromDisk(): HybridStoreCollections | null {
@@ -941,27 +954,27 @@ export function ensureStoreIntegrity(store: HybridStoreCollections): HybridStore
 // Store Initialization & Synchronization
 // ---------------------------------------------------------------------------
 export function getHybridStore(): HybridStoreCollections {
-  // 1. Check disk file mtime for cross-process synchronization
-  if (fs.existsSync(DISK_FILE)) {
-    try {
-      const stats = fs.statSync(DISK_FILE);
-      if (!globalThis.__pgtscHybridStore || globalThis.__pgtscDiskSyncMtime !== stats.mtimeMs) {
-        const diskStore = readSnapshotFromDisk();
-        if (diskStore && Array.isArray(diskStore.students) && diskStore.students.length > 0) {
-          ensureStoreIntegrity(diskStore);
-          globalThis.__pgtscHybridStore = diskStore;
-          return globalThis.__pgtscHybridStore;
-        }
-      }
-    } catch {
-      // fallback to memory
-    }
+  // 1. Fast-path (<1ms): Return warm in-memory cache immediately without blocking on disk I/O
+  if (
+    globalThis.__pgtscHybridStore &&
+    Array.isArray(globalThis.__pgtscHybridStore.students) &&
+    globalThis.__pgtscHybridStore.students.length > 0
+  ) {
+    return globalThis.__pgtscHybridStore;
   }
 
-  // 2. Return memory cache if warm
-  if (globalThis.__pgtscHybridStore && Array.isArray(globalThis.__pgtscHybridStore.students) && globalThis.__pgtscHybridStore.students.length > 0) {
-    ensureStoreIntegrity(globalThis.__pgtscHybridStore);
-    return globalThis.__pgtscHybridStore;
+  // 2. Cold-start only: Hydrate from disk snapshot if available
+  if (fs.existsSync(DISK_FILE)) {
+    try {
+      const diskStore = readSnapshotFromDisk();
+      if (diskStore && Array.isArray(diskStore.students) && diskStore.students.length > 0) {
+        ensureStoreIntegrity(diskStore);
+        globalThis.__pgtscHybridStore = diskStore;
+        return globalThis.__pgtscHybridStore;
+      }
+    } catch {
+      // fallback to fresh seed
+    }
   }
 
   // 3. Initialize fresh store with authentic staging records & defaults
@@ -1033,9 +1046,15 @@ export function saveHybridStore(store: HybridStoreCollections): void {
 // Storage Mode Resolver & Health Detection
 // ---------------------------------------------------------------------------
 export async function isMySQLConnected(): Promise<boolean> {
+  // 60-second circuit breaker from lib/prisma.ts
+  if (!isPrismaAvailable()) {
+    globalThis.__pgtscMysqlConnected = false;
+    return false;
+  }
+
   const now = Date.now();
-  // Cache check for 15 seconds to avoid DB hammering
-  if (globalThis.__pgtscMysqlLastChecked && now - globalThis.__pgtscMysqlLastChecked < 15000) {
+  // Cache check for 60 seconds to avoid DB timeouts/hammering
+  if (globalThis.__pgtscMysqlLastChecked && now - globalThis.__pgtscMysqlLastChecked < 60000) {
     return Boolean(globalThis.__pgtscMysqlConnected);
   }
 
@@ -1046,7 +1065,7 @@ export async function isMySQLConnected(): Promise<boolean> {
       return false;
     }
 
-    // Fast lightweight ping
+    // Fast lightweight ping with 1.5s timeout
     await Promise.race([
       prisma.$queryRaw`SELECT 1`,
       new Promise((_, reject) => setTimeout(() => reject(new Error("MySQL connection timeout")), 1500)),
@@ -1055,6 +1074,7 @@ export async function isMySQLConnected(): Promise<boolean> {
     globalThis.__pgtscMysqlConnected = true;
     return true;
   } catch {
+    markPrismaFailure();
     globalThis.__pgtscMysqlConnected = false;
     return false;
   }

@@ -84,15 +84,27 @@ function sanitizeSettings(settings: AISettings): AISettings {
   return settings;
 }
 
+declare global {
+  // eslint-disable-next-line no-var
+  var __pgtscAiSettingsCache: AISettings | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscAiSettingsWriteTimer: ReturnType<typeof setTimeout> | undefined;
+}
+
 export function getAISettings(): AISettings {
+  if (globalThis.__pgtscAiSettingsCache) {
+    return globalThis.__pgtscAiSettingsCache;
+  }
   try {
     const hybrid = getHybridAiSettings();
     if (hybrid && Array.isArray(hybrid.providers) && hybrid.providers.length > 0) {
-      return sanitizeSettings(hybrid);
+      globalThis.__pgtscAiSettingsCache = sanitizeSettings(hybrid);
+      return globalThis.__pgtscAiSettingsCache;
     }
     if (fs.existsSync(CONFIG_PATH)) {
       const data = fs.readFileSync(CONFIG_PATH, "utf-8");
-      return sanitizeSettings(JSON.parse(data));
+      globalThis.__pgtscAiSettingsCache = sanitizeSettings(JSON.parse(data));
+      return globalThis.__pgtscAiSettingsCache;
     }
   } catch (error) {
     console.error("Error reading AI settings:", error);
@@ -103,17 +115,25 @@ export function getAISettings(): AISettings {
 export function saveAISettings(settings: AISettings) {
   try {
     const sanitized = sanitizeSettings(settings);
+    globalThis.__pgtscAiSettingsCache = sanitized;
     try {
       saveHybridAiSettings(sanitized);
     } catch (hErr) {
       console.warn("[HybridStore] Failed to save AI settings to hybrid engine:", hErr);
     }
 
-    const dir = path.dirname(CONFIG_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    if (globalThis.__pgtscAiSettingsWriteTimer) {
+      clearTimeout(globalThis.__pgtscAiSettingsWriteTimer);
     }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(sanitized, null, 2), "utf-8");
+    globalThis.__pgtscAiSettingsWriteTimer = setTimeout(async () => {
+      try {
+        const dir = path.dirname(CONFIG_PATH);
+        await fs.promises.mkdir(dir, { recursive: true });
+        await fs.promises.writeFile(CONFIG_PATH, JSON.stringify(sanitized, null, 2), "utf-8");
+      } catch (err) {
+        console.error("Async AI settings write error:", err);
+      }
+    }, 1500);
     return true;
   } catch (error) {
     console.error("Error saving AI settings:", error);

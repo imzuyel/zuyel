@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { getSessionQuestions } from "@/lib/liveQuizHelper";
+import { getLiveSession, saveLiveSession, normalizeSlideForLive } from "@/lib/liveSessionStore";
+import { invalidateSessionCache } from "@/lib/sessionCache";
 
 export async function POST(
   req: NextRequest,
@@ -8,76 +10,55 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const session = institutionalDb.liveSessions.find(s => s.id === id);
+    const body = await req.json().catch(() => ({}));
+    const liveSession = getLiveSession(id);
 
-    if (!session) {
+    if (!liveSession) {
       return NextResponse.json(
         { success: false, message: "Live session not found" },
         { status: 404 }
       );
     }
 
-    if (session.status !== "LOBBY") {
-      return NextResponse.json(
-        { success: false, message: "Session is not in LOBBY state" },
-        { status: 400 }
-      );
+    if (!liveSession.slides || liveSession.slides.length === 0) {
+      const questions = getSessionQuestions(liveSession.quizId || "quiz-1");
+      if (questions.length > 0) {
+        liveSession.slides = questions.map((q: any, idx: number) => normalizeSlideForLive(q, idx));
+      }
     }
 
-    const questions = getSessionQuestions(session.quizId);
-    if (questions.length === 0) {
-      return NextResponse.json(
-        { success: false, message: "This quiz has no valid questions to display" },
-        { status: 400 }
-      );
-    }
+    const nowMs = Date.now();
+    liveSession.currentSlideIndex = 0;
+    liveSession.status = "ACTIVE";
+    liveSession.isLocked = false;
 
-    const firstQuestion = questions[0];
-    const isGraded = Number(firstQuestion?.timeLimit || 0) > 0 || ["MCQ", "MATCHING", "FILL_BLANKS", "REORDER", "TRUE_FALSE"].includes((firstQuestion?.type || "").toUpperCase());
-    const now = new Date();
-
-    session.currentQuestionIndex = 0;
-    (session as any).sequenceStartedAt = now.toISOString();
-    (session as any).readyPlayers = [];
-    (session as any).allVoted = false;
-    (session as any).isAnswerRevealed = false;
-    (session as any).eligibilityFrozen = true;
-    session.isQuizModeStarted = true;
-    session.activePreQuizActivity = null;
-
-    if (isGraded) {
-      // Mandatory FIX 4: Enter READY_CHECK State First! DO NOT start countdown/timer until teacher clicks Start!
-      session.status = "READY" as any;
-      (session as any).countdownEndsAt = undefined;
-      (session as any).previewEndsAt = undefined;
-      session.questionStartedAt = undefined;
-      session.questionEndsAt = undefined;
+    if (body?.immediateCountdown !== false) {
+      liveSession.stage = "COUNTDOWN_321";
+      liveSession.stageStartedAt = nowMs;
+      liveSession.stageEndsAt = nowMs + 3000;
     } else {
-      // Content / Warmup slide
-      session.status = "QUESTION_ACTIVE";
-      (session as any).countdownEndsAt = undefined;
-      (session as any).previewEndsAt = undefined;
-      session.questionStartedAt = now.toISOString();
-      session.questionEndsAt = undefined;
+      liveSession.stage = "READY_CHECK";
+      liveSession.stageStartedAt = nowMs;
+      liveSession.stageEndsAt = nowMs + 60000;
     }
 
-    session.updatedAt = now.toISOString();
+    saveLiveSession(liveSession);
+    invalidateSessionCache(id);
 
-    // Log Eligibility Freeze in Security Audit Logs (Phase 14 Requirement 25 & 46)
-    if (institutionalDb.eligibilityAuditLogs) {
-      institutionalDb.eligibilityAuditLogs.unshift({
-        id: `audit-freeze-${session.id}-${Date.now()}`,
-        eventType: "QUIZ_SESSION_ELIGIBILITY_FROZEN",
-        message: `কুইজ লাইভ সেশন (${session.sessionCode}) শুরু হওয়ায় অংশগ্রহণকারী যোগ্যতা স্থবির (Frozen) করা হয়েছে।`,
-        performedBy: "Quiz Live System",
-        timestamp: now.toISOString()
-      });
+    const legacy = institutionalDb.liveSessions.find((s) => s.id === liveSession.id);
+    if (legacy) {
+      legacy.isQuizModeStarted = true;
+      (legacy as any).eligibilityFrozen = true;
+      legacy.updatedAt = new Date().toISOString();
     }
 
     return NextResponse.json({
       success: true,
-      message: "Quiz live session started successfully. Eligibility state is now frozen.",
-      session
+      message: "Live quiz session started cleanly.",
+      stage: liveSession.stage,
+      stageStartedAt: liveSession.stageStartedAt,
+      stageEndsAt: liveSession.stageEndsAt,
+      session: liveSession,
     });
   } catch (error: any) {
     return NextResponse.json(

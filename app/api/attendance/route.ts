@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, AttendanceRecord } from "@/lib/database";
-import { parseClassNumeric, ALL_TRADES } from "@/lib/academicStructure";
+import { parseClassNumeric, ALL_TRADES, doesClassHaveTrade } from "@/lib/academicStructure";
+import { prisma, isPrismaAvailable, markPrismaFailure } from "@/lib/prisma";
 import {
   getHybridAttendanceRecords,
   saveHybridAttendanceRecords,
-  recordHybridAttendanceEntry,
+  getHybridStore,
 } from "@/lib/hybridStorageEngine";
+
+function toPrismaStatus(s: string): "PRESENT" | "ABSENT" | "LATE" | "EXCUSED" {
+  const up = String(s || "P").toUpperCase();
+  if (up === "A" || up === "ABSENT") return "ABSENT";
+  if (up === "L" || up === "LATE") return "LATE";
+  if (up === "E" || up === "EXCUSED" || up === "LEAVE") return "EXCUSED";
+  return "PRESENT";
+}
 
 function matchesClass(c1: any, c2: any): boolean {
   if (c1 === c2 || String(c1) === String(c2)) return true;
@@ -69,6 +78,117 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: true, record: found });
       }
       return NextResponse.json({ success: false, error: "রেকর্ড পাওয়া যায়নি।" }, { status: 404 });
+    }
+
+    // 1.5. PAGINATED STUDENTS FOR DIGITAL ATTENDANCE REGISTER
+    if (action === "students_paged") {
+      const targetClassId = classIdParam ? Number(classIdParam) : 4;
+      const targetTradeId = tradeIdParam && tradeIdParam !== "0" && tradeIdParam !== "all" ? Number(tradeIdParam) : undefined;
+      const searchQ = (searchParams.get("search") || "").trim().toLowerCase();
+      const pageNum = Math.max(1, Number(searchParams.get("page") || 1));
+      const limitNum = Math.max(1, Math.min(200, Number(searchParams.get("limit") || 50)));
+      const hasTrade = doesClassHaveTrade(targetClassId);
+
+      // Try MySQL first when live
+      if (isPrismaAvailable() && prisma) {
+        try {
+          const where: any = { status: "ACTIVE", classId: targetClassId };
+          if (hasTrade && targetTradeId) {
+            where.tradeId = targetTradeId;
+          }
+          if (sectionParam && sectionParam !== "all") {
+            where.section = sectionParam;
+          }
+          if (searchQ) {
+            const numericRoll = Number(searchQ);
+            where.OR = [
+              { name: { contains: searchQ } },
+              { nameBangla: { contains: searchQ } },
+              { studentId: { contains: searchQ } },
+              ...(!Number.isNaN(numericRoll) ? [{ roll: numericRoll }] : []),
+            ];
+          }
+          const [total, rows] = await Promise.all([
+            prisma.student.count({ where }),
+            prisma.student.findMany({
+              where,
+              include: { class: true, trade: true },
+              orderBy: { roll: "asc" },
+              skip: (pageNum - 1) * limitNum,
+              take: limitNum,
+            }),
+          ]);
+          if (total > 0 || rows.length > 0) {
+            const items = rows.map((s: any) => ({
+              id: s.id,
+              studentId: s.studentId,
+              admissionNo: s.admissionNo,
+              roll: s.roll,
+              name: s.name,
+              nameBangla: s.nameBangla || s.name,
+              classId: s.classId,
+              className: s.class?.name || `Class ${s.classId}`,
+              tradeId: s.tradeId || undefined,
+              tradeName: s.trade?.name || undefined,
+              tradeNameBangla: s.trade?.nameBangla || undefined,
+              section: s.section || "A",
+              session: s.session || "2026",
+              photoUrl: s.photoUrl || "",
+              guardianMobile: s.guardianMobile || "",
+              status: "Active",
+            }));
+            return NextResponse.json({
+              success: true,
+              items,
+              total,
+              totalPages: Math.max(1, Math.ceil(total / limitNum)),
+              page: pageNum,
+              limit: limitNum,
+              source: "mysql",
+            });
+          }
+        } catch (dbErr: any) {
+          const msg = dbErr?.message || String(dbErr);
+          if (msg.includes("P1001") || msg.includes("ECONNREFUSED") || msg.includes("timed out")) {
+            markPrismaFailure();
+          }
+        }
+      }
+
+      // Fast In-Memory / Hybrid fallback
+      const hybridList = getHybridStore().students || [];
+      const sourceStudents = hybridList.length > 0 ? hybridList : institutionalDb.students;
+      let filteredStudents = sourceStudents.filter((s: any) => {
+        if (!matchesClass(s.classId, targetClassId)) return false;
+        if (hasTrade && targetTradeId && !matchesTrade(s.tradeId, targetTradeId)) return false;
+        if (sectionParam && sectionParam !== "all" && s.section && s.section !== sectionParam) return false;
+        if (searchQ) {
+          const matchName = (s.name || "").toLowerCase().includes(searchQ) || (s.nameBangla || "").toLowerCase().includes(searchQ);
+          const matchRoll = String(s.roll || "").includes(searchQ);
+          const matchId = (s.studentId || "").toLowerCase().includes(searchQ);
+          if (!matchName && !matchRoll && !matchId) return false;
+        }
+        return true;
+      });
+
+      filteredStudents.sort((a: any, b: any) => Number(a.roll || 0) - Number(b.roll || 0));
+      const total = filteredStudents.length;
+      const totalPages = Math.max(1, Math.ceil(total / limitNum));
+      const paged = filteredStudents.slice((pageNum - 1) * limitNum, pageNum * limitNum).map((s: any) => ({
+        ...s,
+        id: Number(String(s.id).replace(/\D/g, "")) || Number(s.roll) || 1,
+        photoUrl: s.photoUrl || s.avatar || "",
+      }));
+
+      return NextResponse.json({
+        success: true,
+        items: paged,
+        total,
+        totalPages,
+        page: pageNum,
+        limit: limitNum,
+        source: "hybrid",
+      });
     }
 
     // 2. QUIZ ELIGIBILITY ACTION
@@ -295,10 +415,93 @@ export async function POST(req: NextRequest) {
     }
     saveHybridAttendanceRecords(hybridRecords);
 
+    // Strict MySQL Write-Through (Period-Wise AttendanceRecord + AttendanceEntry)
+    let source = "hybrid";
+    if (isPrismaAvailable() && prisma) {
+      try {
+        const presentCount = newRecord.entries.filter((e) => e.status === "P").length;
+        const absentCount = newRecord.entries.filter((e) => e.status === "A").length;
+        const lateCount = newRecord.entries.filter((e) => e.status === "L").length;
+        const leaveCount = newRecord.entries.filter((e) => e.status === "E").length;
+
+        const existingDb = await prisma.attendanceRecord.findFirst({
+          where: {
+            date,
+            classId,
+            tradeId: tradeId || null,
+            section,
+            session,
+            periodNo,
+          },
+        });
+
+        let dbRecordId: number;
+        if (existingDb) {
+          const updated = await prisma.attendanceRecord.update({
+            where: { id: existingDb.id },
+            data: {
+              totalCount: newRecord.entries.length,
+              presentCount,
+              absentCount,
+              lateCount,
+              leaveCount,
+              verifiedBy: newRecord.teacherName,
+            },
+          });
+          dbRecordId = updated.id;
+          await prisma.attendanceEntry.deleteMany({ where: { recordId: dbRecordId } });
+        } else {
+          const created = await prisma.attendanceRecord.create({
+            data: {
+              date,
+              classId,
+              tradeId: tradeId || null,
+              section,
+              session,
+              periodNo,
+              totalCount: newRecord.entries.length,
+              presentCount,
+              absentCount,
+              lateCount,
+              leaveCount,
+              verifiedBy: newRecord.teacherName,
+            },
+          });
+          dbRecordId = created.id;
+        }
+
+        if (newRecord.entries.length > 0) {
+          await prisma.attendanceEntry.createMany({
+            data: newRecord.entries.map((e) => ({
+              recordId: dbRecordId,
+              studentId: Number(e.studentId),
+              status: toPrismaStatus(e.status),
+              remarks: e.remark || null,
+            })),
+            skipDuplicates: true,
+          });
+        }
+        source = "mysql";
+      } catch (dbErr: any) {
+        const msg = dbErr?.message || String(dbErr);
+        const code = String(dbErr?.code || "");
+        if (["P1001", "P1002", "P1008", "P1017", "P2024"].includes(code) || msg.includes("ECONNREFUSED") || msg.includes("timed out")) {
+          markPrismaFailure();
+        } else {
+          console.error("[MySQL Attendance Write Error]:", dbErr);
+          return NextResponse.json(
+            { success: false, error: `MySQL হাজিরা সংরক্ষণ ব্যর্থ: ${msg}`, code },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: "হাজিরা সফলভাবে সংরক্ষিত হয়েছে।",
       record: newRecord,
+      source,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -86,6 +86,10 @@ declare global {
   var __pgtscLiveSessionMap: Map<string, LiveSessionRecord> | undefined;
   // eslint-disable-next-line no-var
   var __pgtscLiveSessionsLastMtime: number | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscLiveDiskWriteTimer: ReturnType<typeof setTimeout> | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscLiveMysqlSyncTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
 const CACHE_DIR = path.join(process.cwd(), ".next", "cache");
@@ -93,10 +97,14 @@ const CACHE_FILE = path.join(CACHE_DIR, "pgtsc-live-sessions.json");
 const LEGACY_CACHE_FILE = path.join(CACHE_DIR, "live-sessions-v3.json");
 
 function syncMapFromDisk(): Map<string, LiveSessionRecord> {
-  if (!globalThis.__pgtscLiveSessionMap) {
-    globalThis.__pgtscLiveSessionMap = new Map<string, LiveSessionRecord>();
+  // Fast-path (<1ms): Never block high-concurrency 60-student routes on synchronous disk I/O
+  if (globalThis.__pgtscLiveSessionMap) {
+    return globalThis.__pgtscLiveSessionMap;
   }
 
+  globalThis.__pgtscLiveSessionMap = new Map<string, LiveSessionRecord>();
+
+  // Cold-start hydration from disk snapshot
   try {
     const targetFile = fs.existsSync(CACHE_FILE)
       ? CACHE_FILE
@@ -106,47 +114,93 @@ function syncMapFromDisk(): Map<string, LiveSessionRecord> {
 
     if (targetFile) {
       const stats = fs.statSync(targetFile);
-      if (stats.mtimeMs !== globalThis.__pgtscLiveSessionsLastMtime) {
-        globalThis.__pgtscLiveSessionsLastMtime = stats.mtimeMs;
-        const raw = fs.readFileSync(targetFile, "utf-8");
-        const list: LiveSessionRecord[] = JSON.parse(raw);
-        if (Array.isArray(list)) {
-          for (const item of list) {
-            if (item && item.id) {
-              item.stageStartedAt = Number(item.stageStartedAt) || Date.now();
-              item.stageEndsAt = Number(item.stageEndsAt) || Date.now() + 3000;
-              item.updatedAt = Number(item.updatedAt) || Date.now();
-              item.createdAt = Number(item.createdAt) || Date.now();
-              item.players = item.players || {};
-              item.answers = item.answers || {};
-              globalThis.__pgtscLiveSessionMap.set(item.id, item);
-            }
+      globalThis.__pgtscLiveSessionsLastMtime = stats.mtimeMs;
+      const raw = fs.readFileSync(targetFile, "utf-8");
+      const list: LiveSessionRecord[] = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        for (const item of list) {
+          if (item && item.id) {
+            item.stageStartedAt = Number.isFinite(Number(item.stageStartedAt)) ? Number(item.stageStartedAt) : Date.now();
+            item.stageEndsAt = Number.isFinite(Number(item.stageEndsAt)) ? Number(item.stageEndsAt) : Date.now() + 20000;
+            item.updatedAt = Number(item.updatedAt) || Date.now();
+            item.createdAt = Number(item.createdAt) || Date.now();
+            item.players = item.players || {};
+            item.answers = item.answers || {};
+            globalThis.__pgtscLiveSessionMap.set(item.id, item);
           }
         }
       }
     }
   } catch (err) {
-    console.warn("[liveSessionStore] Disk read warning:", (err as Error).message);
+    console.warn("[liveSessionStore] Cold-start disk read warning:", (err as Error).message);
   }
 
   return globalThis.__pgtscLiveSessionMap;
 }
 
 function flushMapToDisk(): void {
-  try {
-    if (!fs.existsSync(CACHE_DIR)) {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
-    }
-    const map = syncMapFromDisk();
-    const list = Array.from(map.values());
-    const serialized = JSON.stringify(list);
-    // Write synchronously to guarantee instant cross-process visibility over tunnels/workers
-    fs.writeFileSync(CACHE_FILE, serialized, "utf-8");
-    const stats = fs.statSync(CACHE_FILE);
-    globalThis.__pgtscLiveSessionsLastMtime = stats.mtimeMs;
-  } catch (err) {
-    console.warn("[liveSessionStore] Disk write warning:", (err as Error).message);
+  if (globalThis.__pgtscLiveDiskWriteTimer) {
+    clearTimeout(globalThis.__pgtscLiveDiskWriteTimer);
   }
+  globalThis.__pgtscLiveDiskWriteTimer = setTimeout(async () => {
+    try {
+      await fs.promises.mkdir(CACHE_DIR, { recursive: true });
+      const map = syncMapFromDisk();
+      const list = Array.from(map.values());
+      const serialized = JSON.stringify(list);
+      const tmp = `${CACHE_FILE}.tmp.${Date.now()}`;
+      await fs.promises.writeFile(tmp, serialized, "utf-8");
+      await fs.promises.rename(tmp, CACHE_FILE);
+      globalThis.__pgtscLiveSessionsLastMtime = Date.now();
+    } catch (err) {
+      console.warn("[liveSessionStore] Async disk flush warning:", (err as Error).message);
+    }
+  }, 500);
+}
+
+/**
+ * Asynchronous background MySQL persistence for active live session state.
+ * Never stalls the <1ms classroom concurrency loop.
+ */
+function scheduleMysqlLiveSync(session: LiveSessionRecord): void {
+  if (globalThis.__pgtscLiveMysqlSyncTimer) {
+    clearTimeout(globalThis.__pgtscLiveMysqlSyncTimer);
+  }
+  globalThis.__pgtscLiveMysqlSyncTimer = setTimeout(async () => {
+    try {
+      const { prisma, isPrismaAvailable, markPrismaFailure } = await import("./prisma");
+      if (!isPrismaAvailable() || !prisma?.liveSession) return;
+
+      const sortedPlayers = Object.values(session.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0));
+      const dbStatus = session.status === "ENDED" ? "COMPLETED" : session.status === "ACTIVE" ? "ACTIVE" : "WAITING";
+
+      try {
+        const existing = await prisma.liveSession.findFirst({
+          where: { pin: session.code },
+        });
+        if (existing) {
+          await prisma.liveSession.update({
+            where: { id: existing.id },
+            data: {
+              status: dbStatus,
+              currentQuestion: session.currentSlideIndex || 0,
+              totalQuestions: session.slides?.length || 1,
+              participantsJson: JSON.stringify(sortedPlayers),
+              startedAt: session.status === "ACTIVE" && !existing.startedAt ? new Date() : existing.startedAt,
+              endedAt: session.status === "ENDED" ? new Date() : existing.endedAt,
+            },
+          });
+        }
+      } catch (dbErr: any) {
+        const msg = dbErr?.message || String(dbErr);
+        if (msg.includes("P1001") || msg.includes("ECONNREFUSED") || msg.includes("timed out")) {
+          markPrismaFailure();
+        }
+      }
+    } catch {
+      // Safe non-blocking background sync
+    }
+  }, 1500);
 }
 
 // ============================================================================
@@ -337,6 +391,7 @@ export function saveLiveSession(session: LiveSessionRecord): void {
   session.updatedAt = Date.now();
   map.set(session.id, session);
   flushMapToDisk();
+  scheduleMysqlLiveSync(session);
 
   // Sync to institutionalDb for legacy consumers
   const legacyIdx = institutionalDb.liveSessions.findIndex((s) => s.id === session.id);
@@ -715,8 +770,24 @@ export async function archiveLiveSessionToDb(sessionId: string): Promise<any> {
             },
           });
         }
+        if (prismaClient.quizResult) {
+          const numericQuizId = parseInt(String(session.quizId || "").replace(/\D/g, ""), 10) || 1;
+          await prismaClient.quizResult.create({
+            data: {
+              quizId: numericQuizId,
+              quizTitle: session.title || "লাইভ কুইজ সেশন",
+              sessionPin: session.code,
+              totalPlayers: totalParticipants,
+              winnerName: sortedPlayers[0]?.name || null,
+              winnerScore: sortedPlayers[0]?.score || 0,
+              averageScore: avgScore,
+              leaderboardJson: JSON.stringify(sortedPlayers),
+              completedAt: new Date(now),
+            },
+          });
+        }
       } catch (e) {
-        console.warn("[archiveLiveSessionToDb] Prisma liveSession update warning:", e);
+        console.warn("[archiveLiveSessionToDb] Prisma archive warning:", e);
       }
     }
   } catch (err) {

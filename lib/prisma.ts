@@ -225,6 +225,13 @@ export const mockPrisma: PrismaLike = new Proxy(rootDelegates, {
 const DB_RETRY_COOLDOWN_MS = 60_000; // 60s cooldown before retrying an exhausted database
 
 /**
+ * Trips the 60-second circuit breaker so all callers immediately route to local memory cache.
+ */
+export function markPrismaFailure(): void {
+  globalForPrisma.prismaFailureAt = Date.now();
+}
+
+/**
  * Returns true if Prisma client is initialized, DATABASE_URL is configured,
  * and the database is not in an active connection failure cooldown.
  */
@@ -332,6 +339,7 @@ export async function checkDatabaseHealth(): Promise<DatabaseHealthCheckResult> 
     };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+    markPrismaFailure();
     if (process.env.NODE_ENV === "production") {
       console.error(
         `[Prisma/Database Health] CRITICAL: MySQL ping query failed: ${errorMsg}`

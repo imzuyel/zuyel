@@ -21,43 +21,50 @@ export interface QuickQuiz {
   createdAt: string;
 }
 
-// Ensure data folder exists
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+declare global {
+  // eslint-disable-next-line no-var
+  var __pgtscQuickQuizCache: QuickQuiz | null | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscQuickQuizWriteTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
-// Load active quick quiz from file
+// Load active quick quiz from in-memory cache (cold-start disk read only)
 function loadActiveQuickQuiz(): QuickQuiz | null {
-  ensureDataDir();
+  if (globalThis.__pgtscQuickQuizCache !== undefined) {
+    return globalThis.__pgtscQuickQuizCache;
+  }
   if (fs.existsSync(QUICK_QUIZ_FILE)) {
     try {
       const data = fs.readFileSync(QUICK_QUIZ_FILE, "utf-8");
-      return JSON.parse(data);
+      globalThis.__pgtscQuickQuizCache = JSON.parse(data);
+      return globalThis.__pgtscQuickQuizCache ?? null;
     } catch (e) {
       console.error("Error reading quick quiz file:", e);
     }
   }
+  globalThis.__pgtscQuickQuizCache = null;
   return null;
 }
 
-// Save active quick quiz to file
+// Save active quick quiz in memory + debounced async disk snapshot
 function saveActiveQuickQuiz(quiz: QuickQuiz | null) {
-  ensureDataDir();
-  try {
-    if (quiz === null) {
-      if (fs.existsSync(QUICK_QUIZ_FILE)) {
-        fs.unlinkSync(QUICK_QUIZ_FILE);
-      }
-    } else {
-      fs.writeFileSync(QUICK_QUIZ_FILE, JSON.stringify(quiz, null, 2), "utf-8");
-    }
-    return true;
-  } catch (e) {
-    console.error("Error writing quick quiz file:", e);
-    return false;
+  globalThis.__pgtscQuickQuizCache = quiz;
+  if (globalThis.__pgtscQuickQuizWriteTimer) {
+    clearTimeout(globalThis.__pgtscQuickQuizWriteTimer);
   }
+  globalThis.__pgtscQuickQuizWriteTimer = setTimeout(async () => {
+    try {
+      await fs.promises.mkdir(DATA_DIR, { recursive: true });
+      if (quiz === null) {
+        await fs.promises.unlink(QUICK_QUIZ_FILE).catch(() => { });
+      } else {
+        await fs.promises.writeFile(QUICK_QUIZ_FILE, JSON.stringify(quiz, null, 2), "utf-8");
+      }
+    } catch (e) {
+      console.error("Error writing quick quiz file:", e);
+    }
+  }, 1500);
+  return true;
 }
 
 // GET active quick quiz
