@@ -3,6 +3,7 @@ import { institutionalDb, GeneratedDocument, DocumentType, DocumentStatus, Docum
 import { formatDocumentNo, toBanglaDateString } from "@/lib/utils";
 import { DOCUMENT_TYPE_LABELS, replaceDocumentTokens, DEFAULT_SIGNATORIES, generateTamperProofDocNumber } from "@/lib/documentsData";
 import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { getHybridDocuments, upsertHybridDocument } from "@/lib/hybridStorageEngine";
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,9 +17,19 @@ export async function GET(req: NextRequest) {
     const session = searchParams.get("session");
     const search = searchParams.get("search");
 
+    const hybridDocs = getHybridDocuments();
+    const dbDocs = institutionalDb.documents || [];
+    const docMap = new Map<string, any>();
+    dbDocs.forEach((d) => docMap.set(String(d.id || d.docNumber), d));
+    hybridDocs.forEach((d: any) => {
+      const key = String(d.id || d.docNumber);
+      docMap.set(key, { ...(docMap.get(key) || {}), ...d });
+    });
+    const allUnifiedDocs = Array.from(docMap.values());
+
     if (docNumber) {
-      const found = institutionalDb.documents.find(
-        (d) => d.docNumber.toLowerCase() === docNumber.trim().toLowerCase() || d.id === docNumber
+      const found = allUnifiedDocs.find(
+        (d) => d.docNumber?.toLowerCase() === docNumber.trim().toLowerCase() || d.id === docNumber
       );
       if (!found) {
         return NextResponse.json({ success: false, error: "সনদপত্র বা নথি পাওয়া যায়নি" }, { status: 404 });
@@ -26,7 +37,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, document: found });
     }
 
-    let list = [...institutionalDb.documents];
+    let list = [...allUnifiedDocs];
 
     if (studentId) {
       list = list.filter((d) => d.studentId === Number(studentId));
@@ -203,7 +214,7 @@ export async function POST(req: NextRequest) {
       issueDate: todayStr,
       issueDateBangla: todayBangla,
       generatedBy,
-      qrCodeData: `https://tsc.panchagarh.gov.bd/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId || student.id}`,
+      qrCodeData: `${req.nextUrl.origin || "https://tsc.panchagarh.gov.bd"}/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId || student.id}`,
       customBodyText: finalBodyText,
       remarks: remarks || "অফিসিয়াল রেকর্ড অনুসারে যাচাইকৃত ও অনুমোদিত",
       status: (status as DocumentStatus) || "issued",
@@ -220,6 +231,7 @@ export async function POST(req: NextRequest) {
 
 
     institutionalDb.documents.unshift(newDoc);
+    upsertHybridDocument(newDoc);
 
     return NextResponse.json({
       success: true,

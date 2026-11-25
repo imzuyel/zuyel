@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useSyncExternalStore } from "react";
 
-export type ThemeMode = "light" | "dark";
+export type ThemeMode = "twilight" | "dark" | "light";
 export type ThemeColor =
   | "navy"
   | "emerald"
@@ -317,15 +317,12 @@ function subscribeTheme(callback: () => void) {
 }
 
 function getModeSnapshot(): ThemeMode {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "twilight";
   try {
     const savedMode = localStorage.getItem("pgtsc_theme_mode") as ThemeMode;
-    if (savedMode === "light" || savedMode === "dark") return savedMode;
-    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      return "dark";
-    }
+    if (savedMode === "twilight" || savedMode === "dark" || savedMode === "light") return savedMode;
   } catch {}
-  return "light";
+  return "twilight";
 }
 
 function getThemeColorSnapshot(): ThemeColor {
@@ -365,7 +362,7 @@ function getIconAnimSnapshot(): IconAnimationLevel {
 }
 
 function getServerModeSnapshot(): ThemeMode {
-  return "light";
+  return "twilight";
 }
 function getServerThemeColorSnapshot(): ThemeColor {
   return "navy";
@@ -391,14 +388,27 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     const body = document.body;
-    if (m === "dark") {
+    
+    if (m === "twilight") {
+      // Twilight is the balanced hybrid theme (Slate-Indigo surfaces + soft luminous borders)
+      root.classList.add("dark", "twilight");
+      if (body) body.classList.add("dark", "twilight");
+      root.setAttribute("data-mode", "twilight");
+      if (body) body.setAttribute("data-mode", "twilight");
+    } else if (m === "dark") {
+      // Deep pitch-black / deep dark mode
       root.classList.add("dark");
-      if (body) body.classList.add("dark");
+      root.classList.remove("twilight");
+      if (body) {
+        body.classList.add("dark");
+        body.classList.remove("twilight");
+      }
       root.setAttribute("data-mode", "dark");
       if (body) body.setAttribute("data-mode", "dark");
     } else {
-      root.classList.remove("dark");
-      if (body) body.classList.remove("dark");
+      // Crisp Light Mode
+      root.classList.remove("dark", "twilight");
+      if (body) body.classList.remove("dark", "twilight");
       root.setAttribute("data-mode", "light");
       if (body) body.setAttribute("data-mode", "light");
     }
@@ -426,7 +436,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const toggleMode = () => {
     const current = getModeSnapshot();
-    const next: ThemeMode = current === "light" ? "dark" : "light";
+    // 3-way toggle cycle: Twilight (Default) -> Deep Dark -> Crisp Light -> Twilight
+    let next: ThemeMode = "twilight";
+    if (current === "twilight") next = "dark";
+    else if (current === "dark") next = "light";
+    else next = "twilight";
+
     applyModeToDom(next);
     try {
       localStorage.setItem("pgtsc_theme_mode", next);

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { institutionalDb } from "@/lib/database";
+import { institutionalDb, AttendanceRecord } from "@/lib/database";
 import { parseClassNumeric, ALL_TRADES } from "@/lib/academicStructure";
+import {
+  getHybridAttendanceRecords,
+  saveHybridAttendanceRecords,
+  recordHybridAttendanceEntry,
+} from "@/lib/hybridStorageEngine";
 
 function matchesClass(c1: any, c2: any): boolean {
   if (c1 === c2 || String(c1) === String(c2)) return true;
@@ -25,19 +30,52 @@ function matchesTrade(t1: any, t2: any): boolean {
   return false;
 }
 
+function getAllAttendanceRecords(): any[] {
+  const hybridRecords = getHybridAttendanceRecords();
+  const dbRecords = institutionalDb.attendanceRecords || [];
+  const map = new Map<string, any>();
+
+  dbRecords.forEach((r) => {
+    const key = r.id ? String(r.id) : `${r.date}_${r.classId}_${r.section}_${r.periodNo}`;
+    map.set(key, r);
+  });
+
+  hybridRecords.forEach((r: any) => {
+    const key = r.id ? String(r.id) : `${r.date}_${r.classId}_${r.section}_${r.periodNo}`;
+    map.set(key, { ...(map.get(key) || {}), ...r });
+  });
+
+  return Array.from(map.values());
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action");
     const sessionCode = searchParams.get("sessionCode") || searchParams.get("pin");
     const classIdParam = searchParams.get("classId");
+    const tradeIdParam = searchParams.get("tradeId");
+    const sectionParam = searchParams.get("section");
+    const periodParam = searchParams.get("periodNo");
     const dateParam = searchParams.get("date") || new Date().toISOString().split("T")[0];
+    const recordId = searchParams.get("recordId");
 
+    const allRecords = getAllAttendanceRecords();
+
+    // 1. Fetch by recordId
+    if (recordId) {
+      const found = allRecords.find((r) => String(r.id) === String(recordId));
+      if (found) {
+        return NextResponse.json({ success: true, record: found });
+      }
+      return NextResponse.json({ success: false, error: "রেকর্ড পাওয়া যায়নি।" }, { status: 404 });
+    }
+
+    // 2. QUIZ ELIGIBILITY ACTION
     if (action === "quiz_eligibility") {
-      let targetClassId = classIdParam ? parseInt(classIdParam) : 4; // Default Class 9 (SSC Vocational)
-      let targetTradeId = searchParams.get("tradeId") ? parseInt(searchParams.get("tradeId")!) : undefined;
+      let targetClassId = classIdParam ? parseInt(classIdParam) : 4; // Default Class 9
+      let targetTradeId = tradeIdParam ? parseInt(tradeIdParam) : undefined;
 
-      // Check which students are already joined in the active live session
       const joinedStudentIds = new Set<number>();
       const joinedNames = new Set<string>();
 
@@ -77,14 +115,13 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // 1. Check today's or most recent attendance record for this class & trade
-      let record = institutionalDb.attendanceRecords.find(
+      // Check today's or most recent attendance record
+      let record = allRecords.find(
         (r) => matchesClass(r.classId, targetClassId) && (!targetTradeId || matchesTrade(r.tradeId, targetTradeId)) && r.date === dateParam
       );
 
-      // If not found for today's exact date, find the latest available attendance record
       if (!record) {
-        const recordsForClass = institutionalDb.attendanceRecords
+        const recordsForClass = allRecords
           .filter((r) => matchesClass(r.classId, targetClassId) && (!targetTradeId || matchesTrade(r.tradeId, targetTradeId)))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         record = recordsForClass[0];
@@ -93,12 +130,11 @@ export async function GET(req: NextRequest) {
       let eligibleStudents: any[] = [];
 
       if (record && record.entries && record.entries.length > 0) {
-        // Filter students with Present ("P") or Late ("L")
         const presentEntries = record.entries.filter(
-          (e) => e.status === "P" || e.status === "L"
+          (e: any) => e.status === "P" || e.status === "L" || e.status === "PRESENT" || e.status === "LATE"
         );
 
-        eligibleStudents = presentEntries.map((entry) => {
+        eligibleStudents = presentEntries.map((entry: any) => {
           const studentProfile = institutionalDb.students.find((s) => s.id === entry.studentId);
           const name = studentProfile?.nameBangla || studentProfile?.name || entry.name;
           const cleanNameLower = name.trim().toLowerCase();
@@ -114,8 +150,8 @@ export async function GET(req: NextRequest) {
             tradeId: studentProfile?.tradeId || record?.tradeId,
             className: studentProfile?.className || record?.className || "Class 9 (SSC Vocational)",
             classId: studentProfile?.classId || record?.classId,
-            attendanceStatus: entry.status === "P" ? "উপস্থিত (Present)" : "বিলম্বে উপস্থিত (Late)",
-            statusCode: entry.status,
+            attendanceStatus: (entry.status === "P" || entry.status === "PRESENT") ? "উপস্থিত (Present)" : "বিলম্বে উপস্থিত (Late)",
+            statusCode: entry.status === "PRESENT" ? "P" : entry.status,
             attendanceRate: studentProfile?.attendanceRate ?? 95,
             isJoined: isJoined,
           };
@@ -126,7 +162,6 @@ export async function GET(req: NextRequest) {
           if (filteredByTrade.length > 0) eligibleStudents = filteredByTrade;
         }
       } else {
-        // Fallback: active students for this class or general active students
         const studentsInClass = institutionalDb.students.filter(
           (s) => matchesClass(s.classId, targetClassId) && (!targetTradeId || matchesTrade(s.tradeId, targetTradeId)) && s.status === "Active"
         );
@@ -165,15 +200,247 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Default attendance summary / fallback
+    // 3. FILTERED QUERY (Class, Section, Period, Date)
+    let filtered = allRecords;
+    if (dateParam) {
+      filtered = filtered.filter((r) => r.date === dateParam);
+    }
+    if (classIdParam) {
+      filtered = filtered.filter((r) => matchesClass(r.classId, classIdParam));
+    }
+    if (tradeIdParam && tradeIdParam !== "all") {
+      filtered = filtered.filter((r) => matchesTrade(r.tradeId, tradeIdParam));
+    }
+    if (sectionParam && sectionParam !== "all") {
+      filtered = filtered.filter((r) => r.section === sectionParam);
+    }
+    if (periodParam) {
+      filtered = filtered.filter((r) => String(r.periodNo) === String(periodParam));
+    }
+
     return NextResponse.json({
       success: true,
-      records: institutionalDb.attendanceRecords.slice(0, 20),
+      records: filtered,
+      record: filtered[0] || null,
+      total: filtered.length,
     });
   } catch (error: any) {
     return NextResponse.json(
       { success: false, message: error.message || "Failed to fetch attendance data" },
       { status: 500 }
     );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const id = body.id || `att_rec_${Date.now()}`;
+    const date = body.date || new Date().toISOString().split("T")[0];
+    const periodNo = Number(body.periodNo || 1);
+    const classId = Number(body.classId || 4);
+    const tradeId = body.tradeId ? Number(body.tradeId) : undefined;
+    const section = body.section || "A";
+    const session = body.session || "2026";
+    const entries = Array.isArray(body.entries) ? body.entries : [];
+
+    const existingIndex = institutionalDb.attendanceRecords.findIndex(
+      (r) => String(r.id) === String(id) || (r.date === date && Number(r.periodNo) === periodNo && Number(r.classId) === classId && r.section === section)
+    );
+
+    const newRecord: AttendanceRecord = {
+      id: existingIndex >= 0 ? institutionalDb.attendanceRecords[existingIndex].id : id,
+      session,
+      date,
+      classId,
+      className: body.className || `Class ${classId}`,
+      tradeId,
+      tradeName: body.tradeName,
+      section,
+      periodNo,
+      subjectCode: body.subjectCode,
+      subjectName: body.subjectName || "ট্রেড ও সাধারণ বিষয়",
+      teacherName: body.teacherName || "অন-ডিউটি শিক্ষক",
+      department: body.department || "কারিগরি শাখা",
+      status: body.status || "submitted",
+      isLocked: Boolean(body.isLocked),
+      entries: entries.map((e: any) => ({
+        id: e.id || `ent_${Date.now()}_${e.studentId}`,
+        studentId: Number(e.studentId),
+        studentCode: e.studentCode || String(e.studentId),
+        roll: Number(e.roll || 1),
+        name: e.name || "শিক্ষার্থী",
+        status: e.status || "P",
+        inTime: e.inTime || new Date().toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" }),
+        remark: e.remark,
+      })),
+      auditLogs: [],
+      createdAt: existingIndex >= 0 ? institutionalDb.attendanceRecords[existingIndex].createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (existingIndex >= 0) {
+      institutionalDb.attendanceRecords[existingIndex] = newRecord;
+    } else {
+      institutionalDb.attendanceRecords.unshift(newRecord);
+    }
+
+    // Write-through to Hybrid Storage
+    const hybridRecords = getHybridAttendanceRecords();
+    const hIdx = hybridRecords.findIndex((r: any) => String(r.id) === String(newRecord.id));
+    if (hIdx >= 0) {
+      hybridRecords[hIdx] = newRecord;
+    } else {
+      hybridRecords.unshift(newRecord);
+    }
+    saveHybridAttendanceRecords(hybridRecords);
+
+    return NextResponse.json({
+      success: true,
+      message: "হাজিরা সফলভাবে সংরক্ষিত হয়েছে।",
+      record: newRecord,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { recordId, studentId, newStatus, remark, reason, changedBy = "Faculty" } = body;
+
+    if (!recordId || !studentId || !newStatus) {
+      return NextResponse.json(
+        { success: false, error: "রেকর্ড আইডি, শিক্ষার্থী আইডি ও নতুন স্ট্যাটাস আবশ্যক।" },
+        { status: 400 }
+      );
+    }
+
+    const allRecords = getAllAttendanceRecords();
+    const record = allRecords.find((r) => String(r.id) === String(recordId));
+
+    if (!record) {
+      return NextResponse.json({ success: false, error: "হাজিরা রেকর্ডটি খুঁজে পাওয়া যায়নি।" }, { status: 404 });
+    }
+
+    record.entries = record.entries || [];
+    const entry = record.entries.find((e: any) => Number(e.studentId) === Number(studentId));
+
+    if (entry) {
+      entry.status = newStatus;
+      if (remark) entry.remark = remark;
+    } else {
+      record.entries.push({
+        id: `ent_${Date.now()}_${studentId}`,
+        studentId: Number(studentId),
+        studentCode: String(studentId),
+        roll: 1,
+        name: "শিক্ষার্থী",
+        status: newStatus,
+        remark: remark || reason,
+      });
+    }
+
+    record.auditLogs = record.auditLogs || [];
+    record.auditLogs.push({
+      timestamp: new Date().toISOString(),
+      changedBy,
+      field: `student_${studentId}_status`,
+      oldValue: entry?.status || "N/A",
+      newValue: newStatus,
+      reason: reason || "সরাসরি সংশোধন",
+    });
+    record.updatedAt = new Date().toISOString();
+
+    // Update in-memory & hybrid
+    const dbIdx = institutionalDb.attendanceRecords.findIndex((r) => String(r.id) === String(recordId));
+    if (dbIdx >= 0) institutionalDb.attendanceRecords[dbIdx] = record;
+
+    const hybridRecords = getHybridAttendanceRecords();
+    const hIdx = hybridRecords.findIndex((r: any) => String(r.id) === String(recordId));
+    if (hIdx >= 0) hybridRecords[hIdx] = record;
+    else hybridRecords.unshift(record);
+    saveHybridAttendanceRecords(hybridRecords);
+
+    return NextResponse.json({
+      success: true,
+      message: "হাজিরা সফলভাবে হালনাগাদ করা হয়েছে।",
+      record,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { recordId, isLocked, userRole, changedBy = "Principal" } = body;
+
+    if (!recordId) {
+      return NextResponse.json({ success: false, error: "রেকর্ড আইডি আবশ্যক।" }, { status: 400 });
+    }
+
+    const allRecords = getAllAttendanceRecords();
+    const record = allRecords.find((r) => String(r.id) === String(recordId));
+
+    if (!record) {
+      return NextResponse.json({ success: false, error: "হাজিরা রেকর্ডটি খুঁজে পাওয়া যায়নি।" }, { status: 404 });
+    }
+
+    record.isLocked = Boolean(isLocked);
+    record.status = isLocked ? "finalized" : "draft";
+    record.updatedAt = new Date().toISOString();
+    record.auditLogs = record.auditLogs || [];
+    record.auditLogs.push({
+      timestamp: new Date().toISOString(),
+      changedBy,
+      field: "isLocked",
+      oldValue: !isLocked,
+      newValue: isLocked,
+      reason: isLocked ? "লক করা হয়েছে" : "আনলক করা হয়েছে",
+    });
+
+    const dbIdx = institutionalDb.attendanceRecords.findIndex((r) => String(r.id) === String(recordId));
+    if (dbIdx >= 0) institutionalDb.attendanceRecords[dbIdx] = record;
+
+    const hybridRecords = getHybridAttendanceRecords();
+    const hIdx = hybridRecords.findIndex((r: any) => String(r.id) === String(recordId));
+    if (hIdx >= 0) hybridRecords[hIdx] = record;
+    saveHybridAttendanceRecords(hybridRecords);
+
+    return NextResponse.json({
+      success: true,
+      message: isLocked ? "হাজিরা রেকর্ড সফলভাবে লক করা হয়েছে।" : "হাজিরা রেকর্ড আনলক করা হয়েছে।",
+      record,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const recordId = searchParams.get("recordId");
+
+    if (!recordId) {
+      return NextResponse.json({ success: false, error: "রেকর্ড আইডি প্রদান করা হয়নি।" }, { status: 400 });
+    }
+
+    institutionalDb.attendanceRecords = institutionalDb.attendanceRecords.filter(
+      (r) => String(r.id) !== String(recordId)
+    );
+
+    const hybridRecords = getHybridAttendanceRecords().filter((r: any) => String(r.id) !== String(recordId));
+    saveHybridAttendanceRecords(hybridRecords);
+
+    return NextResponse.json({
+      success: true,
+      message: "হাজিরা রেকর্ড সফলভাবে মুছে ফেলা হয়েছে।",
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

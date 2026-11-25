@@ -15,7 +15,11 @@ export async function GET(req: NextRequest) {
       ...settings,
       providers: settings.providers.map(p => ({
         ...p,
-        apiKey: p.apiKey ? `${p.apiKey.substring(0, 4)}...${p.apiKey.substring(p.apiKey.length - 4)}` : ""
+        apiKey: p.apiKey 
+          ? (p.apiKey.length >= 8 
+              ? `${p.apiKey.substring(0, 4)}••••••${p.apiKey.substring(p.apiKey.length - 2)}` 
+              : "••••••••") 
+          : ""
       }))
     };
 
@@ -39,7 +43,7 @@ export async function POST(req: NextRequest) {
     const updatedProviders = body.providers.map(newP => {
       const currentP = currentSettings.providers.find(p => p.id === newP.id);
       
-      if (newP.apiKey && newP.apiKey.includes("...")) {
+      if (newP.apiKey && (newP.apiKey.includes("...") || newP.apiKey.includes("•"))) {
         return { ...newP, apiKey: currentP?.apiKey || "" };
       }
       return newP;

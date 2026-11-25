@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { examinationEngine, AssessmentCategory, ExamStatus } from "@/lib/examinationEngine";
+import { upsertHybridExam } from "@/lib/hybridStorageEngine";
 
 export async function GET(req: Request) {
   try {
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
     const operator = body.operator || "Exam Controller";
 
     const created = examinationEngine.createExam(body, operator);
+    upsertHybridExam(created);
 
     return NextResponse.json({
       success: true,
@@ -68,6 +70,7 @@ export async function PUT(req: Request) {
     }
 
     const updated = examinationEngine.updateExam(Number(id), updates, operator);
+    upsertHybridExam(updated);
 
     return NextResponse.json({
       success: true,
@@ -89,6 +92,7 @@ export async function PATCH(req: Request) {
     }
 
     const exam = examinationEngine.transitionStatus(Number(id), status, operator, reason);
+    upsertHybridExam(exam);
 
     return NextResponse.json({
       success: true,

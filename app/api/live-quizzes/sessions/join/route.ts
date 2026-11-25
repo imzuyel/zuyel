@@ -5,6 +5,7 @@ import {
   syncAndAutoAdvanceSession,
 } from "@/lib/liveSessionStore";
 import { ReconnectService, SecurityService } from "@/lib/reconnectService";
+import { sanitizeUserTextInput } from "@/components/common/SafeHtmlRenderer";
 
 // GET: Auto-validate room code & fetch session metadata for student join card
 export async function GET(req: NextRequest) {
@@ -118,8 +119,8 @@ export async function POST(req: NextRequest) {
 
     const playerRecord = addOrUpdatePlayer(session.id, {
       id: effectivePlayerId,
-      name: displayName.trim(),
-      roll: playerRoll,
+      name: sanitizeUserTextInput(displayName, 50),
+      roll: sanitizeUserTextInput(String(playerRoll), 20),
       avatar: avatar || "🚀",
     });
 

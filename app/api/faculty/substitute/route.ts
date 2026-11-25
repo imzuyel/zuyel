@@ -254,6 +254,11 @@ export async function POST(req: NextRequest) {
       existingDuty.reason = reason || existingDuty.reason;
       existingDuty.authorizedBy = authorizedBy;
 
+      try {
+        const { recordHybridSubstitution } = await import("@/lib/hybridStorageEngine");
+        recordHybridSubstitution(existingDuty);
+      } catch {}
+
       return NextResponse.json({
         success: true,
         message: "বিকল্প শিক্ষকের দায়িত্ব সফলভাবে হালনাগাদ করা হয়েছে।",
@@ -283,6 +288,23 @@ export async function POST(req: NextRequest) {
     };
 
     institutionalDb.substituteDuties.unshift(newDuty);
+
+    try {
+      const { recordHybridSubstitution } = await import("@/lib/hybridStorageEngine");
+      recordHybridSubstitution(newDuty);
+    } catch {}
+
+    // Dispatch SMS notification if requested
+    if (body.sendSmsNotification) {
+      try {
+        const { sendSmsGateway } = await import("@/lib/smsGatewayEngine");
+        const phone = (subTeacher as any).mobile || (subTeacher as any).phone || "01700000000";
+        const msg = `সম্মানিত শিক্ষক ${subTeacher.nameBangla || subTeacher.name}, অধ্যক্ষ মহোদয়ের নির্দেশে ${date} তারিখের ${periodNo}ম পিরিয়ডে ${className || `শ্রেণি ${classId}`}-এ আপনাকে বিকল্প শিক্ষক হিসেবে দায়িত্ব প্রদান করা হয়েছে। - PTSC`;
+        await sendSmsGateway(phone, msg, "emergency", subTeacher.name, "অধ্যক্ষ");
+      } catch (smsErr) {
+        console.warn("Substitute SMS notification warning:", smsErr);
+      }
+    }
 
     return NextResponse.json({
       success: true,

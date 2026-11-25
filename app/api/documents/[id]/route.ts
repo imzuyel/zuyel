@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, DocumentStatus, DocumentReprintLog, DocumentAuditLog } from "@/lib/database";
 import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { upsertHybridDocument, deleteHybridDocument } from "@/lib/hybridStorageEngine";
 
 export async function GET(
   req: NextRequest,
@@ -157,6 +158,8 @@ export async function PATCH(
       details: `সনদপত্রের বিবরণ ও সেটিংস সংস্করণ #${doc.version}-এ হালনাগাদ করা হয়েছে।`,
     });
 
+    upsertHybridDocument(doc);
+
     return NextResponse.json({
       success: true,
       document: doc,
@@ -196,6 +199,7 @@ export async function DELETE(
     }
 
     institutionalDb.documents.splice(docIndex, 1);
+    deleteHybridDocument(id);
     return NextResponse.json({ success: true, message: "ড্রাফট নথি সফলভাবে মুছে ফেলা হয়েছে।" });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -44,6 +44,7 @@ export interface ToastItem {
 }
 
 interface AuthContextType {
+  isAuthReady: boolean;
   currentUser: UserProfile;
   user: {
     name: string;
@@ -123,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const toastSeqRef = React.useRef(0);
   const alertSeqRef = React.useRef(0);
 
+  const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [activeRole, setActiveRole] = useState<Role>("student");
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
@@ -154,7 +156,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setCurrentUserProfile(PRESET_USERS[savedRole]);
       }
       setAuditLogs(getSecurityAuditLogs({ limit: 100 }));
-    } catch {}
+    } catch {} finally {
+      setIsAuthReady(true);
+    }
   }, []);
 
   const currentUser = currentUserProfile || PRESET_USERS[activeRole] || PRESET_USERS.student;
@@ -510,6 +514,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
+        isAuthReady,
         currentUser,
         user: {
           name: currentUser.nameBangla || currentUser.fullName,

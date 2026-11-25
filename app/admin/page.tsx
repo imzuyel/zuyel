@@ -138,8 +138,8 @@ const ExaminationManagementView = dynamic(() => import("@/components/examination
   loading: () => <ViewLoader title="পরীক্ষা ব্যবস্থাপনা" />,
   ssr: false,
 });
-const WrittenQuestionPaperBuilder = dynamic(() => import("@/components/examination/WrittenQuestionPaperBuilder"), {
-  loading: () => <ViewLoader title="লিখিত প্রশ্নপত্র বিল্ডার" />,
+const AdvancedExamPaperStudio = dynamic(() => import("@/components/examination/AdvancedExamPaperStudio"), {
+  loading: () => <ViewLoader title="উন্নত প্রশ্নপত্র স্টুডিও" />,
   ssr: false,
 });
 const ResultMarksHub = dynamic(() => import("@/components/results/ResultMarksHub"), {
@@ -461,7 +461,7 @@ export default function AdminPage() {
               {activeTab === "lab_inventory" && <LabEquipmentStudio />}
               {activeTab === "routine_master" && <PtscMasterRoutineStudio />}
               {activeTab === "examinations" && <ExaminationManagementView />}
-              {activeTab === "written_question_builder" && <WrittenQuestionPaperBuilder />}
+              {activeTab === "written_question_builder" && <AdvancedExamPaperStudio />}
               {activeTab === "marks_results" && <ResultMarksHub />}
               {activeTab === "bteb_annual_ledger" && <AdvancedAttendanceKhata initialTab="yearly" />}
               {activeTab === "mysql_workbench" && <MySQLWorkbenchView />}

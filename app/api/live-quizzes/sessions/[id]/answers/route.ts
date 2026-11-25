@@ -4,6 +4,7 @@ import { institutionalDb, LiveAnswer } from "@/lib/database";
 import { ScoringService } from "@/lib/scoringService";
 import { SecurityService } from "@/lib/reconnectService";
 import { invalidateSessionCache } from "@/lib/sessionCache";
+import { sanitizeUserTextInput } from "@/components/common/SafeHtmlRenderer";
 
 export async function POST(
   req: NextRequest,
@@ -15,7 +16,10 @@ export async function POST(
 
     const playerId = body.playerId || body.participantId;
     const questionId = body.questionId;
-    const answerPayload = body.answerPayload !== undefined ? body.answerPayload : body.answer;
+    let answerPayload = body.answerPayload !== undefined ? body.answerPayload : body.answer;
+    if (typeof answerPayload === "string") {
+      answerPayload = sanitizeUserTextInput(answerPayload, 200);
+    }
     const slideIndex = body.slideIndex !== undefined ? Number(body.slideIndex) : undefined;
 
     if (!playerId) {
@@ -66,8 +70,10 @@ export async function POST(
     }
     const player = session.players[playerId];
 
-    const responseTimeMs = Number(body.responseTimeMs) || 1200;
-    const questionDurationMs = (Number(currentSlide?.timeLimit) || 20) * 1000;
+    const rawResponse = Number(body.responseTimeMs);
+    const responseTimeMs = !isNaN(rawResponse) && rawResponse >= 0 ? rawResponse : 1200;
+    const rawDuration = Number(currentSlide?.timeLimit);
+    const questionDurationMs = (!isNaN(rawDuration) && rawDuration >= 5 ? rawDuration : 20) * 1000;
 
     const evaluation = ScoringService.score({
       questionType: currentSlide?.type || "MCQ",

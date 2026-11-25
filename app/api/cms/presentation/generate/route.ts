@@ -209,7 +209,7 @@ Return ONLY the JSON response without any Markdown formatting or backticks.`;
         className,
         trade: trade || "কারিগরি শাখা",
         subject: topic,
-        theme: "cyber_cyan",
+        theme: "twilight_indigo",
         slides: data.slides,
         author: "PTSC AI Presentation Studio",
       });

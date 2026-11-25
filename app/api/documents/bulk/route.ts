@@ -3,6 +3,7 @@ import { institutionalDb, GeneratedDocument, DocumentType, DocumentStatus, Docum
 import { formatDocumentNo, toBanglaDateString } from "@/lib/utils";
 import { DOCUMENT_TYPE_LABELS, replaceDocumentTokens, DEFAULT_SIGNATORIES, generateTamperProofDocNumber } from "@/lib/documentsData";
 import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { upsertHybridDocument } from "@/lib/hybridStorageEngine";
 
 export async function POST(req: NextRequest) {
   const auth = verifyBackendAuthorization(req, {
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
         issueDate: todayStr,
         issueDateBangla: todayBangla,
         generatedBy,
-        qrCodeData: `https://tsc.panchagarh.gov.bd/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId || student.id}`,
+        qrCodeData: `${req.nextUrl.origin || "https://tsc.panchagarh.gov.bd"}/verify?doc=${encodeURIComponent(docNumber)}&id=${student.studentId || student.id}`,
         customBodyText: personalizedBody,
         remarks,
         status: (status as DocumentStatus) || "issued",
@@ -129,6 +130,7 @@ export async function POST(req: NextRequest) {
       };
 
       institutionalDb.documents.unshift(newDoc);
+      upsertHybridDocument(newDoc);
       generatedDocs.push(newDoc);
     }
 

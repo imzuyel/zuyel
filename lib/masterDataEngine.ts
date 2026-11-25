@@ -1240,6 +1240,10 @@ export async function saveAcademicMappingRecord(
   }
 
   await persistStoreSlice(METADATA_KEY_MAPPINGS, memoryMappings);
+  try {
+    const { upsertHybridAcademicMapping } = await import("./hybridStorageEngine");
+    upsertHybridAcademicMapping(savedMapping);
+  } catch {}
   return { success: true, mapping: savedMapping };
 }
 
@@ -1337,6 +1341,10 @@ export async function deleteAcademicMappingRecord(
 
   const [deleted] = memoryMappings.splice(idx, 1);
   await persistStoreSlice(METADATA_KEY_MAPPINGS, memoryMappings);
+  try {
+    const { deleteHybridAcademicMapping } = await import("./hybridStorageEngine");
+    deleteHybridAcademicMapping(mappingId);
+  } catch {}
 
   return {
     success: true,
@@ -1401,6 +1409,10 @@ export async function saveInstitutionSettings(
   };
 
   await persistStoreSlice(METADATA_KEY_INSTITUTION, memoryInstitutionSettings);
+  try {
+    const { saveHybridInstitutionSettings } = await import("./hybridStorageEngine");
+    saveHybridInstitutionSettings(memoryInstitutionSettings);
+  } catch {}
   return memoryInstitutionSettings;
 }
 

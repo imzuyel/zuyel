@@ -39,7 +39,7 @@ interface HeaderProps {
 
 export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
   const { language, setLanguage } = useLanguage();
-  const { mode, toggleMode } = useTheme();
+  const { mode, toggleMode, setMode } = useTheme();
   const { currentUser, user, notifications, markNotificationRead, clearAllNotifications, logout } = useAuth();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -150,17 +150,34 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
           </span>
         </button>
 
-        {/* Dark / Light Theme Toggle */}
+        {/* Balanced Twilight / Deep Dark / Crisp Light Theme Toggle */}
         <button
           onClick={toggleMode}
-          className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition"
-          title={mode === "dark" ? "লাইট মোড চালু করুন" : "ডার্ক মোড চালু করুন"}
-          aria-label="Toggle Theme"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition text-xs font-bold"
+          title={
+            mode === "twilight"
+              ? "টুইলাইট মোড (ডিফল্ট) • ক্লিক করে ডিপ ডার্কে যান"
+              : mode === "dark"
+              ? "ডিপ ডার্ক মোড • ক্লিক করে লাইট মোডে যান"
+              : "লাইট মোড • ক্লিক করে টুইলাইটে যান"
+          }
+          aria-label="Toggle Theme Mode"
         >
-          {mode === "dark" ? (
-            <Sun className="w-4 h-4 text-amber-400" />
+          {mode === "twilight" ? (
+            <>
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+              <span className="hidden sm:inline text-[11px] font-bold text-indigo-400">Twilight</span>
+            </>
+          ) : mode === "dark" ? (
+            <>
+              <Moon className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline text-[11px] font-bold text-cyan-400">Dark</span>
+            </>
           ) : (
-            <Moon className="w-4 h-4 text-indigo-600" />
+            <>
+              <Sun className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline text-[11px] font-bold text-amber-500">Light</span>
+            </>
           )}
         </button>
 
@@ -398,6 +415,55 @@ export default function Header({ onToggleSidebar, onNavigate }: HeaderProps) {
                 <span className="font-mono text-[9px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-bold">
                   Active
                 </span>
+              </div>
+
+              {/* Theme Mode Selector Widget */}
+              <div className="p-2 bg-slate-50 dark:bg-slate-800/60 rounded-xl mb-2 border border-slate-100 dark:border-slate-800">
+                <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 flex items-center justify-between">
+                  <span>থিম মোড</span>
+                  <span className="text-indigo-400 font-mono text-[9px] uppercase font-bold">{mode}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode("twilight")}
+                    className={`px-1.5 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
+                      mode === "twilight"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
+                    }`}
+                    title="Balanced Twilight (Default)"
+                  >
+                    <Sparkles className="w-3 h-3 text-indigo-300" />
+                    <span>টুইলাইট</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("dark")}
+                    className={`px-1.5 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
+                      mode === "dark"
+                        ? "bg-slate-900 text-white shadow-xs border border-slate-700"
+                        : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
+                    }`}
+                    title="Deep Dark"
+                  >
+                    <Moon className="w-3 h-3 text-cyan-400" />
+                    <span>ডার্ক</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("light")}
+                    className={`px-1.5 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
+                      mode === "light"
+                        ? "bg-amber-500 text-white shadow-xs"
+                        : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
+                    }`}
+                    title="Crisp Light"
+                  >
+                    <Sun className="w-3 h-3 text-amber-200" />
+                    <span>লাইট</span>
+                  </button>
+                </div>
               </div>
 
               {/* Logout Button */}

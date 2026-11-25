@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { sendSmsGateway, globalSmsLogs, formatSmsTemplate } from "@/lib/smsGatewayEngine";
 import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
+import { getHybridSmsLogs, getHybridStore } from "@/lib/hybridStorageEngine";
 
 export async function GET(req: NextRequest) {
   const auth = requireTeacherOrAdmin(req, "/api/communication/sms/send");
@@ -10,9 +11,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const hybridLogs = getHybridSmsLogs();
+    const seenIds = new Set<string>();
+    const mergedLogs: any[] = [];
+    for (const log of [...hybridLogs, ...globalSmsLogs]) {
+      if (log && log.id && !seenIds.has(String(log.id))) {
+        seenIds.add(String(log.id));
+        mergedLogs.push(log);
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      logs: globalSmsLogs
+      logs: mergedLogs
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -71,18 +82,21 @@ export async function POST(req: NextRequest) {
         studentName: studentName || "শিক্ষার্থী"
       });
     } else {
-      // Collect students from institutionalDb or mock sample
-      const allStudents = institutionalDb.students || [];
+      // Collect students from hybridStore or institutionalDb
+      const hybridStore = getHybridStore();
+      const allStudents: any[] = hybridStore.students?.length ? hybridStore.students : (institutionalDb.students || []);
 
-      let filtered = allStudents;
+      let filtered: any[] = allStudents;
       if (targetAudience === "absent") {
         filtered = allStudents.filter((s: any) => s.isPresentToday === false);
         if (filtered.length === 0) {
-          // Fallback sample if none marked absent
           filtered = [allStudents[0]];
         }
-      } else if (targetAudience === "trade") {
-        filtered = allStudents.filter((s: any) => s.tradeName === selectedTrade || s.tradeCode === selectedTrade);
+      } else if (targetAudience === "trade" || targetAudience === "department") {
+        filtered = allStudents.filter((s: any) => 
+          (s.tradeName && s.tradeName.toLowerCase().includes(selectedTrade.toLowerCase())) ||
+          (s.tradeCode && s.tradeCode.toLowerCase().includes(selectedTrade.toLowerCase()))
+        );
         if (filtered.length === 0) {
           filtered = allStudents.slice(0, 3);
         }
@@ -122,10 +136,14 @@ export async function POST(req: NextRequest) {
         .replace(/\[স্কোর[:\s]*X%\]/gi, `স্কোর: ${rec.score !== undefined ? rec.score : 85}%`)
         .replace(/X%/g, `${rec.score !== undefined ? rec.score : 85}%`);
 
+      const effectiveTemplateType = (templateType === "absence" || templateType === "result" || templateType === "emergency")
+        ? templateType
+        : "custom";
+
       const log = await sendSmsGateway(
         rec.phone,
         formattedMsg,
-        templateType,
+        effectiveTemplateType,
         rec.studentName,
         rec.name
       );
@@ -134,12 +152,14 @@ export async function POST(req: NextRequest) {
       totalCost += log.cost;
     }
 
+    const updatedLogs = getHybridSmsLogs();
+
     return NextResponse.json({
       success: true,
       message: `${sentCount} SMS successfully dispatched`,
       sentCount,
-      totalCost,
-      logs: globalSmsLogs.slice(0, 20)
+      totalCost: Number(totalCost.toFixed(2)),
+      logs: updatedLogs.slice(0, 20)
     });
   } catch (error: any) {
     console.error("[SMS API Error]:", error);

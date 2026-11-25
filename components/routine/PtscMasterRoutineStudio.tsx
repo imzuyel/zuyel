@@ -108,6 +108,24 @@ export default function PtscMasterRoutineStudio({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccessBanner, setSaveSuccessBanner] = useState<string | null>(null);
 
+  // Synchronize master routine from persistent /api/routine store
+  useEffect(() => {
+    let isMounted = true;
+    fetch("/api/routine")
+      .then((res) => res.json())
+      .then((data) => {
+        if (isMounted && data.success && Array.isArray(data.items) && data.items.length > 0) {
+          setRoutines(data.items);
+          if (onUpdateRoutine) onUpdateRoutine(data.items);
+        }
+      })
+      .catch((e) => console.warn("Failed to load routines from /api/routine:", e));
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Colorful Theme & Print Customization Engine
   const [screenTheme, setScreenTheme] = useState<"vivid" | "pastel" | "emerald" | "cyber" | "royal" | "slate">("vivid");
   const [printTheme, setPrintTheme] = useState<"vivid-print" | "pastel-print" | "eco-ink" | "classic-gov">("vivid-print");
@@ -286,9 +304,22 @@ export default function PtscMasterRoutineStudio({
     setRoutines(newRoutines);
     if (onUpdateRoutine) onUpdateRoutine(newRoutines);
 
-    setTimeout(() => {
-      setIsSaving(false);
-    }, 700);
+    // Persist to dual-mode storage engine via /api/routine
+    fetch("/api/routine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ routines: newRoutines }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          setSaveSuccessBanner("রুটিন সফলভাবে ক্লাউড ও লোকাল স্টোরেজে সংরক্ষিত হয়েছে!");
+        }
+      })
+      .catch((err) => console.error("Error saving routine:", err))
+      .finally(() => {
+        setTimeout(() => setIsSaving(false), 500);
+      });
   };
 
   const handleUndo = () => {

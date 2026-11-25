@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { getHybridAiSettings, saveHybridAiSettings } from "@/lib/hybridStorageEngine";
 
 export interface AIProviderConfig {
   id: string;
@@ -85,6 +86,10 @@ function sanitizeSettings(settings: AISettings): AISettings {
 
 export function getAISettings(): AISettings {
   try {
+    const hybrid = getHybridAiSettings();
+    if (hybrid && Array.isArray(hybrid.providers) && hybrid.providers.length > 0) {
+      return sanitizeSettings(hybrid);
+    }
     if (fs.existsSync(CONFIG_PATH)) {
       const data = fs.readFileSync(CONFIG_PATH, "utf-8");
       return sanitizeSettings(JSON.parse(data));
@@ -97,11 +102,18 @@ export function getAISettings(): AISettings {
 
 export function saveAISettings(settings: AISettings) {
   try {
+    const sanitized = sanitizeSettings(settings);
+    try {
+      saveHybridAiSettings(sanitized);
+    } catch (hErr) {
+      console.warn("[HybridStore] Failed to save AI settings to hybrid engine:", hErr);
+    }
+
     const dir = path.dirname(CONFIG_PATH);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(settings, null, 2), "utf-8");
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(sanitized, null, 2), "utf-8");
     return true;
   } catch (error) {
     console.error("Error saving AI settings:", error);

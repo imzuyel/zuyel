@@ -15,6 +15,7 @@ import {
   Sliders,
   Wand2,
   FileText,
+  BookOpen,
 } from "lucide-react";
 import { ExamMaster } from "@/lib/examinationEngine";
 import ExamDirectoryView from "./ExamDirectoryView";
@@ -22,11 +23,12 @@ import ExamCreationWizard from "./ExamCreationWizard";
 import ExamMarkEntryWorkspace from "./ExamMarkEntryWorkspace";
 import ExamScheduleTimetable from "./ExamScheduleTimetable";
 import ExamAuditTrailView from "./ExamAuditTrailView";
-import WrittenQuestionPaperBuilder from "./WrittenQuestionPaperBuilder";
+import AdvancedExamPaperStudio from "./AdvancedExamPaperStudio";
+import QuestionBankStudio from "./QuestionBankStudio";
 
 export default function ExaminationManagementView() {
   const [activeTab, setActiveTab] = useState<
-    "directory" | "wizard" | "marks" | "schedule" | "written_question" | "class_routine" | "audit"
+    "directory" | "wizard" | "marks" | "schedule" | "written_question" | "question_bank" | "class_routine" | "audit"
   >("directory");
 
   const [exams, setExams] = useState<ExamMaster[]>([]);
@@ -131,7 +133,8 @@ export default function ExaminationManagementView() {
         <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
           {[
             { id: "directory", label: "পরীক্ষা ড্যাশবোর্ড ও তালিকা", icon: Layers },
-            { id: "written_question", label: "লিখিত প্রশ্নপত্র বিল্ডার (Question Studio)", icon: FileText },
+            { id: "written_question", label: "উন্নত প্রশ্নপত্র স্টুডিও (Advanced Exam Studio)", icon: FileText },
+            { id: "question_bank", label: "প্রশ্ন ব্যাংক (Question Bank)", icon: BookOpen },
             { id: "wizard", label: "নতুন পরীক্ষা তৈরি উইজার্ড", icon: Wand2 },
             { id: "marks", label: "নম্বর প্রদান ও মূল্যায়ন ওয়ার্কস্পেস", icon: Award },
             { id: "schedule", label: "পরীক্ষার রুটিন ও সিট প্ল্যান", icon: Calendar },
@@ -166,7 +169,8 @@ export default function ExaminationManagementView() {
       )}
 
       {/* Active Tab Submodule Render */}
-      {activeTab === "written_question" && <WrittenQuestionPaperBuilder />}
+      {activeTab === "written_question" && <AdvancedExamPaperStudio />}
+      {activeTab === "question_bank" && <QuestionBankStudio />}
 
       {activeTab === "directory" && (
         <ExamDirectoryView

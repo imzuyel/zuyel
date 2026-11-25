@@ -69,6 +69,8 @@ import {
   StudentAuthAccount,
 } from "@/lib/studentIntelligenceStore";
 import { useGlobalAcademic } from "@/context/GlobalAcademicContext";
+import { useAuth } from "@/context/AuthContext";
+import LmsStrictLoginGuard from "./LmsStrictLoginGuard";
 
 // Helper for dynamic subject icons based on BTEB 4 trades & curriculum
 export const getSubjectIcon = (tradeCode?: string | null, code?: string | null) => {
@@ -749,6 +751,34 @@ export default function SequentialLearningPathView() {
       setSubmittingQuiz(false);
     }
   };
+
+  const { isAuthReady, isLoggedIn, currentUser } = useAuth();
+
+  // Prevent hydration flicker before auth restoration completes
+  if (!isAuthReady) {
+    return (
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-[#0F172A] text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-semibold text-slate-300">শিক্ষার্থী সেশন যাচাই করা হচ্ছে...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Strict Login Guard: Do not mount protected learning roadmap if not authenticated
+  const isAuthStudent = (isLoggedIn && currentUser?.role === "student") || activeStudent !== null;
+  if (!isAuthStudent) {
+    return (
+      <div className="min-h-[75vh] flex items-center justify-center p-4">
+        <LmsStrictLoginGuard
+          onSuccessLogin={(acc) => setActiveStudent(acc)}
+          title="অধ্যায়ভিত্তিক ডুওলিঙ্গো লার্নিং পাথওয়ে"
+          subtitle="ইন্টারঅ্যাক্টিভ পাঠ ও ধারাবাহিক অগ্রগতি আনলক করতে শিক্ষার্থী হিসেবে লগইন করুন।"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

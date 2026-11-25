@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { initialGeneratedDocuments } from "@/lib/documentsData";
 import { maskSensitiveInfo } from "@/lib/certificateVerifier";
+import { getHybridDocuments, getStudents } from "@/lib/hybridStorageEngine";
 
 export async function GET(
   req: NextRequest,
@@ -49,18 +50,52 @@ export async function GET(
     const decodedMemo = rawMemo.replace(/[^a-zA-Z0-9\-_/.\s]/g, "").trim();
     const queryUpper = decodedMemo.toUpperCase();
 
-    // Search across in-memory database and initial documents
+    // Search across hybrid database, in-memory database and initial documents
+    const hybridDocs = getHybridDocuments();
     const allDocs = [
+      ...(hybridDocs || []),
       ...(institutionalDb.documents || []),
       ...initialGeneratedDocuments,
     ];
 
-    const doc = allDocs.find((d: any) => {
+    let doc = allDocs.find((d: any) => {
       const num = (d.docNumber || "").toUpperCase();
       const id = (d.id || "").toUpperCase();
       const sCode = (d.studentCode || "").toUpperCase();
       return num === queryUpper || num.includes(queryUpper) || id === queryUpper || sCode === queryUpper;
     });
+
+    if (!doc) {
+      // Check Student ID Card / Enrollment match
+      const hybridStudents = (await getStudents()) || institutionalDb.students || [];
+      const matchedStudent = hybridStudents.find((s: any) => {
+        const sId = (s.studentId || "").toUpperCase();
+        const adm = (s.admissionNo || "").toUpperCase();
+        const rollStr = String(s.roll || "");
+        return sId === queryUpper || sId.includes(queryUpper) || adm === queryUpper || `PTSC-${rollStr}` === queryUpper || `PGTSC-2026-${rollStr}` === queryUpper || rollStr === queryUpper;
+      });
+
+      if (matchedStudent) {
+        doc = {
+          id: `idcard_${matchedStudent.studentId || matchedStudent.roll}`,
+          docNumber: `PGTSC-2026-ID${matchedStudent.roll || matchedStudent.studentId}`,
+          docType: "bonafide",
+          docTypeBangla: "অফিশিয়াল ডিজিটাল স্টুডেন্ট আইডি ও প্রত্যয়ন",
+          studentName: matchedStudent.name,
+          studentNameBangla: matchedStudent.nameBangla || matchedStudent.name,
+          studentCode: matchedStudent.studentId,
+          className: matchedStudent.className || "Class 9",
+          tradeName: matchedStudent.trade || "IT Support & IoT",
+          tradeNameBangla: matchedStudent.trade || "আইটি সাপোর্ট অ্যান্ড আইওটি",
+          session: "2026",
+          roll: matchedStudent.roll,
+          issueDate: new Date().toISOString().slice(0, 10),
+          issueDateBangla: "২০২৬",
+          generatedBy: "অধ্যক্ষ ও পরীক্ষা নিয়ন্ত্রণ শাখা (PTSC)",
+          status: "issued",
+        } as any;
+      }
+    }
 
     if (!doc) {
       return NextResponse.json({

@@ -2,13 +2,31 @@ import { NextRequest } from "next/server";
 import { institutionalDb, Notice } from "@/lib/database";
 import { requireAdmin, verifyBackendAuthorization } from "@/lib/serverAuthGuard";
 import { apiSuccess, apiError } from "@/lib/apiResponse";
+import {
+  getHybridNotices,
+  upsertHybridNotice,
+  deleteHybridNotice,
+} from "@/lib/hybridStorageEngine";
+import { sanitizeUserTextInput, sanitizeHtml } from "@/components/common/SafeHtmlRenderer";
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
 
-    let list = [...(institutionalDb.notices || [])];
+    const hybridList = getHybridNotices();
+    const instList = institutionalDb.notices || [];
+
+    // Merge by id
+    const seen = new Set<string>();
+    let list: Notice[] = [];
+    for (const n of [...hybridList, ...instList]) {
+      if (n && n.id && !seen.has(String(n.id))) {
+        seen.add(String(n.id));
+        list.push(n);
+      }
+    }
+
     if (category && category !== "all") {
       list = list.filter((n) => n.category === category);
     }
@@ -50,10 +68,10 @@ export async function POST(req: NextRequest) {
     };
 
     const newNotice: Notice = {
-      id: Date.now(),
-      title: (body.title || body.titleBangla).trim().slice(0, 300),
-      titleBangla: (body.titleBangla || body.title).trim().slice(0, 300),
-      content: (body.content || "").trim().slice(0, 10000),
+      id: body.id || Date.now(),
+      title: sanitizeUserTextInput(body.title || body.titleBangla || "", 300),
+      titleBangla: sanitizeUserTextInput(body.titleBangla || body.title || "", 300),
+      content: sanitizeHtml(body.content || "").trim().slice(0, 10000),
       category: body.category || "academic",
       categoryBangla: categoryMap[body.category] || "একাডেমিক",
       publishedAt: body.publishedAt || new Date().toISOString().slice(0, 10),
@@ -65,12 +83,14 @@ export async function POST(req: NextRequest) {
       targetAudience: body.targetAudience || { type: "all" },
     };
 
+    // Save to memory institutionalDb and persist to hybridStorageEngine
     institutionalDb.notices.unshift(newNotice);
+    const saved = upsertHybridNotice(newNotice);
 
-    return apiSuccess(newNotice, {
+    return apiSuccess(saved, {
       message: "নোটিশ সফলভাবে প্রচার করা হয়েছে।",
       extraKeys: {
-        notice: newNotice,
+        notice: saved,
       },
     });
   } catch (error: any) {
@@ -88,9 +108,6 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const id = Number(body.id);
     const idx = institutionalDb.notices.findIndex((n) => n.id === id);
-    if (idx === -1) {
-      return apiError("নোটিশ পাওয়া যায়নি (Notice not found)", { status: 404 });
-    }
 
     const categoryMap: Record<string, string> = {
       academic: "একাডেমিক",
@@ -101,20 +118,28 @@ export async function PUT(req: NextRequest) {
       administrative: "প্রশাসনিক",
     };
 
+    const baseNotice = idx >= 0 ? institutionalDb.notices[idx] : (getHybridNotices().find(n => Number(n.id) === id) || {});
+
     const updated: Notice = {
-      ...institutionalDb.notices[idx],
+      ...baseNotice,
       ...body,
-      categoryBangla: categoryMap[body.category] || institutionalDb.notices[idx].categoryBangla,
-      status: body.status || institutionalDb.notices[idx].status,
-      targetAudience: body.targetAudience || institutionalDb.notices[idx].targetAudience,
+      id,
+      categoryBangla: categoryMap[body.category] || baseNotice.categoryBangla || "একাডেমিক",
+      status: body.status || baseNotice.status || "published",
+      targetAudience: body.targetAudience || baseNotice.targetAudience || { type: "all" },
     };
 
-    institutionalDb.notices[idx] = updated;
+    if (idx >= 0) {
+      institutionalDb.notices[idx] = updated;
+    } else {
+      institutionalDb.notices.unshift(updated);
+    }
+    const saved = upsertHybridNotice(updated);
 
-    return apiSuccess(updated, {
+    return apiSuccess(saved, {
       message: "নোটিশ সফলভাবে আপডেট করা হয়েছে।",
       extraKeys: {
-        notice: updated,
+        notice: saved,
       },
     });
   } catch (error: any) {
@@ -135,14 +160,10 @@ export async function DELETE(req: NextRequest) {
       return apiError("নোটিশ আইডি প্রদান করুন", { status: 400 });
     }
 
-    const initialLength = institutionalDb.notices.length;
-    institutionalDb.notices = institutionalDb.notices.filter((n) => n.id !== Number(id));
+    institutionalDb.notices = institutionalDb.notices.filter((n) => String(n.id) !== String(id));
+    deleteHybridNotice(id);
 
-    if (institutionalDb.notices.length === initialLength) {
-      return apiError("নোটিশ পাওয়া যায়নি", { status: 404 });
-    }
-
-    return apiSuccess({ deletedId: Number(id) }, {
+    return apiSuccess({ deletedId: id }, {
       message: "নোটিশ সফলভাবে মুছে ফেলা হয়েছে।",
     });
   } catch (error: any) {

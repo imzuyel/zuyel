@@ -6,12 +6,14 @@ import HierarchicalSidebar from "@/components/navigation/HierarchicalSidebar";
 import BtebTabulationSheetStudio from "@/components/examination/BtebTabulationSheetStudio";
 import ExaminationManagementView from "@/components/examination/ExaminationManagementView";
 import BtebAnnualLongTermRegisterView from "@/components/academic/BtebAnnualLongTermRegisterView";
+import AdvancedExamPaperStudio from "@/components/examination/AdvancedExamPaperStudio";
+import QuestionBankStudio from "@/components/examination/QuestionBankStudio";
 import Link from "next/link";
-import { Award, FileSpreadsheet, Calendar, BookOpen } from "lucide-react";
+import { Award, FileSpreadsheet, Calendar, BookOpen, FileText } from "lucide-react";
 
 export default function ExaminationHubPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"tabulation" | "management" | "annual_ledger">("tabulation");
+  const [activeTab, setActiveTab] = useState<"tabulation" | "management" | "annual_ledger" | "paper_studio" | "question_bank">("paper_studio");
 
   return (
     <div className="flex h-screen max-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
@@ -48,6 +50,30 @@ export default function ExaminationHubPage() {
             {/* View Switcher Tabs */}
             <div className="p-1 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center gap-1 shadow-2xs self-start sm:self-auto flex-wrap">
               <button
+                onClick={() => setActiveTab("paper_studio")}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === "paper_studio"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>১. প্রশ্নপত্র স্টুডিও</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("question_bank")}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === "question_bank"
+                    ? "bg-purple-600 text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>২. প্রশ্ন ব্যাংক</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab("tabulation")}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                   activeTab === "tabulation"
@@ -56,7 +82,7 @@ export default function ExaminationHubPage() {
                 }`}
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>১. ট্যাবুলেশন শিট</span>
+                <span>৩. ট্যাবুলেশন শিট</span>
               </button>
 
               <button
@@ -68,7 +94,7 @@ export default function ExaminationHubPage() {
                 }`}
               >
                 <Calendar className="w-3.5 h-3.5" />
-                <span>২. পরীক্ষা সূচি</span>
+                <span>৪. পরীক্ষা সূচি</span>
               </button>
 
               <button
@@ -79,14 +105,22 @@ export default function ExaminationHubPage() {
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>৩. BTEB বার্ষিক দীর্ঘমেয়াদী খাতা</span>
+                <Award className="w-3.5 h-3.5" />
+                <span>৫. BTEB দীর্ঘমেয়াদী খাতা</span>
               </button>
             </div>
           </div>
 
           {/* Render Active View */}
-          {activeTab === "tabulation" ? (
+          {activeTab === "paper_studio" ? (
+            <div className="h-[calc(100vh-140px)]">
+              <AdvancedExamPaperStudio />
+            </div>
+          ) : activeTab === "question_bank" ? (
+            <div className="h-[calc(100vh-140px)]">
+              <QuestionBankStudio />
+            </div>
+          ) : activeTab === "tabulation" ? (
             <BtebTabulationSheetStudio />
           ) : activeTab === "management" ? (
             <ExaminationManagementView />

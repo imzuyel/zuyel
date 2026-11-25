@@ -16,6 +16,8 @@ import StudentProgressDashboard from "./StudentProgressDashboard";
 import StudentLearningLeaderboard from "./StudentLearningLeaderboard";
 import StudentLoginModal from "@/components/auth/StudentLoginModal";
 import StudentProfileView from "./StudentProfileView";
+import LmsStrictLoginGuard from "./LmsStrictLoginGuard";
+import { useAuth } from "@/context/AuthContext";
 import {
   getActiveStudentAccount,
   logoutStudentAccount,
@@ -23,6 +25,7 @@ import {
 } from "@/lib/studentIntelligenceStore";
 
 export default function StudentLearningHub() {
+  const { isAuthReady, isLoggedIn, currentUser } = useAuth();
   // Navigation tab: 'learning_path' | 'progress' | 'leaderboard' | 'profile'
   const [activeTab, setActiveTab] = useState<"learning_path" | "progress" | "leaderboard" | "profile">("learning_path");
 
@@ -52,6 +55,32 @@ export default function StudentLearningHub() {
       setActiveTab("learning_path");
     }
   };
+
+  // Prevent hydration flicker before auth restoration completes
+  if (!isAuthReady) {
+    return (
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-[#0F172A] text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-semibold text-slate-300">শিক্ষার্থী সেশন যাচাই করা হচ্ছে...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Strict Login Guard: Do not mount protected portal if not authenticated
+  const isAuthStudent = (isLoggedIn && currentUser?.role === "student") || activeStudent !== null;
+  if (!isAuthStudent) {
+    return (
+      <div className="min-h-[75vh] flex items-center justify-center p-4">
+        <LmsStrictLoginGuard
+          onSuccessLogin={(acc) => setActiveStudent(acc)}
+          title="পিটিএসসি শিক্ষার্থী লার্নিং হাব"
+          subtitle="ডিজিটাল লার্নিং পাথওয়ে, অধ্যায়ভিত্তিক কুইজ এবং লিডারবোর্ডে অংশ নিতে শিক্ষার্থী হিসেবে লগইন করুন।"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 animate-fade-in">

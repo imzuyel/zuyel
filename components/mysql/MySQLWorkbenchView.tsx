@@ -45,6 +45,10 @@ export default function MySQLWorkbenchView() {
     phpMyAdminUrl: "http://localhost:8080/phpmyadmin",
   });
 
+  const [syncingMySQL, setSyncingMySQL] = useState(false);
+  const [pullingMySQL, setPullingMySQL] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
   const isAdmin = isAdministrator(role) || isSupremeAdmin(role);
 
   useEffect(() => {
@@ -222,6 +226,101 @@ export default function MySQLWorkbenchView() {
     }
   };
 
+  const handleSyncToMySQL = async () => {
+    setSyncingMySQL(true);
+    try {
+      const res = await fetch("/api/mysql-workbench", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync_to_mysql" }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("সকল লোকাল কালেকশন MySQL ডাটাবেসে সফলভাবে সিঙ্ক হয়েছে!", "success");
+        fetchStatus();
+      } else {
+        showToast(json.error || "MySQL সিঙ্ক সম্পন্ন হতে পারেনি", "error");
+      }
+    } catch {
+      showToast("MySQL সিঙ্ক ব্যর্থ", "error");
+    } finally {
+      setSyncingMySQL(false);
+    }
+  };
+
+  const handlePullFromMySQL = async () => {
+    if (!confirm("আপনি কি নিশ্চিত যে MySQL থেকে সমস্ত ডাটা লোকাল ক্যাশে টেনে আনতে চান?")) return;
+    setPullingMySQL(true);
+    try {
+      const res = await fetch("/api/mysql-workbench", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pull_from_mysql" }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("MySQL ডাটা সফলভাবে লোকাল মেমোরি ক্যাশে লোড হয়েছে!", "success");
+        fetchStatus();
+        fetchTableData(selectedTable);
+      } else {
+        showToast(json.error || "ডাটা পুল করা সম্ভব হয়নি", "error");
+      }
+    } catch {
+      showToast("ডাটা পুল ব্যর্থ", "error");
+    } finally {
+      setPullingMySQL(false);
+    }
+  };
+
+  const handleDeleteRow = async (id: any) => {
+    if (!confirm(`আপনি কি নিশ্চিত যে সারি #${id} মুছে ফেলতে চান?`)) return;
+    try {
+      const res = await fetch("/api/mysql-workbench", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_row", table: selectedTable, id }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast(json.message || "সারি সফলভাবে মুছে ফেলা হয়েছে", "success");
+        fetchTableData(selectedTable);
+        fetchStatus();
+      } else {
+        showToast(json.error || "মুছে ফেলা সম্ভব হয়নি", "error");
+      }
+    } catch {
+      showToast("অপারেশন ব্যর্থ", "error");
+    }
+  };
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const res = await fetch("/api/mysql-workbench", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "restore_backup", backupData: text }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          showToast(json.message || "ব্যাকআপ সফলভাবে পুনরুদ্ধার হয়েছে!", "success");
+          fetchStatus();
+          fetchTableData(selectedTable);
+        } else {
+          showToast(json.error || "ব্যাকআপ ফাইল সঠিক নয়", "error");
+        }
+      } catch {
+        showToast("ব্যাকআপ পুনরুদ্ধার ব্যর্থ", "error");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   if (!isAdmin) {
     return (
       <div className="p-8 bg-white dark:bg-slate-900 rounded-3xl border border-rose-200 dark:border-rose-900/40 text-center space-y-4">
@@ -249,28 +348,74 @@ export default function MySQLWorkbenchView() {
       {/* MySQL & phpMyAdmin Studio Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 p-6 sm:p-8 rounded-3xl text-white shadow-xl border border-indigo-900/50 flex flex-col md:flex-row md:items-center md:justify-between gap-5 relative overflow-hidden">
         <div className="relative z-10 space-y-2">
+          {/* Storage Mode Pill */}
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-emerald-300 text-xs font-bold backdrop-blur-xs border border-white/20">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>নিরাপদ সিস্টেম ও ডাটাবেস হেলথ মনিটর (Read-Only Mode)</span>
+            <span>{statusData?.storageEngineLabel || "⚡ Fast Local Memory/JSON Store (.next/cache/pgtsc-hybrid-local-db.json)"}</span>
           </div>
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white">
             ডাটাবেস হেলথ ও সিস্টেম স্ট্যাটাস ওয়ার্কবেঞ্চ
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-            ডাটাবেস টেবিল ব্রাউজার, মেমোরি হেলথ ও রিড-অনলি কুয়েরি পরিদর্শক। উৎপাদনশীল পরিবেশের নিরাপত্তায় ক্ষতিকর SQL পরিবর্তন স্থায়ীভাবে লকড করা হয়েছে।
+            হাইব্রিড ডুয়াল-ইঞ্জিন স্টোরেজ ইন্সপেক্টর (Fast Memory/JSON Dev + MySQL Live Production)। টেবিল ব্রাউজার, 1-ক্লিক সিঙ্ক ও ফুল ডাটাবেস ব্যাকআপ ইঞ্জিন।
           </p>
         </div>
 
-        {/* 1-Click MySQL .SQL Dump Download Button */}
-        <div className="relative z-10 flex flex-wrap items-center gap-3">
+        {/* 1-Click Sync & Backup Toolbar */}
+        <div className="relative z-10 flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleSyncToMySQL}
+            disabled={syncingMySQL}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            title="লোকাল ডাটাবেস থেকে সকল রেকর্ড MySQL এ আপলোড করুন"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncingMySQL ? "animate-spin" : ""}`} />
+            <span>{syncingMySQL ? "সিঙ্ক হচ্ছে..." : "Sync Local to MySQL"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePullFromMySQL}
+            disabled={pullingMySQL}
+            className="px-4 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            title="MySQL ডাটাবেস থেকে সমস্ত রেকর্ড লোকাল ক্যাশে নিয়ে আসুন"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>{pullingMySQL ? "লোড হচ্ছে..." : "Pull MySQL to Local"}</span>
+          </button>
+
+          <a
+            href="/api/mysql-workbench?action=export_backup&format=json"
+            download="pgtsc_erp_full_backup.json"
+            className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all flex items-center gap-1.5"
+            title="সম্পূর্ণ ডাটাবেস JSON ব্যাকআপ ফাইল ডাউনলোড করুন"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>.JSON ব্যাকআপ</span>
+          </a>
+
           <a
             href="/api/mysql-workbench?action=export_sql"
             download="pgtsc_erp_mysql_dump.sql"
-            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 flex items-center gap-2 transition-all transform hover:scale-105"
+            className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 font-black text-xs shadow-md flex items-center gap-1.5 transition-all"
+            title="MySQL রিলেশনাল DDL ও INSERT ডাম্প ডাউনলোড করুন"
           >
-            <Download className="w-4 h-4" />
-            <span>.SQL ডাম্প এক্সপোর্ট</span>
+            <Download className="w-3.5 h-3.5" />
+            <span>.SQL ডাম্প</span>
           </a>
+
+          <label className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer">
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>রিস্টোর (.JSON)</span>
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleRestoreFile}
+              className="hidden"
+            />
+          </label>
         </div>
       </div>
 
@@ -404,52 +549,77 @@ export default function MySQLWorkbenchView() {
 
           {/* Right Table Data Rows View (8 cols) */}
           <div className="lg:col-span-8 bg-white dark:bg-slate-900 p-5 rounded-3xl shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-3 text-xs overflow-hidden">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-bold block">বর্তমান টেবিল</span>
                 <h3 className="font-mono font-black text-base text-indigo-700 dark:text-cyan-400">
                   `{selectedTable}`
                 </h3>
               </div>
-              <button
-                onClick={() => fetchTableData(selectedTable)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-semibold"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>রিফ্রেশ</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="টেবিলে অনুসন্ধান করুন..."
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden w-48"
+                />
+                <button
+                  onClick={() => fetchTableData(selectedTable)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>রিফ্রেশ</span>
+                </button>
+              </div>
             </div>
 
             {loadingTable ? (
               <div className="p-12 text-center text-slate-400">ডাটা লোড হচ্ছে...</div>
             ) : tableRows.length === 0 ? (
               <div className="p-12 text-center text-slate-400">এই টেবিলে কোনও সারি পাওয়া যায়নি।</div>
-            ) : (
-              <div className="overflow-x-auto max-h-[440px]">
-                <table className="w-full text-left border-collapse font-mono text-[11px]">
-                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 sticky top-0 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <tr>
-                      {Object.keys(tableRows[0] || {}).slice(0, 7).map((col) => (
-                        <th key={col} className="p-2.5 whitespace-nowrap">
-                          {col}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {tableRows.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
+            ) : (() => {
+              const filteredRows = searchQuery.trim()
+                ? tableRows.filter((r) => JSON.stringify(r).toLowerCase().includes(searchQuery.toLowerCase().trim()))
+                : tableRows;
+
+              return (
+                <div className="overflow-x-auto max-h-[440px]">
+                  <table className="w-full text-left border-collapse font-mono text-[11px]">
+                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 sticky top-0 font-bold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-2.5 whitespace-nowrap text-rose-500">অ্যাকশন</th>
                         {Object.keys(tableRows[0] || {}).slice(0, 7).map((col) => (
-                          <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200">
-                            {typeof row[col] === "object" ? JSON.stringify(row[col]) : String(row[col] ?? "")}
-                          </td>
+                          <th key={col} className="p-2.5 whitespace-nowrap">
+                            {col}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredRows.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                          <td className="p-2.5 whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRow(row.id ?? idx)}
+                              className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900 border border-rose-200 dark:border-rose-800 transition cursor-pointer"
+                            >
+                              মুছুন
+                            </button>
+                          </td>
+                          {Object.keys(tableRows[0] || {}).slice(0, 7).map((col) => (
+                            <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                              {typeof row[col] === "object" ? JSON.stringify(row[col]) : String(row[col] ?? "")}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

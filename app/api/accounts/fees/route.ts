@@ -12,6 +12,20 @@ export async function GET(req: NextRequest) {
   try {
     let invoices = FeeAccountsManager.getInvoices();
 
+    const { searchParams } = new URL(req.url);
+    const filterStudentId = searchParams.get("studentId");
+    const filterRoll = searchParams.get("roll");
+
+    if (filterStudentId) {
+      invoices = invoices.filter(
+        (inv: any) =>
+          String(inv.studentId) === String(filterStudentId) ||
+          String(inv.studentCode) === String(filterStudentId)
+      );
+    } else if (filterRoll) {
+      invoices = invoices.filter((inv: any) => String(inv.roll) === String(filterRoll));
+    }
+
     if (hasDatabaseUrl) {
       try {
         if (prisma && prisma.feeInvoice) {

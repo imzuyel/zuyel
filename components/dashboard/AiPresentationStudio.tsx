@@ -50,8 +50,8 @@ export default function AiPresentationStudio() {
   const [generating, setSubmitting] = useState(false);
   const [downloadingPptx, setDownloadingPptx] = useState(false);
 
-  // Theme Selection States (50+ Themes Registry)
-  const [selectedThemeId, setSelectedThemeId] = useState<string>("cyber_cyan");
+  // Theme Selection States (50+ Themes Registry - Strict Contrast-Paired Twilight Default)
+  const [selectedThemeId, setSelectedThemeId] = useState<string>("twilight_indigo");
   const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [activeThemeCategory, setActiveThemeCategory] = useState<string>("All Themes");
   const [themeSearchQuery, setThemeSearchQuery] = useState("");

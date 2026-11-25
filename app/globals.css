@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *, [data-mode="dark"], [data-mode="dark"] *));
+@custom-variant dark (&:where(.dark, .dark *, [data-mode="dark"], [data-mode="dark"] *, [data-mode="twilight"], [data-mode="twilight"] *));
+@custom-variant twilight (&:where(.twilight, .twilight *, [data-mode="twilight"], [data-mode="twilight"] *));
 
 @theme {
   --color-slate-750: #243247;
@@ -59,6 +60,31 @@
   --quiz-option-border: #475569;
   --quiz-option-text: #f8fafc;
   --quiz-plate-bg: #090d16;
+  --quiz-plate-fg: #f8fafc;
+}
+
+.twilight, [data-mode="twilight"] {
+  /* Balanced Twilight / Soft-Slate Hybrid Theme (Default) */
+  --surface-canvas: #141c2e;
+  --surface-card: rgba(30, 41, 59, 0.9);
+  --surface-card-muted: #1e293b;
+  --surface-border: rgba(148, 163, 184, 0.2);
+  --surface-border-subtle: rgba(148, 163, 184, 0.12);
+  --ring-focus: rgba(99, 102, 241, 0.35);
+  --border-focus: #6366f1;
+
+  /* Quiz Tokens in Twilight (High Contrast & Legibility) */
+  --quiz-surface-bg: #141c2e;
+  --quiz-surface-muted: #1e293b;
+  --quiz-border: rgba(148, 163, 184, 0.25);
+  --quiz-text-primary: #f8fafc;
+  --quiz-text-secondary: #cbd5e1;
+  --quiz-text-muted: #94a3b8;
+  --quiz-option-bg: #1e293b;
+  --quiz-option-hover: #27354f;
+  --quiz-option-border: #475569;
+  --quiz-option-text: #f8fafc;
+  --quiz-plate-bg: #141c2e;
   --quiz-plate-fg: #f8fafc;
 }
 

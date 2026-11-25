@@ -3,6 +3,8 @@
  * Panchagarh Government Technical School and College (PTSC)
  */
 
+import { institutionalDb } from "./database";
+
 export type RoutineDay =
   | "SATURDAY"
   | "SUNDAY"
@@ -242,11 +244,89 @@ export function checkAllConstraints(slots: RoutineSlot[]): { isValid: boolean; c
   return { isValid: conflicts.length === 0, conflicts };
 }
 
-export function findSubstituteTeachers(slot: RoutineSlot, allSlots: RoutineSlot[]): any[] {
-  return [
-    { teacherId: "tch-201", name: "মো: আব্দুল কুদ্দুস", designation: "ইনস্ট্রাক্টর", available: true },
-    { teacherId: "tch-202", name: "প্রকৌ: নাজমুল হুদা", designation: "জুনিয়র ইন্সট্রাক্টর", available: true }
-  ];
+export function findSubstituteTeachers(
+  slot: RoutineSlot | any,
+  allSlots: RoutineSlot[] | any[],
+  facultyList?: any[]
+): any[] {
+  const faculty = (facultyList && facultyList.length > 0) ? facultyList : institutionalDb.faculty;
+  const targetDay = String(slot?.day || "Sunday").toLowerCase();
+  const targetPeriod = Number(slot?.periodNo || slot?.periodIndex || 1);
+  const targetDuration = Number(slot?.durationMinutes || 40);
+  const targetTrade = String(slot?.tradeCode || "").toLowerCase();
+  const originalTeacherId = slot?.teacherId;
+
+  // Zero Collision Guarantee: find teachers who are busy during this slot
+  const busyTeacherIds = new Set<any>();
+  const busyTeacherNames = new Set<string>();
+
+  for (const s of allSlots || []) {
+    if (String(s.day || "").toLowerCase() === targetDay && s.id !== slot?.id) {
+      const sStart = Number(s.periodNo || s.periodIndex || 1);
+      const sDuration = Number(s.durationMinutes || 40);
+      const sSpan = sDuration >= 120 ? 3 : sDuration >= 80 ? 2 : 1;
+      const sEnd = sStart + sSpan - 1;
+
+      const targetSpan = targetDuration >= 120 ? 3 : targetDuration >= 80 ? 2 : 1;
+      const targetEnd = targetPeriod + targetSpan - 1;
+
+      const overlaps = !(targetEnd < sStart || sEnd < targetPeriod);
+      if (overlaps) {
+        if (s.teacherId) busyTeacherIds.add(s.teacherId);
+        if (s.teacherName) busyTeacherNames.add(s.teacherName.trim().toLowerCase());
+      }
+    }
+  }
+
+  // Filter available teachers
+  const availableCandidates: any[] = [];
+
+  for (const f of faculty) {
+    if (f.type && f.type !== "faculty") continue;
+    if (originalTeacherId && (f.id === originalTeacherId || String(f.id) === String(originalTeacherId))) continue;
+    if (slot?.teacherName && f.name.trim().toLowerCase() === slot.teacherName.trim().toLowerCase()) continue;
+    if (busyTeacherIds.has(f.id) || busyTeacherNames.has(f.name.trim().toLowerCase())) continue;
+
+    // Calculate score
+    const fTrade = String(f.tradeCode || f.department || "").toLowerCase();
+    const isTradeMatch = targetTrade && fTrade && (fTrade.includes(targetTrade) || targetTrade.includes(fTrade));
+    
+    // Workload on this day
+    const dayLoad = (allSlots || []).filter(
+      (s: any) => String(s.day || "").toLowerCase() === targetDay && (s.teacherId === f.id || (s.teacherName && s.teacherName.toLowerCase() === f.name.toLowerCase()))
+    ).length;
+
+    let score = 50;
+    let matchReason = "উপযুক্ত ও ফ্রি শিক্ষক";
+
+    if (isTradeMatch) {
+      score += 40;
+      matchReason = "ট্রেড ও বিষয় স্পেশালিস্ট (সর্বোচ্চ অগ্রাধিকার)";
+    }
+    if (dayLoad <= 1) {
+      score += 20;
+      matchReason += " • দৈনিক ক্লাস চাপ কম";
+    }
+
+    availableCandidates.push({
+      teacherId: f.id,
+      id: f.id,
+      name: f.name,
+      nameBangla: f.nameBangla || f.name,
+      designation: f.designation || "ইন্সট্রাক্টর",
+      department: f.department || "কারিগরি শাখা",
+      tradeCode: f.tradeCode,
+      available: true,
+      dayLoad,
+      isTradeMatch,
+      score,
+      matchReason,
+    });
+  }
+
+  // Sort descending by score, then ascending by dayLoad
+  availableCandidates.sort((a, b) => b.score - a.score || a.dayLoad - b.dayLoad);
+  return availableCandidates;
 }
 
 export function compareRoutineVersions(v1: RoutineSlot[], v2: RoutineSlot[]): any {

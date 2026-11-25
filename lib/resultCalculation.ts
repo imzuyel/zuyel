@@ -270,7 +270,31 @@ export function calculateSubjectTotalAndGrade(
 
   let failedReason: string | undefined;
   const baseGrade = calculateGradeAndGP(totalMarks, max);
-  if (totalMarks < pass || baseGrade.grade === "F") {
+
+  // Dual-Component Pass Validation (Theory Aggregate & Practical Aggregate)
+  const tc = Number(components.continuousTheory) || 0;
+  const tf = Number(components.finalTheory ?? components.theoryMarks) || 0;
+  const pc = Number(components.continuousPractical) || 0;
+  const pf = Number(components.finalPractical ?? components.practicalMarks) || 0;
+
+  const theoryTotal = tc + tf;
+  const practicalTotal = pc + pf;
+  const hasPractical = pc > 0 || pf > 0 || (components.practicalMarks !== undefined && Number(components.practicalMarks) > 0);
+
+  if (hasPractical && (tc > 0 || tf > 0 || pc > 0 || pf > 0)) {
+    const theoryMax = Math.round(max * 0.6);
+    const practicalMax = max - theoryMax;
+    const theoryPass = Math.round(theoryMax * 0.4);
+    const practicalPass = Math.round(practicalMax * 0.4);
+
+    if (theoryTotal < theoryPass) {
+      failedReason = `তত্ত্বীয় অংশে (TC+TF=${theoryTotal}) ন্যূনতম ৪০% (${theoryPass}) অনুপস্থিত`;
+    } else if (practicalTotal < practicalPass) {
+      failedReason = `ব্যবহারিক অংশে (PC+PF=${practicalTotal}) ন্যূনতম ৪০% (${practicalPass}) অনুপস্থিত`;
+    }
+  }
+
+  if (!failedReason && (totalMarks < pass || baseGrade.grade === "F")) {
     failedReason = "মোট নম্বর ৩৩% এর কম";
   }
 

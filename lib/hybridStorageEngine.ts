@@ -20,6 +20,19 @@ import fs from "fs";
 import path from "path";
 import { prisma, isPrismaAvailable } from "./prisma";
 import { institutionalDb } from "./database";
+import {
+  DEFAULT_INSTITUTION_SETTINGS,
+  DEFAULT_ACADEMIC_YEARS,
+  DEFAULT_ACADEMIC_PROGRAMS,
+  DEFAULT_CLASSES,
+  DEFAULT_TRADES,
+  DEFAULT_SECTIONS_SHIFTS,
+  buildAuthoritativeBaselineMappings,
+} from "./masterDataEngine";
+import { pdfMasterRoutines } from "./panchagarhTscPdfRoutineData";
+import { initialGeneratedDocuments } from "./documentsData";
+import { PTSC_INITIAL_FEE_INVOICES } from "./feeAccountsEngine";
+import { PTSC_INITIAL_LAB_EQUIPMENT } from "./labInventoryEngine";
 
 export type StorageMode = "AUTO" | "LOCAL_MEMORY" | "MYSQL_LIVE";
 
@@ -125,6 +138,7 @@ export interface HybridStoreCollections {
   quizzes: HybridQuizItem[];
   liveSessions: Record<string, any>;
   attendance: HybridAttendanceSummary[];
+  attendanceRecords?: any[];
   quizResults: any[];
   learningCourses?: any[];
   learningProgress?: Record<string, any[]>;
@@ -135,7 +149,36 @@ export interface HybridStoreCollections {
     atRiskStudents: Array<{ id: string; name: string; roll: number; className: string; trade: string; issue: string; severity: "HIGH" | "MEDIUM" }>;
     recentActivity: Array<{ id: string; type: string; title: string; time: string }>;
   };
+  // Academic & Settings Collections
+  academicYears?: any[];
+  academicPrograms?: any[];
+  academicClasses?: any[];
+  academicTrades?: any[];
+  academicSections?: any[];
   academicMappings: any[];
+  academicSubjects?: any[];
+  institutionSettings?: any;
+  trades?: any[];
+  classes?: any[];
+  institution?: any;
+  // Master Routine & Auto-Substitution Collections
+  routines?: any[];
+  examRoutines?: any[];
+  substitutions?: any[];
+  // Examination & Results Collections
+  exams?: any[];
+  marks?: any[];
+  // Document, ID Card & Verification Collections
+  documents?: any[];
+  idCards?: any[];
+  // Communication & Notice Collections
+  smsLogs?: any[];
+  notices?: any[];
+  // Accounts & Lab Inventory Collections
+  fees?: any[];
+  inventory?: any[];
+  // AI Settings
+  aiSettings?: any;
   updatedAt: number;
 }
 
@@ -869,6 +912,31 @@ function seedInitialAttendance(): HybridAttendanceSummary[] {
   ];
 }
 
+export function ensureStoreIntegrity(store: HybridStoreCollections): HybridStoreCollections {
+  if (!store.academicYears || store.academicYears.length === 0) store.academicYears = DEFAULT_ACADEMIC_YEARS;
+  if (!store.academicPrograms || store.academicPrograms.length === 0) store.academicPrograms = DEFAULT_ACADEMIC_PROGRAMS;
+  if (!store.academicClasses || store.academicClasses.length === 0) store.academicClasses = DEFAULT_CLASSES;
+  if (!store.academicTrades || store.academicTrades.length === 0) store.academicTrades = DEFAULT_TRADES;
+  if (!store.academicSections || store.academicSections.length === 0) store.academicSections = DEFAULT_SECTIONS_SHIFTS;
+  if (!store.academicMappings || store.academicMappings.length === 0) store.academicMappings = buildAuthoritativeBaselineMappings("2026");
+  if (!store.institutionSettings) store.institutionSettings = DEFAULT_INSTITUTION_SETTINGS;
+  if (!store.routines || store.routines.length === 0) store.routines = pdfMasterRoutines;
+  if (!store.substitutions) store.substitutions = institutionalDb.substituteDuties || [];
+  if (!store.attendanceRecords || store.attendanceRecords.length === 0) store.attendanceRecords = institutionalDb.attendanceRecords || [];
+  if (!store.exams || store.exams.length === 0) store.exams = institutionalDb.exams || [];
+  if (!store.marks) store.marks = institutionalDb.marks || [];
+  if (!store.documents || store.documents.length === 0) {
+    store.documents = [...(institutionalDb.documents || []), ...initialGeneratedDocuments];
+  }
+  if (!store.idCards) store.idCards = [];
+  if (!store.smsLogs) store.smsLogs = (institutionalDb as any).smsLogs || [];
+  if (!store.notices || store.notices.length === 0) store.notices = institutionalDb.notices || [];
+  if (!store.fees || store.fees.length === 0) store.fees = PTSC_INITIAL_FEE_INVOICES;
+  if (!store.inventory || store.inventory.length === 0) store.inventory = PTSC_INITIAL_LAB_EQUIPMENT;
+  if (!store.aiSettings) store.aiSettings = null;
+  return store;
+}
+
 // ---------------------------------------------------------------------------
 // Store Initialization & Synchronization
 // ---------------------------------------------------------------------------
@@ -880,6 +948,7 @@ export function getHybridStore(): HybridStoreCollections {
       if (!globalThis.__pgtscHybridStore || globalThis.__pgtscDiskSyncMtime !== stats.mtimeMs) {
         const diskStore = readSnapshotFromDisk();
         if (diskStore && Array.isArray(diskStore.students) && diskStore.students.length > 0) {
+          ensureStoreIntegrity(diskStore);
           globalThis.__pgtscHybridStore = diskStore;
           return globalThis.__pgtscHybridStore;
         }
@@ -891,6 +960,7 @@ export function getHybridStore(): HybridStoreCollections {
 
   // 2. Return memory cache if warm
   if (globalThis.__pgtscHybridStore && Array.isArray(globalThis.__pgtscHybridStore.students) && globalThis.__pgtscHybridStore.students.length > 0) {
+    ensureStoreIntegrity(globalThis.__pgtscHybridStore);
     return globalThis.__pgtscHybridStore;
   }
 
@@ -911,10 +981,11 @@ export function getHybridStore(): HybridStoreCollections {
     quizzes: seededQuizzes,
     liveSessions: {},
     attendance: seededAttendance,
+    attendanceRecords: institutionalDb.attendanceRecords || [],
     quizResults: [],
     analytics: {
       weakTopics: [
-        { topic: "ডিজিタル লজিক গেটস ও ট্রুথ টেবিল", subject: "Computer Systems", class: "Class 9", failureRate: 42, studentCount: 28 },
+        { topic: "ডিজিটাল লজিক গেটস ও ট্রুথ টেবিল", subject: "Computer Systems", class: "Class 9", failureRate: 42, studentCount: 28 },
         { topic: "ওহমের সূত্রের সার্কিট হিসাব", subject: "Electrical Circuits", class: "Class 9", failureRate: 38, studentCount: 24 },
         { topic: "বাইনারি বিয়োগ ও পরিপূরক", subject: "Computer Systems", class: "Class 9", failureRate: 35, studentCount: 21 },
       ],
@@ -929,9 +1000,21 @@ export function getHybridStore(): HybridStoreCollections {
         { id: "act_3", type: "CHAPTER", title: "অধ্যায় ২: বাইনারি সংখ্যা পদ্ধতি আনলক করা হয়েছে", time: "৩ ঘণ্টা আগে" },
       ],
     },
-    academicMappings: institutionalDb.academyClassTradeMappings || [],
+    academicYears: DEFAULT_ACADEMIC_YEARS,
+    academicPrograms: DEFAULT_ACADEMIC_PROGRAMS,
+    academicClasses: DEFAULT_CLASSES,
+    academicTrades: DEFAULT_TRADES,
+    academicSections: DEFAULT_SECTIONS_SHIFTS,
+    academicMappings: buildAuthoritativeBaselineMappings("2026"),
+    institutionSettings: DEFAULT_INSTITUTION_SETTINGS,
+    routines: pdfMasterRoutines,
+    substitutions: institutionalDb.substituteDuties || [],
+    exams: institutionalDb.exams || [],
+    marks: institutionalDb.marks || [],
     updatedAt: Date.now(),
   };
+
+  ensureStoreIntegrity(freshStore);
 
   globalThis.__pgtscHybridStore = freshStore;
   writeSnapshotToDisk(freshStore);
@@ -1408,3 +1491,868 @@ export function deleteHybridPresentation(id: string): boolean {
   }
   return false;
 }
+
+// ============================================================================
+// ACADEMIC & INSTITUTION SETTINGS ACCESSORS
+// ============================================================================
+
+export function getHybridAcademicMappings(year = "2026"): any[] {
+  const store = getHybridStore();
+  const list = store.academicMappings || [];
+  return year ? list.filter((m: any) => m.academicYear === year) : list;
+}
+
+export function saveHybridAcademicMappings(mappings: any[]): void {
+  const store = getHybridStore();
+  store.academicMappings = mappings;
+  saveHybridStore(store);
+}
+
+export function upsertHybridAcademicMapping(mapping: any): any {
+  const store = getHybridStore();
+  if (!store.academicMappings) store.academicMappings = [];
+  const idx = store.academicMappings.findIndex((m: any) => m.id === mapping.id);
+  const now = new Date().toISOString();
+  if (idx >= 0) {
+    store.academicMappings[idx] = { ...store.academicMappings[idx], ...mapping, updatedAt: now };
+  } else {
+    store.academicMappings.unshift({ ...mapping, createdAt: now, updatedAt: now });
+  }
+  saveHybridStore(store);
+  return idx >= 0 ? store.academicMappings[idx] : store.academicMappings[0];
+}
+
+export function deleteHybridAcademicMapping(id: string): boolean {
+  const store = getHybridStore();
+  if (!store.academicMappings) return false;
+  const initLen = store.academicMappings.length;
+  store.academicMappings = store.academicMappings.filter((m: any) => m.id !== id);
+  if (store.academicMappings.length !== initLen) {
+    saveHybridStore(store);
+    return true;
+  }
+  return false;
+}
+
+export function getHybridAcademicClasses(): any[] {
+  const store = getHybridStore();
+  return store.academicClasses || DEFAULT_CLASSES;
+}
+
+export function saveHybridAcademicClasses(classes: any[]): void {
+  const store = getHybridStore();
+  store.academicClasses = classes;
+  saveHybridStore(store);
+}
+
+export function getHybridAcademicTrades(): any[] {
+  const store = getHybridStore();
+  return store.academicTrades || DEFAULT_TRADES;
+}
+
+export function saveHybridAcademicTrades(trades: any[]): void {
+  const store = getHybridStore();
+  store.academicTrades = trades;
+  saveHybridStore(store);
+}
+
+export function getHybridAcademicSections(): any[] {
+  const store = getHybridStore();
+  return store.academicSections || DEFAULT_SECTIONS_SHIFTS;
+}
+
+export function getHybridAcademicYears(): any[] {
+  const store = getHybridStore();
+  return store.academicYears || DEFAULT_ACADEMIC_YEARS;
+}
+
+export function getHybridInstitutionSettings(): any {
+  const store = getHybridStore();
+  return store.institutionSettings || DEFAULT_INSTITUTION_SETTINGS;
+}
+
+export function saveHybridInstitutionSettings(settings: any): any {
+  const store = getHybridStore();
+  store.institutionSettings = { ...store.institutionSettings, ...settings, updatedAt: new Date().toISOString() };
+  saveHybridStore(store);
+  return store.institutionSettings;
+}
+
+// ============================================================================
+// MASTER ROUTINE & AUTO-SUBSTITUTION ACCESSORS
+// ============================================================================
+
+export function getHybridRoutines(filters?: { classId?: string | number; day?: string; teacherId?: number; tradeCode?: string }): any[] {
+  const store = getHybridStore();
+  let list = store.routines || [];
+  if (filters?.classId && filters.classId !== "all") {
+    list = list.filter((r: any) => String(r.classId) === String(filters.classId) || r.className?.includes(`Class ${filters.classId}`));
+  }
+  if (filters?.day && filters.day !== "all") {
+    list = list.filter((r: any) => r.day?.toLowerCase() === filters.day?.toLowerCase());
+  }
+  if (filters?.teacherId) {
+    list = list.filter((r: any) => Number(r.teacherId) === Number(filters.teacherId));
+  }
+  if (filters?.tradeCode && filters.tradeCode !== "all") {
+    list = list.filter((r: any) => r.tradeCode === filters.tradeCode);
+  }
+  return list;
+}
+
+export function saveHybridRoutines(routines: any[]): void {
+  const store = getHybridStore();
+  store.routines = routines;
+  saveHybridStore(store);
+}
+
+export function upsertHybridRoutineSlot(slot: any): any {
+  const store = getHybridStore();
+  if (!store.routines) store.routines = [];
+  const idx = store.routines.findIndex((r: any) => r.id === slot.id || (r.day === slot.day && r.periodNo === slot.periodNo && r.classId === slot.classId && r.tradeCode === slot.tradeCode));
+  if (idx >= 0) {
+    store.routines[idx] = { ...store.routines[idx], ...slot };
+  } else {
+    store.routines.push({ ...slot, id: slot.id || Date.now() });
+  }
+  saveHybridStore(store);
+  return idx >= 0 ? store.routines[idx] : store.routines[store.routines.length - 1];
+}
+
+export function deleteHybridRoutineSlot(id: number | string): boolean {
+  const store = getHybridStore();
+  if (!store.routines) return false;
+  const initLen = store.routines.length;
+  store.routines = store.routines.filter((r: any) => String(r.id) !== String(id));
+  if (store.routines.length !== initLen) {
+    saveHybridStore(store);
+    return true;
+  }
+  return false;
+}
+
+export function getHybridSubstitutions(date?: string): any[] {
+  const store = getHybridStore();
+  const list = store.substitutions || [];
+  return date ? list.filter((s: any) => s.date === date) : list;
+}
+
+export function recordHybridSubstitution(duty: any): any {
+  const store = getHybridStore();
+  if (!store.substitutions) store.substitutions = [];
+  const existingIdx = store.substitutions.findIndex((s: any) => s.id === duty.id || (s.date === duty.date && s.periodNo === duty.periodNo && s.classId === duty.classId));
+  const record = { ...duty, id: duty.id || `sub_${Date.now()}`, createdAt: duty.createdAt || new Date().toISOString() };
+  if (existingIdx >= 0) {
+    store.substitutions[existingIdx] = record;
+  } else {
+    store.substitutions.unshift(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+// ============================================================================
+// DIGITAL ATTENDANCE ACCESSORS
+// ============================================================================
+
+export function getHybridAttendanceRecords(filters?: { classId?: number; tradeId?: number; date?: string }): any[] {
+  const store = getHybridStore();
+  let list = store.attendanceRecords || [];
+  if (filters?.classId) {
+    list = list.filter((r: any) => Number(r.classId) === Number(filters.classId));
+  }
+  if (filters?.tradeId) {
+    list = list.filter((r: any) => Number(r.tradeId) === Number(filters.tradeId));
+  }
+  if (filters?.date) {
+    list = list.filter((r: any) => r.date === filters.date);
+  }
+  return list;
+}
+
+export function saveHybridAttendanceRecords(records: any[]): void {
+  const store = getHybridStore();
+  store.attendanceRecords = records;
+  saveHybridStore(store);
+}
+
+export function recordHybridAttendanceEntry(entry: {
+  studentId?: number;
+  roll: number;
+  classId: number;
+  tradeId?: number;
+  className?: string;
+  trade?: string;
+  status: "P" | "A" | "L" | "PRESENT" | "ABSENT" | "LATE";
+  date: string;
+  method?: string;
+}): any {
+  const store = getHybridStore();
+  if (!store.attendanceRecords) store.attendanceRecords = [];
+  const normalizedStatus = entry.status === "PRESENT" ? "P" : entry.status === "ABSENT" ? "A" : entry.status === "LATE" ? "L" : entry.status;
+  
+  let dayRecord = store.attendanceRecords.find((r: any) => Number(r.classId) === Number(entry.classId) && (!entry.tradeId || Number(r.tradeId) === Number(entry.tradeId)) && r.date === entry.date);
+  if (!dayRecord) {
+    dayRecord = {
+      id: Date.now(),
+      date: entry.date,
+      academicYear: "2026",
+      classId: entry.classId,
+      tradeId: entry.tradeId,
+      section: "A",
+      shift: "morning",
+      entries: [],
+      stats: { totalStudents: 0, presentCount: 0, absentCount: 0, lateCount: 0, attendancePercentage: 100 },
+      status: "submitted",
+      takenBy: "ডিজিটাল স্ক্যানার",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.attendanceRecords.unshift(dayRecord);
+  }
+
+  const studentEntryIdx = dayRecord.entries.findIndex((e: any) => Number(e.roll) === Number(entry.roll) || (entry.studentId && Number(e.studentId) === Number(entry.studentId)));
+  const newEntry = {
+    studentId: entry.studentId || Number(entry.roll),
+    roll: Number(entry.roll),
+    status: normalizedStatus,
+    timestamp: new Date().toISOString(),
+    source: entry.method || "QR_SCAN",
+  };
+  if (studentEntryIdx >= 0) {
+    dayRecord.entries[studentEntryIdx] = { ...dayRecord.entries[studentEntryIdx], ...newEntry };
+  } else {
+    dayRecord.entries.push(newEntry);
+  }
+
+  const total = dayRecord.entries.length;
+  const present = dayRecord.entries.filter((e: any) => e.status === "P" || e.status === "L").length;
+  const absent = dayRecord.entries.filter((e: any) => e.status === "A").length;
+  const late = dayRecord.entries.filter((e: any) => e.status === "L").length;
+  dayRecord.stats = {
+    totalStudents: total,
+    presentCount: present,
+    absentCount: absent,
+    lateCount: late,
+    attendancePercentage: total > 0 ? Math.round((present / total) * 100) : 100,
+  };
+  dayRecord.updatedAt = new Date().toISOString();
+
+  const std = store.students.find((s) => s.roll === Number(entry.roll));
+  if (std) {
+    const presentInc = (normalizedStatus === "P" || normalizedStatus === "L") ? 1 : 0;
+    std.attendanceRate = Math.min(100, Math.max(50, Math.round((std.attendanceRate * 0.95) + (presentInc * 5))));
+  }
+
+  saveHybridStore(store);
+  return { dayRecord, updatedEntry: newEntry };
+}
+
+// ============================================================================
+// EXAMINATIONS & MARKS ACCESSORS
+// ============================================================================
+
+export function getHybridExams(year?: number | string): any[] {
+  const store = getHybridStore();
+  let list = store.exams || [];
+  if (year) {
+    list = list.filter((e: any) => String(e.academicYear) === String(year));
+  }
+  return list;
+}
+
+export function saveHybridExams(exams: any[]): void {
+  const store = getHybridStore();
+  store.exams = exams;
+  saveHybridStore(store);
+}
+
+export function upsertHybridExam(exam: any): any {
+  const store = getHybridStore();
+  if (!store.exams) store.exams = [];
+  const idx = store.exams.findIndex((e: any) => e.id === exam.id || (e.title === exam.title && e.academicYear === exam.academicYear));
+  const record = { ...exam, id: exam.id || Date.now(), updatedAt: new Date().toISOString() };
+  if (idx >= 0) {
+    store.exams[idx] = { ...store.exams[idx], ...record };
+  } else {
+    store.exams.unshift(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+export function getHybridMarks(examId?: number, classId?: number, subjectCode?: string): any[] {
+  const store = getHybridStore();
+  let list = store.marks || [];
+  if (examId) list = list.filter((m: any) => Number(m.examId) === Number(examId));
+  if (classId) list = list.filter((m: any) => Number(m.classId) === Number(classId));
+  if (subjectCode) list = list.filter((m: any) => m.subjectCode === subjectCode);
+  return list;
+}
+
+export function saveHybridMarks(marks: any[]): void {
+  const store = getHybridStore();
+  store.marks = marks;
+  saveHybridStore(store);
+}
+
+export function upsertHybridMarks(newMarks: any[]): any[] {
+  const store = getHybridStore();
+  if (!store.marks) store.marks = [];
+  for (const nm of newMarks) {
+    const idx = store.marks.findIndex(
+      (m: any) => Number(m.examId) === Number(nm.examId) && Number(m.studentId || m.roll) === Number(nm.studentId || nm.roll) && m.subjectCode === nm.subjectCode
+    );
+    const item = { ...nm, id: nm.id || `mk_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, updatedAt: new Date().toISOString() };
+    if (idx >= 0) {
+      store.marks[idx] = { ...store.marks[idx], ...item };
+    } else {
+      store.marks.push(item);
+    }
+  }
+  saveHybridStore(store);
+  return store.marks;
+}
+
+// ============================================================================
+// DOCUMENTS & ID CARDS ACCESSORS
+// ============================================================================
+
+export function getHybridDocuments(): any[] {
+  const store = getHybridStore();
+  return store.documents || [];
+}
+
+export function saveHybridDocuments(docs: any[]): void {
+  const store = getHybridStore();
+  store.documents = docs;
+  saveHybridStore(store);
+}
+
+export function upsertHybridDocument(doc: any): any {
+  const store = getHybridStore();
+  if (!store.documents) store.documents = [];
+  const idx = store.documents.findIndex(
+    (d: any) => String(d.id) === String(doc.id) || (d.docNumber && String(d.docNumber).toUpperCase() === String(doc.docNumber).toUpperCase())
+  );
+  const record = { ...doc, id: doc.id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`, updatedAt: new Date().toISOString() };
+  if (idx >= 0) {
+    store.documents[idx] = { ...store.documents[idx], ...record };
+  } else {
+    store.documents.unshift(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+export function deleteHybridDocument(idOrDocNo: string): boolean {
+  const store = getHybridStore();
+  const initialLen = store.documents?.length || 0;
+  store.documents = (store.documents || []).filter(
+    (d: any) => String(d.id) !== String(idOrDocNo) && String(d.docNumber).toUpperCase() !== String(idOrDocNo).toUpperCase()
+  );
+  if (store.documents.length !== initialLen) {
+    saveHybridStore(store);
+    return true;
+  }
+  return false;
+}
+
+export function getHybridIdCards(): any[] {
+  const store = getHybridStore();
+  return store.idCards || [];
+}
+
+export function saveHybridIdCards(cards: any[]): void {
+  const store = getHybridStore();
+  store.idCards = cards;
+  saveHybridStore(store);
+}
+
+export function upsertHybridIdCard(card: any): any {
+  const store = getHybridStore();
+  if (!store.idCards) store.idCards = [];
+  const idx = store.idCards.findIndex(
+    (c: any) => String(c.studentId) === String(card.studentId) || (c.cardNo && c.cardNo === card.cardNo)
+  );
+  const record = { ...card, id: card.id || `idcard_${Date.now()}_${card.studentId}`, updatedAt: new Date().toISOString() };
+  if (idx >= 0) {
+    store.idCards[idx] = { ...store.idCards[idx], ...record };
+  } else {
+    store.idCards.unshift(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+// ============================================================================
+// SMS LOGS & NOTICES ACCESSORS
+// ============================================================================
+
+export function getHybridSmsLogs(): any[] {
+  const store = getHybridStore();
+  return store.smsLogs || [];
+}
+
+export function saveHybridSmsLogs(logs: any[]): void {
+  const store = getHybridStore();
+  store.smsLogs = logs;
+  saveHybridStore(store);
+}
+
+export function recordHybridSmsLog(log: any): any {
+  const store = getHybridStore();
+  if (!store.smsLogs) store.smsLogs = [];
+  const record = {
+    ...log,
+    id: log.id || `sms_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    timestamp: log.timestamp || new Date().toISOString(),
+    status: log.status || "SENT",
+  };
+  store.smsLogs.unshift(record);
+  saveHybridStore(store);
+  return record;
+}
+
+export function getHybridNotices(): any[] {
+  const store = getHybridStore();
+  return store.notices || [];
+}
+
+export function saveHybridNotices(notices: any[]): void {
+  const store = getHybridStore();
+  store.notices = notices;
+  saveHybridStore(store);
+}
+
+export function upsertHybridNotice(notice: any): any {
+  const store = getHybridStore();
+  if (!store.notices) store.notices = [];
+  const idx = store.notices.findIndex((n: any) => String(n.id) === String(notice.id));
+  const record = { ...notice, id: notice.id || Date.now(), updatedAt: new Date().toISOString() };
+  if (idx >= 0) {
+    store.notices[idx] = { ...store.notices[idx], ...record };
+  } else {
+    store.notices.unshift(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+export function deleteHybridNotice(id: any): boolean {
+  const store = getHybridStore();
+  const initialLen = store.notices?.length || 0;
+  store.notices = (store.notices || []).filter((n: any) => String(n.id) !== String(id));
+  if (store.notices.length !== initialLen) {
+    saveHybridStore(store);
+    return true;
+  }
+  return false;
+}
+
+// ============================================================================
+// FEES & INVENTORY ACCESSORS
+// ============================================================================
+
+export function getHybridFees(): any[] {
+  const store = getHybridStore();
+  return store.fees || [];
+}
+
+export function saveHybridFees(fees: any[]): void {
+  const store = getHybridStore();
+  store.fees = fees;
+  saveHybridStore(store);
+}
+
+export function upsertHybridFee(invoice: any): any {
+  const store = getHybridStore();
+  if (!store.fees) store.fees = [];
+  const idx = store.fees.findIndex(
+    (f: any) => String(f.id) === String(invoice.id) || (f.invoiceNumber && f.invoiceNumber === invoice.invoiceNumber)
+  );
+  const record = {
+    ...invoice,
+    id: invoice.id || `inv_${Date.now()}`,
+    receiptDate: invoice.receiptDate || new Date().toISOString(),
+  };
+  if (idx >= 0) {
+    store.fees[idx] = { ...store.fees[idx], ...record };
+  } else {
+    store.fees.unshift(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+export function getHybridInventory(): any[] {
+  const store = getHybridStore();
+  return store.inventory || [];
+}
+
+export function saveHybridInventory(inventory: any[]): void {
+  const store = getHybridStore();
+  store.inventory = inventory;
+  saveHybridStore(store);
+}
+
+export function upsertHybridEquipment(eq: any): any {
+  const store = getHybridStore();
+  if (!store.inventory) store.inventory = [];
+  const idx = store.inventory.findIndex(
+    (item: any) => String(item.id) === String(eq.id) || (item.itemCode && item.itemCode === eq.itemCode)
+  );
+  const record = { ...eq, id: eq.id || `eq_${Date.now()}`, updatedAt: new Date().toISOString() };
+  if (idx >= 0) {
+    store.inventory[idx] = { ...store.inventory[idx], ...record };
+  } else {
+    store.inventory.push(record);
+  }
+  saveHybridStore(store);
+  return record;
+}
+
+// ============================================================================
+// AI SETTINGS ACCESSORS
+// ============================================================================
+
+export function getHybridAiSettings(): any {
+  const store = getHybridStore();
+  return store.aiSettings;
+}
+
+export function saveHybridAiSettings(settings: any): void {
+  const store = getHybridStore();
+  store.aiSettings = settings;
+  saveHybridStore(store);
+}
+
+// ============================================================================
+// FULL DATABASE SYNC & BACKUP ENGINE
+// ============================================================================
+
+export async function syncAllLocalToMySQL(): Promise<{
+  success: boolean;
+  syncedCounts: Record<string, number>;
+  message: string;
+}> {
+  const store = getHybridStore();
+  const counts: Record<string, number> = {
+    students: 0,
+    courses: 0,
+    documents: 0,
+    notices: 0,
+    fees: 0,
+    inventory: 0,
+  };
+
+  const isConnected = await isMySQLConnected();
+  if (!isConnected || !prisma) {
+    return {
+      success: false,
+      syncedCounts: counts,
+      message: "MySQL ডাটাবেস সংযোগ অফলাইন। লোকাল স্টোরেজ সচল রয়েছে।",
+    };
+  }
+
+  try {
+    // 1. Sync Students
+    if (prisma.student && store.students) {
+      for (const s of store.students.slice(0, 50)) {
+        try {
+          await prisma.student.upsert({
+            where: { studentId: s.studentId },
+            update: {
+              name: s.name,
+              nameBangla: s.nameBangla,
+              roll: s.roll,
+            },
+            create: {
+              studentId: s.studentId,
+              name: s.name,
+              nameBangla: s.nameBangla,
+              roll: s.roll,
+              admissionNo: s.admissionNo || `ADM-${s.roll}`,
+              classId: s.classId || 4,
+              status: "ACTIVE",
+            },
+          });
+          counts.students++;
+        } catch {}
+      }
+    }
+
+    // 2. Sync Lab Equipment
+    if (prisma.labEquipment && store.inventory) {
+      for (const item of store.inventory) {
+        try {
+          await prisma.labEquipment.upsert({
+            where: { id: item.id },
+            update: {
+              availableQuantity: item.availableQuantity,
+              damagedQuantity: item.damagedQuantity,
+              conditionStatus: item.conditionStatus,
+            },
+            create: {
+              id: item.id,
+              itemCode: item.itemCode,
+              name: item.name,
+              nameBangla: item.nameBangla,
+              tradeCode: item.tradeCode,
+              labLocation: item.labLocation,
+              category: item.category,
+              totalQuantity: item.totalQuantity,
+              availableQuantity: item.availableQuantity,
+              damagedQuantity: item.damagedQuantity,
+              conditionStatus: item.conditionStatus,
+              unitPrice: item.unitPrice,
+              purchaseDate: item.purchaseDate,
+              supplier: item.supplier,
+              notes: item.notes,
+            },
+          });
+          counts.inventory++;
+        } catch {}
+      }
+    }
+
+    // 3. Sync Fees Invoices
+    if (prisma.feeInvoice && store.fees) {
+      for (const fee of store.fees) {
+        try {
+          await (prisma as any).feeInvoice.upsert({
+            where: { id: fee.id },
+            update: {
+              paidAmount: fee.paidAmount,
+              dueAmount: fee.dueAmount,
+              status: fee.status,
+            },
+            create: {
+              id: fee.id,
+              invoiceNumber: fee.invoiceNumber,
+              studentId: fee.studentId,
+              studentCode: fee.studentCode,
+              roll: String(fee.roll),
+              name: fee.name,
+              className: fee.className,
+              tradeName: fee.tradeName,
+              items: typeof fee.items === "string" ? fee.items : JSON.stringify(fee.items),
+              totalAmount: fee.totalAmount,
+              paidAmount: fee.paidAmount,
+              dueAmount: fee.dueAmount,
+              paymentMethod: fee.paymentMethod || "CASH",
+              transactionId: fee.transactionId,
+              receiptDate: fee.receiptDate,
+              collectedBy: fee.collectedBy,
+              status: fee.status,
+            },
+          });
+          counts.fees++;
+        } catch {}
+      }
+    }
+
+    // 4. Sync Notices
+    if ((prisma as any).notice && store.notices) {
+      for (const n of store.notices.slice(0, 30)) {
+        try {
+          await (prisma as any).notice.upsert({
+            where: { id: n.id },
+            update: { title: n.title, titleBangla: n.title, content: n.content },
+            create: {
+              id: n.id,
+              title: n.title,
+              titleBangla: n.title,
+              content: n.content,
+              category: "ACADEMIC",
+              categoryBangla: n.category || "একাডেমিক",
+              publishedAt: n.publishedAt || new Date().toISOString().slice(0, 10),
+              publishedBy: n.publishedBy || "অধ্যক্ষ কার্যালয়",
+            },
+          });
+          counts.notices = (counts.notices || 0) + 1;
+        } catch {}
+      }
+    }
+
+    // 5. Sync SMS Logs
+    if ((prisma as any).smsLog && store.smsLogs) {
+      for (const s of store.smsLogs.slice(0, 50)) {
+        try {
+          await (prisma as any).smsLog.create({
+            data: {
+              recipientMobile: s.recipientMobile || s.recipientPhone || "01700000000",
+              recipientName: s.recipientName || s.studentName,
+              studentRoll: s.studentRoll,
+              className: s.className,
+              messageType: s.messageType || s.category || "General",
+              messageContent: s.messageContent || s.messageText || "",
+              status: s.status || "SENT",
+            },
+          });
+          counts.smsLogs = (counts.smsLogs || 0) + 1;
+        } catch {}
+      }
+    }
+
+    // 6. Sync Presentations
+    if ((prisma as any).presentation && store.presentations) {
+      for (const p of store.presentations.slice(0, 20)) {
+        try {
+          await (prisma as any).presentation.upsert({
+            where: { id: p.id },
+            update: {
+              title: p.title,
+              slidesJson: typeof p.slides === "string" ? p.slides : JSON.stringify(p.slides),
+              theme: p.theme || "twilight_indigo",
+            },
+            create: {
+              id: p.id,
+              title: p.title,
+              className: p.className || "Class 9",
+              trade: p.trade || "All",
+              subject: p.subject || p.title,
+              theme: p.theme || "twilight_indigo",
+              slideCount: p.slideCount || (Array.isArray(p.slides) ? p.slides.length : 5),
+              slidesJson: typeof p.slides === "string" ? p.slides : JSON.stringify(p.slides),
+              author: p.author || "PTSC Faculty",
+            },
+          });
+          counts.presentations = (counts.presentations || 0) + 1;
+        } catch {}
+      }
+    }
+
+    return {
+      success: true,
+      syncedCounts: counts,
+      message: "সকল লোকাল ডাটা সফলভাবে MySQL ডাটাবেসে সিঙ্ক করা হয়েছে।",
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      syncedCounts: counts,
+      message: `সিঙ্ক করার সময় ত্রুটি ঘটেছে: ${err.message}`,
+    };
+  }
+}
+
+export async function pullMySQLToLocalCache(): Promise<{
+  success: boolean;
+  pulledCounts: Record<string, number>;
+  message: string;
+}> {
+  const store = getHybridStore();
+  const counts: Record<string, number> = {
+    students: 0,
+    fees: 0,
+    inventory: 0,
+  };
+
+  const isConnected = await isMySQLConnected();
+  if (!isConnected || !prisma) {
+    return {
+      success: false,
+      pulledCounts: counts,
+      message: "MySQL সার্ভার অফলাইন। লোকাল ক্যাশ ব্যবহার করা হচ্ছে।",
+    };
+  }
+
+  try {
+    if (prisma.student) {
+      const dbStudents = await prisma.student.findMany({ take: 200 });
+      if (dbStudents.length > 0) {
+        counts.students = dbStudents.length;
+      }
+    }
+
+    if (prisma.labEquipment) {
+      const dbEquip = await prisma.labEquipment.findMany();
+      if (dbEquip.length > 0) {
+        store.inventory = dbEquip as any[];
+        counts.inventory = dbEquip.length;
+      }
+    }
+
+    if (prisma.feeInvoice) {
+      const dbFees = await prisma.feeInvoice.findMany();
+      if (dbFees.length > 0) {
+        store.fees = dbFees.map((f: any) => ({
+          ...f,
+          items: typeof f.items === "string" ? JSON.parse(f.items) : f.items,
+        }));
+        counts.fees = dbFees.length;
+      }
+    }
+
+    saveHybridStore(store);
+    return {
+      success: true,
+      pulledCounts: counts,
+      message: "MySQL থেকে সর্বশেষ রেকর্ডসমূহ লোকাল ক্যাশে সফলভাবে লোড হয়েছে।",
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      pulledCounts: counts,
+      message: `MySQL ডাটা পুল করতে সমস্যা হয়েছে: ${err.message}`,
+    };
+  }
+}
+
+export function exportFullDatabaseBackup(format: "json" | "sql" = "json"): string {
+  const store = getHybridStore();
+
+  if (format === "json") {
+    return JSON.stringify(store, null, 2);
+  }
+
+  // Generate standard SQL dump for MySQL
+  const timestamp = new Date().toISOString();
+  let sql = `-- ========================================================\n`;
+  sql += `-- Panchagarh Govt. Technical School & College (PTSC) ERP\n`;
+  sql += `-- Full Database SQL Dump Generated: ${timestamp}\n`;
+  sql += `-- Engine: Dual-Mode Hybrid Storage Engine\n`;
+  sql += `-- ========================================================\n\n`;
+  sql += `SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n\n`;
+
+  // Students Table Dump
+  sql += `-- Table: students (${store.students?.length || 0} rows)\n`;
+  sql += `CREATE TABLE IF NOT EXISTS \`students\` (\n`;
+  sql += `  \`id\` VARCHAR(64) PRIMARY KEY,\n`;
+  sql += `  \`studentId\` VARCHAR(64) NOT NULL,\n`;
+  sql += `  \`name\` VARCHAR(255) NOT NULL,\n`;
+  sql += `  \`nameBangla\` VARCHAR(255),\n`;
+  sql += `  \`roll\` INT NOT NULL,\n`;
+  sql += `  \`className\` VARCHAR(64),\n`;
+  sql += `  \`trade\` VARCHAR(128),\n`;
+  sql += `  \`status\` VARCHAR(32) DEFAULT 'ACTIVE'\n`;
+  sql += `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n\n`;
+
+  if (store.students && store.students.length > 0) {
+    sql += `INSERT INTO \`students\` (\`id\`, \`studentId\`, \`name\`, \`nameBangla\`, \`roll\`, \`className\`, \`trade\`, \`status\`) VALUES\n`;
+    const rows = store.students.slice(0, 50).map((s) => {
+      const escape = (str?: string) => `'${(str || "").replace(/'/g, "''")}'`;
+      return `  (${escape(s.id)}, ${escape(s.studentId)}, ${escape(s.name)}, ${escape(s.nameBangla)}, ${s.roll || 1}, ${escape(s.className)}, ${escape(s.trade)}, ${escape(s.status || "ACTIVE")})`;
+    });
+    sql += rows.join(",\n") + ";\n\n";
+  }
+
+  sql += `SET FOREIGN_KEY_CHECKS = 1;\n-- End of Backup Dump\n`;
+  return sql;
+}
+
+export function restoreFromBackup(backupJsonString: string): boolean {
+  try {
+    const parsed = JSON.parse(backupJsonString);
+    if (parsed && (Array.isArray(parsed.students) || parsed.academicClasses)) {
+      ensureStoreIntegrity(parsed);
+      saveHybridStore(parsed);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+

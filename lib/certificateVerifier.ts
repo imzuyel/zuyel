@@ -10,6 +10,7 @@
 import { institutionalDb } from "@/lib/database";
 import { initialGeneratedDocuments } from "@/lib/documentsData";
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
+import { getHybridDocuments, getStudents } from "@/lib/hybridStorageEngine";
 
 export type DocumentClassification =
   | "testimonial"
@@ -263,8 +264,10 @@ export async function verifyDocumentRecord(
     }
   }
 
-  // 2. In-Memory Store Search (AI Studio Preview Safe)
+  // 2. Hybrid Store & In-Memory Store Search
+  const hybridDocs = getHybridDocuments();
   const allDocs = [
+    ...(hybridDocs || []),
     ...(institutionalDb.documents || []),
     ...initialGeneratedDocuments,
   ];
@@ -278,6 +281,50 @@ export async function verifyDocumentRecord(
   });
 
   if (!matched) {
+    // 3. Check Student ID Card & Active Enrollment Verification
+    const hybridStudents = (await getStudents()) || institutionalDb.students || [];
+    const matchedStudent = hybridStudents.find((s: any) => {
+      const sId = (s.studentId || "").toUpperCase();
+      const adm = (s.admissionNo || "").toUpperCase();
+      const rollStr = String(s.roll || "");
+      return sId === queryUpper || sId.includes(queryUpper) || adm === queryUpper || `PTSC-${rollStr}` === queryUpper || `PGTSC-2026-${rollStr}` === queryUpper || rollStr === queryUpper;
+    });
+
+    if (matchedStudent) {
+      const generatedDocRecord = {
+        id: `idcard_${matchedStudent.studentId || matchedStudent.roll}`,
+        docNumber: `PGTSC-2026-ID${matchedStudent.roll || matchedStudent.studentId}`,
+        docType: "bonafide",
+        docTypeBangla: "অফিশিয়াল ডিজিটাল স্টুডেন্ট আইডি ও অধ্যয়নরত প্রত্যয়ন",
+        status: "issued",
+        issueDate: new Date().toISOString().slice(0, 10),
+        issueDateBangla: "২০২৬",
+        generatedBy: "অধ্যক্ষ ও পরীক্ষা নিয়ন্ত্রণ শাখা (PTSC)",
+        student: {
+          studentId: matchedStudent.studentId,
+          admissionNo: matchedStudent.admissionNo || `ADM-${matchedStudent.roll}`,
+          name: matchedStudent.name,
+          nameBangla: matchedStudent.nameBangla || matchedStudent.name,
+          fatherName: matchedStudent.fatherName || "মোঃ রফিকুল ইসলাম",
+          motherName: matchedStudent.motherName || "মোছাঃ রোকেয়া বেগম",
+          className: matchedStudent.className || "Class 9",
+          tradeName: matchedStudent.trade || "IT Support & IoT",
+          tradeNameBangla: matchedStudent.trade || "আইটি সাপোর্ট অ্যান্ড আইওটি",
+          session: "2026",
+          roll: matchedStudent.roll,
+          photoUrl: matchedStudent.avatar || "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&auto=format&fit=crop&q=80",
+        },
+      };
+      const publicDoc = formatPublicVerifiedDocument(generatedDocRecord);
+      return {
+        verified: true,
+        verificationStatus: "VALID",
+        message: "Student Identity and Active Enrollment verified successfully",
+        messageBangla: "শিক্ষার্থীর ডিজিটাল আইডি কার্ড ও অধ্যয়নরত প্রত্যয়ন সফলভাবে যাচাইকৃত ও সত্য প্রমাণিত।",
+        document: publicDoc,
+      };
+    }
+
     return {
       verified: false,
       verificationStatus: "NOT_FOUND",

@@ -282,15 +282,11 @@ export default function HostLiveFullscreenStage({
         // safe polling catch
       }
     }, 1000);
-  } catch {
-    // safe polling catch
-  }
-}, 1000);
 
-return () => {
-  isMounted = false;
-  clearInterval(pollInterval);
-};
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
   }, [sessionId, currentSlideIndex]);
 
 // Isolated countdown timer for graded slides

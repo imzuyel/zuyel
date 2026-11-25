@@ -34,6 +34,7 @@ export interface GlobalAcademicContextType extends GlobalAcademicState {
   setSelectedSection: (section: string) => void;
   setSelectedTradeId: (tradeId: string | number) => void;
   setGlobalAcademicMapping: (params: Partial<GlobalAcademicState>) => void;
+  broadcastAcademicUpdate: (params: Partial<GlobalAcademicState>) => void;
   resetToDefaults: () => void;
 }
 
@@ -167,9 +168,54 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
     setState((prev) => ({ ...prev, selectedTradeId: String(tradeId) }));
   }, []);
 
+  // Listen to external broadcast events to sync tabs & modules
+  useEffect(() => {
+    const handleContextEvent = (e: any) => {
+      if (e?.detail && typeof e.detail === "object") {
+        setState((prev) => {
+          const detail = e.detail;
+          if (
+            (!detail.academicYear || prev.academicYear === detail.academicYear) &&
+            (!detail.selectedClassId || prev.selectedClassId === String(detail.selectedClassId)) &&
+            (!detail.selectedTradeId || prev.selectedTradeId === String(detail.selectedTradeId)) &&
+            (!detail.selectedSection || prev.selectedSection === detail.selectedSection)
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            ...detail,
+            selectedClassId: String(detail.selectedClassId || prev.selectedClassId),
+            selectedTradeId: String(detail.selectedTradeId || prev.selectedTradeId),
+          };
+        });
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("ptsc_academic_context_changed", handleContextEvent);
+      return () => window.removeEventListener("ptsc_academic_context_changed", handleContextEvent);
+    }
+  }, []);
+
   // Mutator: Bulk parameter update
   const setGlobalAcademicMapping = useCallback((params: Partial<GlobalAcademicState>) => {
     setState((prev) => ({ ...prev, ...params }));
+  }, []);
+
+  // Broadcast update to all components and tabs
+  const broadcastAcademicUpdate = useCallback((params: Partial<GlobalAcademicState>) => {
+    setState((prev) => {
+      const next = { ...prev, ...params };
+      if (typeof window !== "undefined") {
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("ptsc_academic_context_changed", { detail: next })
+          );
+        }, 0);
+      }
+      return next;
+    });
   }, []);
 
   // Reset to default institutional configuration
@@ -195,6 +241,7 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
       setSelectedSection,
       setSelectedTradeId,
       setGlobalAcademicMapping,
+      broadcastAcademicUpdate,
       resetToDefaults,
     }),
     [
@@ -209,6 +256,7 @@ export function GlobalAcademicProvider({ children }: { children: React.ReactNode
       setSelectedSection,
       setSelectedTradeId,
       setGlobalAcademicMapping,
+      broadcastAcademicUpdate,
       resetToDefaults,
     ]
   );

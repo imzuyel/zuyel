@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { examinationEngine } from "@/lib/examinationEngine";
 import { verifyBackendAuthorization, requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
+import { institutionalDb } from "@/lib/database";
+import { upsertHybridMarks } from "@/lib/hybridStorageEngine";
 
 export async function GET(req: Request) {
   const auth = requireTeacherOrAdmin(req, "/api/examination/marks");
@@ -86,6 +88,22 @@ export async function POST(req: Request) {
       isFinalSubmit,
       reason
     );
+
+    // Sync newly updated marks to hybridStorageEngine
+    try {
+      const studentIds = new Set(entries.map((e: any) => Number(e.studentId)));
+      const marksToSync = institutionalDb.marks.filter(
+        (m) =>
+          studentIds.has(m.studentId) &&
+          (m.examId === Number(examId) || m.examName?.includes(result.exam.nameBangla)) &&
+          m.subjectCode.toLowerCase() === subjectCode.toLowerCase()
+      );
+      if (marksToSync.length > 0) {
+        upsertHybridMarks(marksToSync);
+      }
+    } catch (syncErr) {
+      console.warn("[Examination Marks API] Hybrid storage sync warning:", (syncErr as Error).message);
+    }
 
     return NextResponse.json({
       success: true,

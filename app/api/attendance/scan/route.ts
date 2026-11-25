@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { prisma, isPrismaAvailable } from "@/lib/prisma";
+import { recordHybridAttendanceEntry } from "@/lib/hybridStorageEngine";
 
 // PTSC Campus Official Geolocation Benchmark (Panchagarh Sadar)
 const PTSC_CAMPUS_LAT = 26.3354;
@@ -255,6 +256,28 @@ export async function POST(req: Request) {
         remark: `Geo-verified (${distanceMeters}m)`,
       } as any);
       (todayRecord as any).presentCount = ((todayRecord as any).presentCount || 0) + 1;
+    }
+
+    // 8. HYBRID DUAL-MODE DISK + MYSQL STORE SYNC
+    try {
+      recordHybridAttendanceEntry({
+        studentId: matchedStudent?.id ? Number(matchedStudent.id) : Number(studentId),
+        roll: Number(studentRoll) || 1,
+        classId: Number(payload.classId || matchedStudent?.classId || 4),
+        tradeId: payload.tradeId ? Number(payload.tradeId) : (matchedStudent?.tradeId ? Number(matchedStudent.tradeId) : undefined),
+        className: payload.className || matchedStudent?.className || "Class 9",
+        trade: payload.tradeName || matchedStudent?.tradeNameBangla,
+        status: "P",
+        date: today,
+        method: "DYNAMIC_QR_SCAN",
+      });
+
+      // Update student attendanceRate in institutionalDb
+      if (matchedStudent) {
+        matchedStudent.attendanceRate = Math.min(100, Math.max(50, Math.round(((matchedStudent.attendanceRate || 90) * 0.95) + 5)));
+      }
+    } catch (syncErr) {
+      console.warn("[Attendance Scan API] Hybrid storage sync warning:", (syncErr as Error).message);
     }
 
     return NextResponse.json({

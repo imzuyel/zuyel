@@ -1,3 +1,5 @@
+import { getHybridSmsLogs, recordHybridSmsLog } from "@/lib/hybridStorageEngine";
+
 /**
  * Bangladeshi SMS Gateway Engine (Greenweb / Teletalk / SSL Wireless / DTE-BTEB Standard)
  * Panchagarh Government Technical School and College (PTSC)
@@ -156,5 +158,10 @@ export async function sendSmsGateway(
   };
 
   globalSmsLogs.unshift(logEntry);
+  try {
+    recordHybridSmsLog(logEntry);
+  } catch (err) {
+    console.warn("[HybridStore] Failed to record SMS log:", err);
+  }
   return logEntry;
 }

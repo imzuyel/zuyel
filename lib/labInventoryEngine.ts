@@ -1,3 +1,5 @@
+import { getHybridInventory, upsertHybridEquipment } from "@/lib/hybridStorageEngine";
+
 /**
  * Technical Lab Equipment & Inventory Tracking Engine
  * Panchagarh Government Technical School and College (PTSC)
@@ -44,10 +46,28 @@ export interface LabIssueRecord {
 // In-memory persistent preview storage for PTSC Labs
 export const PTSC_INITIAL_LAB_EQUIPMENT: LabEquipment[] = [
   {
+    id: "eq-pc-1",
+    itemCode: "LAB-IT-PC01",
+    name: "Dell OptiPlex Core i5 Desktop Computer Workstation",
+    nameBangla: "ডেল অপটিপ্লেক্স কোর আই৫ ডেস্কটপ ওয়ার্কস্টেশন",
+    tradeCode: "IT",
+    labLocation: "Room 203 - Computer & Programming Lab",
+    category: "Heavy Machinery",
+    totalQuantity: 40,
+    availableQuantity: 38,
+    damagedQuantity: 2,
+    conditionStatus: "GOOD",
+    unitPrice: 58000,
+    purchaseDate: "2024-09-10",
+    supplier: "Global Brand Pvt Ltd",
+    notes: "সফটওয়্যার ডেভেলপমেন্ট ও অফিস অ্যাপ্লিকেশনের প্রধান কম্পিউটার ল্যাব।",
+    updatedAt: new Date().toISOString()
+  },
+  {
     id: "eq-1",
     itemCode: "LAB-IT-001",
-    name: "Arduino Uno R3 Development Board",
-    nameBangla: "আর্ডুইনো উনো আর৩ মাইক্রোকন্ট্রোলার বোর্ড",
+    name: "Arduino Uno R3 Development Board Starter Kit",
+    nameBangla: "আর্ডুইনো উনো আর৩ মাইক্রোকন্ট্রোলার স্টার্টার কিট",
     tradeCode: "IT",
     labLocation: "Room 204 - IoT Lab",
     category: "Electronic Components",
@@ -62,10 +82,64 @@ export const PTSC_INITIAL_LAB_EQUIPMENT: LabEquipment[] = [
     updatedAt: new Date().toISOString()
   },
   {
+    id: "eq-esp-1",
+    itemCode: "LAB-IT-003",
+    name: "ESP32 NodeMCU WiFi & Bluetooth IoT Dev Board",
+    nameBangla: "ইএসপি৩২ নোডএমসিইউ ওয়াইফাই ও ব্লুটুথ আইওটি মডিউল",
+    tradeCode: "IT",
+    labLocation: "Room 204 - IoT Lab",
+    category: "Electronic Components",
+    totalQuantity: 45,
+    availableQuantity: 40,
+    damagedQuantity: 1,
+    conditionStatus: "GOOD",
+    unitPrice: 950,
+    purchaseDate: "2025-02-01",
+    supplier: "TechBD Electronics",
+    notes: "স্মার্ট হোম ও ক্লাউড আইওটি প্রজেক্ট বাস্তবায়নের জন্য।",
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: "eq-sensor-1",
+    itemCode: "LAB-IT-004",
+    name: "IoT Sensor Kit (DHT22 Temp, HC-SR04 Ultrasonic & PIR Motion)",
+    nameBangla: "আইওটি মাল্টি-সেন্সর কিট (তাপমাত্রা, আল্ট্রাসনিক ও পিআইআর মোশন)",
+    tradeCode: "IT",
+    labLocation: "Room 204 - IoT Lab",
+    category: "Electronic Components",
+    totalQuantity: 60,
+    availableQuantity: 55,
+    damagedQuantity: 3,
+    conditionStatus: "GOOD",
+    unitPrice: 420,
+    purchaseDate: "2025-02-15",
+    supplier: "Robotics Bangladesh",
+    notes: "এনভায়রনমেন্ট সেন্সিং ও অটোমেশন ল্যাব টেস্ট।",
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: "eq-router-1",
+    itemCode: "LAB-IT-005",
+    name: "TP-Link Archer Gigabit Wireless Lab Router AX55 WiFi 6",
+    nameBangla: "টিপি-লিংক গিগাবিট ওয়্যারলেস ল্যাব রাউটার (ওয়াইফাই ৬)",
+    tradeCode: "IT",
+    labLocation: "Room 204 - IoT Lab",
+    category: "Heavy Machinery",
+    totalQuantity: 6,
+    availableQuantity: 5,
+    damagedQuantity: 0,
+    conditionStatus: "GOOD",
+    unitPrice: 7200,
+    purchaseDate: "2025-01-20",
+    supplier: "Excel Technologies Ltd",
+    notes: "আইওটি নেটওয়ার্কিং ও লোকাল সার্ভার টেস্টিং ব্যাকবোন।",
+    updatedAt: new Date().toISOString()
+  },
+  {
     id: "eq-2",
     itemCode: "LAB-IT-002",
-    name: "Digital Multimeter (Fluke 101)",
-    nameBangla: "ডিজিটাল মাল্টিমিটার",
+    name: "Digital Multimeter (Fluke 101 Pocket Standard)",
+    nameBangla: "ডিজিটাল মাল্টিমিটার (ফ্লুক ১০১ স্ট্যান্ডার্ড)",
     tradeCode: "IT",
     labLocation: "Room 204 - IoT Lab",
     category: "Hand Tools",
@@ -76,7 +150,7 @@ export const PTSC_INITIAL_LAB_EQUIPMENT: LabEquipment[] = [
     unitPrice: 2200,
     purchaseDate: "2025-02-10",
     supplier: "Karigari Store",
-    notes: "ভোল্টেজ ও রেজিস্ট্যান্স পরিমাপের জন্য।",
+    notes: "ভোল্টেজ, কারেন্ট ও রেজিস্ট্যান্স পরিমাপের জন্য।",
     updatedAt: new Date().toISOString()
   },
   {
@@ -112,7 +186,7 @@ export const PTSC_INITIAL_LAB_EQUIPMENT: LabEquipment[] = [
     unitPrice: 1200,
     purchaseDate: "2025-01-05",
     supplier: "Local Hardware",
-    notes: "ವೈরিং কাজের অপরিহার্য হ্যান্ড টুলস।",
+    notes: "ওয়্যারিং কাজের অপরিহার্য হ্যান্ড টুলস।",
     updatedAt: new Date().toISOString()
   },
   {
@@ -189,6 +263,14 @@ export class LabInventoryManager {
   private static issueRecords: LabIssueRecord[] = [...PTSC_INITIAL_ISSUE_RECORDS];
 
   public static getEquipment(): LabEquipment[] {
+    try {
+      const hybrid = getHybridInventory();
+      if (hybrid && hybrid.length > 0) {
+        return hybrid as LabEquipment[];
+      }
+    } catch {
+      // Fallback
+    }
     return this.equipmentList;
   }
 
@@ -203,25 +285,44 @@ export class LabInventoryManager {
       updatedAt: new Date().toISOString()
     };
     this.equipmentList.unshift(newItem);
+    try {
+      upsertHybridEquipment(newItem);
+    } catch (err) {
+      console.warn("[LabInventoryEngine] Failed to save equipment to hybrid engine:", err);
+    }
     return newItem;
   }
 
   public static updateEquipment(id: string, partial: Partial<LabEquipment>): LabEquipment | null {
-    const idx = this.equipmentList.findIndex(e => e.id === id);
+    const list = this.getEquipment();
+    const idx = list.findIndex(e => e.id === id);
     if (idx === -1) return null;
-    this.equipmentList[idx] = {
-      ...this.equipmentList[idx],
+    const updated = {
+      ...list[idx],
       ...partial,
       updatedAt: new Date().toISOString()
     };
-    return this.equipmentList[idx];
+    list[idx] = updated;
+    this.equipmentList = list;
+    try {
+      upsertHybridEquipment(updated);
+    } catch (err) {
+      console.warn("[LabInventoryEngine] Failed to update equipment in hybrid engine:", err);
+    }
+    return updated;
   }
 
   public static issueItem(record: Omit<LabIssueRecord, "id" | "issuedAt" | "status">): LabIssueRecord {
-    const eq = this.equipmentList.find(e => e.id === record.equipmentId);
+    const list = this.getEquipment();
+    const eq = list.find(e => e.id === record.equipmentId);
     if (eq && eq.availableQuantity >= record.quantityIssued) {
       eq.availableQuantity -= record.quantityIssued;
       eq.updatedAt = new Date().toISOString();
+      try {
+        upsertHybridEquipment(eq);
+      } catch (err) {
+        console.warn("[LabInventoryEngine] Failed to sync issued equipment:", err);
+      }
     }
 
     const newIssue: LabIssueRecord = {
@@ -241,10 +342,16 @@ export class LabInventoryManager {
     iss.status = "RETURNED";
     iss.returnedAt = new Date().toISOString();
 
-    const eq = this.equipmentList.find(e => e.id === iss.equipmentId);
+    const list = this.getEquipment();
+    const eq = list.find(e => e.id === iss.equipmentId);
     if (eq) {
       eq.availableQuantity = Math.min(eq.totalQuantity, eq.availableQuantity + iss.quantityIssued);
       eq.updatedAt = new Date().toISOString();
+      try {
+        upsertHybridEquipment(eq);
+      } catch (err) {
+        console.warn("[LabInventoryEngine] Failed to sync returned equipment:", err);
+      }
     }
     return true;
   }

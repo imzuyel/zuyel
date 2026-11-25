@@ -66,6 +66,7 @@ export default function Student360ProfileModal({
     | "history"
     | "attendance"
     | "results"
+    | "fees"
     | "documents"
     | "idcard"
     | "audit"
@@ -75,6 +76,10 @@ export default function Student360ProfileModal({
   const [studentMarks, setStudentMarks] = useState<any[]>([]);
   const [loadingMarks, setLoadingMarks] = useState(false);
   const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+
+  // State for student fees & invoices
+  const [studentFees, setStudentFees] = useState<any[]>([]);
+  const [loadingFees, setLoadingFees] = useState(false);
 
   // State for issued official certificates
   const [issuedCertificates, setIssuedCertificates] = useState<any[]>([]);
@@ -107,6 +112,37 @@ export default function Student360ProfileModal({
       active = false;
     };
   }, [student.studentId]);
+
+  // Fetch student fees & invoices
+  useEffect(() => {
+    let active = true;
+    const fetchFees = async () => {
+      setLoadingFees(true);
+      try {
+        const res = await fetch(`/api/accounts/fees?studentId=${student.studentId}&roll=${student.roll}`);
+        const data = await res.json();
+        if (active && data.success) {
+          const list = data.invoices || [];
+          const matched = list.filter(
+            (inv: any) =>
+              String(inv.studentId) === String(student.studentId) ||
+              String(inv.studentId) === String(student.id) ||
+              String(inv.studentCode) === String(student.studentId) ||
+              String(inv.roll) === String(student.roll)
+          );
+          setStudentFees(matched.length > 0 ? matched : list.slice(0, 1));
+        }
+      } catch (err) {
+        console.error("Failed to fetch student fees:", err);
+      } finally {
+        if (active) setLoadingFees(false);
+      }
+    };
+    fetchFees();
+    return () => {
+      active = false;
+    };
+  }, [student.studentId, student.id, student.roll]);
 
   // Fetch generated official documents & certificates
   useEffect(() => {
@@ -514,6 +550,18 @@ export default function Student360ProfileModal({
           >
             <Award className="w-3.5 h-3.5" />
             <span>৭. ফলাফল ও নম্বর</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("fees")}
+            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
+              activeTab === "fees"
+                ? "border-indigo-600 text-indigo-700 bg-white dark:bg-slate-900 shadow-xs rounded-t-lg"
+                : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>৮. ফি ও হিসাব (Accounts)</span>
           </button>
 
           <button
@@ -1101,6 +1149,129 @@ export default function Student360ProfileModal({
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: FEES & ACCOUNTS */}
+          {activeTab === "fees" && (
+            <div className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xs space-y-6 animate-in fade-in duration-150">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-emerald-600" />
+                    <span>শিক্ষার্থী ফি ও পেমেন্ট হিস্ট্রি (Tuition & Accounts)</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    মাসিক বেতন, সেশন চার্জ, সেমিস্টার পরীক্ষার ফি এবং বোর্ড রেজিস্ট্রেশনের কেন্দ্রীয় রসিদ
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded-full border border-emerald-200 dark:border-emerald-800 self-start sm:self-auto">
+                  {studentFees.length} টি ইনভয়েস প্রাপ্ত
+                </span>
+              </div>
+
+              {/* Summary Cards */}
+              {(() => {
+                const totalBilled = studentFees.reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
+                const totalPaid = studentFees.reduce((acc, inv) => acc + (inv.paidAmount || 0), 0);
+                const totalDue = studentFees.reduce((acc, inv) => acc + (inv.dueAmount || 0), 0);
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] uppercase font-bold text-slate-500">মোট ধার্যকৃত ফি</span>
+                      <p className="text-lg font-black text-slate-900 dark:text-white font-mono mt-0.5">৳ {totalBilled.toLocaleString()}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                      <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400">মোট পরিশোধিত</span>
+                      <p className="text-lg font-black text-emerald-700 dark:text-emerald-300 font-mono mt-0.5">৳ {totalPaid.toLocaleString()}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                      <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">বকেয়া পরিমাণ</span>
+                      <p className="text-lg font-black text-amber-700 dark:text-amber-300 font-mono mt-0.5">৳ {totalDue.toLocaleString()}</p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Fee Invoices List */}
+              {loadingFees ? (
+                <div className="p-8 text-center text-xs text-slate-400 animate-pulse">
+                  হিসাব ডাটাবেস থেকে ফি রেকর্ড লোড হচ্ছে...
+                </div>
+              ) : studentFees.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 dark:bg-slate-950 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                  <CreditCard className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500">এই শিক্ষার্থীর কোনো বকেয়া বা পূর্বতন রসিদ নেই।</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {studentFees.map((inv: any) => (
+                    <div
+                      key={inv.id || inv.invoiceNumber}
+                      className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1.5 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">
+                            {inv.invoiceNumber}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              inv.status === "PAID"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                : inv.status === "PARTIAL"
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                                : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                            }`}
+                          >
+                            {inv.status === "PAID" ? "পরিশোধিত" : inv.status === "PARTIAL" ? "আংশিক পরিশোধিত" : "বকেয়া"}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {inv.receiptDate ? new Date(inv.receiptDate).toLocaleDateString("bn-BD") : "তাৎক্ষণিক"}
+                          </span>
+                        </div>
+
+                        {/* Items breakdown */}
+                        <div className="text-xs text-slate-600 dark:text-slate-300">
+                          {Array.isArray(inv.items) && inv.items.length > 0 ? (
+                            inv.items.map((it: any, idx: number) => (
+                              <span key={idx} className="mr-3">
+                                • {it.titleBangla || it.head}: <strong>৳{it.amount}</strong>
+                              </span>
+                            ))
+                          ) : (
+                            <span>মাসিক টিউশন ও ল্যাব চার্জ</span>
+                          )}
+                        </div>
+
+                        {inv.transactionId && (
+                          <div className="text-[10px] font-mono text-slate-400">
+                            পেমেন্ট মাধ্যম: {inv.paymentMethod || "bKash"} • TrxID: {inv.transactionId}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end md:self-center shrink-0">
+                        <div className="text-right">
+                          <div className="text-xs font-bold text-slate-500">পরিশোধ: ৳{inv.paidAmount}</div>
+                          {inv.dueAmount > 0 && (
+                            <div className="text-[11px] font-bold text-rose-600">বকেয়া: ৳{inv.dueAmount}</div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => window.print()}
+                          className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-slate-500" />
+                          <span>রসিদ</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

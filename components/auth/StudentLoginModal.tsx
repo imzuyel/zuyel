@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   Lock,
   UserCheck,
@@ -38,7 +39,22 @@ export default function StudentLoginModal({
   onSuccess,
   defaultClass = "class-10",
 }: StudentLoginModalProps) {
-  if (isOpen !== undefined && !isOpen) return null;
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock body scroll while open
+  useEffect(() => {
+    if (isOpen !== false && mounted) {
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prevOverflow;
+      };
+    }
+  }, [isOpen, mounted]);
+
   // Modal flow modes: 'login' | 'change_password'
   const [modalMode, setModalMode] = useState<"login" | "change_password">("login");
 
@@ -55,13 +71,62 @@ export default function StudentLoginModal({
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  if (isOpen !== undefined && !isOpen) return null;
+  if (!mounted) return null;
+
   // Handle Login Submission
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
     setIsSubmitting(true);
 
-    const res = loginStudentAccount(loginRoll, loginPassword, selectedClass);
+    const cleanRoll = loginRoll.trim();
+    const cleanPass = loginPassword.trim();
+
+    try {
+      // 1. Attempt server-side auth verification first
+      const apiRes = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifier: cleanRoll,
+          password: cleanPass,
+          classLevel: selectedClass,
+          source: "student",
+        }),
+      }).catch(() => null);
+
+      if (apiRes && apiRes.ok) {
+        const apiData = await apiRes.json();
+        if (apiData.success && apiData.user) {
+          const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass);
+          setIsSubmitting(false);
+          setMessage({ text: apiData.message || "লগইন সফল হয়েছে!", isError: false });
+          setTimeout(() => {
+            if (typeof onSuccessLogin === "function") {
+              onSuccessLogin(res.account || {
+                studentName: apiData.user.fullName,
+                rollNumber: cleanRoll,
+                classLevel: selectedClass,
+                trade: "কারিগরি",
+                password: cleanPass,
+                createdAt: new Date().toISOString(),
+                isLoggedIn: true,
+                hasChangedDefaultPassword: cleanPass !== "1234",
+              });
+            } else if (typeof onSuccess === "function") {
+              onSuccess(res.account);
+            }
+            onClose();
+          }, 600);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Server auth fallback to local intelligence store:", e);
+    }
+
+    const res = loginStudentAccount(cleanRoll, cleanPass, selectedClass);
     setIsSubmitting(false);
 
     if (res.success) {
@@ -164,8 +229,8 @@ export default function StudentLoginModal({
     setLoginPassword(UNIVERSAL_DEFAULT_PASSWORD);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] min-h-dvh w-full overflow-y-auto bg-[#0F172A]/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-fade-in">
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-indigo-500/30 shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto my-auto flex flex-col">
         
         {/* Header */}
@@ -420,6 +485,7 @@ export default function StudentLoginModal({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

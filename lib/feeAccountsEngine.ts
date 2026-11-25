@@ -1,3 +1,5 @@
+import { getHybridFees, upsertHybridFee } from "@/lib/hybridStorageEngine";
+
 /**
  * Smart Fee and Accounts Collection Engine
  * Panchagarh Government Technical School and College (PTSC)
@@ -158,6 +160,14 @@ export class FeeAccountsManager {
   private static invoices: FeeInvoice[] = [...PTSC_INITIAL_FEE_INVOICES];
 
   public static getInvoices(): FeeInvoice[] {
+    try {
+      const hybrid = getHybridFees();
+      if (hybrid && hybrid.length > 0) {
+        return hybrid as FeeInvoice[];
+      }
+    } catch {
+      // Fallback to in-memory
+    }
     return this.invoices;
   }
 
@@ -171,10 +181,11 @@ export class FeeAccountsManager {
       status = "PARTIAL";
     }
 
+    const currentCount = this.getInvoices().length;
     const newInvoice: FeeInvoice = {
       ...data,
       id: `inv-${Date.now()}`,
-      invoiceNumber: `PTSC-FEE-2026-${String(this.invoices.length + 1).padStart(4, "0")}`,
+      invoiceNumber: `PTSC-FEE-2026-${String(currentCount + 1).padStart(4, "0")}`,
       totalAmount,
       dueAmount,
       status,
@@ -182,6 +193,11 @@ export class FeeAccountsManager {
     };
 
     this.invoices.unshift(newInvoice);
+    try {
+      upsertHybridFee(newInvoice);
+    } catch (err) {
+      console.warn("[FeeAccountsEngine] Failed to save fee to hybrid engine:", err);
+    }
     return newInvoice;
   }
 }

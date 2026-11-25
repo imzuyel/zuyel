@@ -496,6 +496,70 @@ export function getOfflineMockQuestions(params: QuizAiGeneratorParams): BtebQuiz
 }
 
 /**
+ * Strict Question Validation & Option Length Balancer:
+ * - Strips redundant prefix labels ("A.", "(ক)", "1.")
+ * - Balances option lengths so the correct answer isn't obvious
+ * - Enforces valid numeric correctAnswer index
+ * - Sets default timeLimit = 20 seconds
+ */
+export function validateAndBalanceOptions(
+  rawOptions: any[],
+  rawCorrectAnswer: any
+): { options: string[]; correctAnswer: number | boolean } {
+  if (!Array.isArray(rawOptions) || rawOptions.length < 2) {
+    return {
+      options: ["অপশন ক", "অপশন খ", "অপশন গ", "অপশন ঘ"],
+      correctAnswer: 0,
+    };
+  }
+
+  // Clean strings and remove duplicate letter prefixes
+  let options = rawOptions.map((opt) =>
+    String(opt || "")
+      .replace(/^[A-Da-dক-ঘ১-৪][\.\)\-\:\s]+/g, "")
+      .replace(/^["']|["']$/g, "")
+      .trim()
+  );
+
+  // If boolean
+  if (typeof rawCorrectAnswer === "boolean") {
+    return { options: ["সত্য (True)", "মিথ্যা (False)"], correctAnswer: rawCorrectAnswer };
+  }
+
+  // Resolve correctAnswer index
+  let correctIndex = 0;
+  if (typeof rawCorrectAnswer === "number" && rawCorrectAnswer >= 0 && rawCorrectAnswer < options.length) {
+    correctIndex = rawCorrectAnswer;
+  } else if (typeof rawCorrectAnswer === "string") {
+    const trimmed = rawCorrectAnswer.trim().toLowerCase();
+    const idx = options.findIndex((o) => o.toLowerCase() === trimmed || o.toLowerCase().includes(trimmed));
+    if (idx !== -1) {
+      correctIndex = idx;
+    } else if (/^[0-3]$/.test(trimmed)) {
+      correctIndex = parseInt(trimmed, 10);
+    } else if (trimmed === "a" || trimmed === "ক") correctIndex = 0;
+    else if (trimmed === "b" || trimmed === "খ") correctIndex = 1;
+    else if (trimmed === "c" || trimmed === "গ") correctIndex = 2;
+    else if (trimmed === "d" || trimmed === "ঘ") correctIndex = 3;
+  }
+
+  // Balance option lengths: prevent the correct option from sticking out by 2x+
+  const lengths = options.map((o) => o.length);
+  const avgDistractorLength =
+    lengths.filter((_, i) => i !== correctIndex).reduce((a, b) => a + b, 0) /
+    Math.max(1, lengths.length - 1);
+
+  if (options[correctIndex] && options[correctIndex].length > avgDistractorLength * 2.2) {
+    const parts = options[correctIndex].split(/[।,]/);
+    if (parts[0] && parts[0].trim().length >= 8) {
+      options[correctIndex] = parts[0].trim();
+    }
+  }
+
+  return { options, correctAnswer: correctIndex };
+}
+
+/**
  * Main AI Quiz Generator Engine using Google GenAI SDK with graceful offline fallback
  */
 export async function generateBtebQuizQuestions(
@@ -610,19 +674,15 @@ JSON ফরম্যাট নমুনা:
     if (Array.isArray(parsed) && parsed.length > 0) {
       let formattedQuestions: BtebQuizQuestion[] = parsed.map((q, idx) => {
         const detectedType = q.type || (q.pairs ? "matching" : q.acceptedAnswers ? "fill_blank" : typeof q.correctAnswer === "boolean" ? "true_false" : qType !== "mixed" ? qType : "mcq_single");
-        
+        const validated = validateAndBalanceOptions(q.options, q.correctAnswer);
+        const resolvedTimeLimit = typeof q.timeLimit === "number" && q.timeLimit >= 15 && q.timeLimit <= 60 ? q.timeLimit : 20;
+
         return {
           id: `ai-${Date.now()}-${idx + 1}`,
           type: detectedType as any,
           question: q.question || `টেকনিক্যাল প্রশ্ন ${idx + 1}`,
-          options: Array.isArray(q.options) && q.options.length >= 2 
-            ? q.options.map((opt: any) => String(opt).trim())
-            : ["অপশন ১", "অপশন ২", "অপশন ৩", "অপশন ৪"],
-          correctAnswer: typeof q.correctAnswer === "boolean"
-            ? q.correctAnswer
-            : typeof q.correctAnswer === "number" && q.correctAnswer >= 0
-            ? q.correctAnswer
-            : 0,
+          options: validated.options,
+          correctAnswer: validated.correctAnswer,
           correctIndices: Array.isArray(q.correctIndices) ? q.correctIndices : undefined,
           pairs: Array.isArray(q.pairs) && q.pairs.length > 0 ? q.pairs : undefined,
           items: Array.isArray(q.items) && q.items.length > 0 ? q.items : undefined,
@@ -630,15 +690,15 @@ JSON ফরম্যাট নমুনা:
           expectedAnswerKeyword: q.expectedAnswerKeyword || undefined,
           caseSensitive: !!q.caseSensitive,
           explanation: q.explanation || "কারিগরি পাঠ্যসূচি অনুযায়ী সঠিক উত্তর নির্বাচন করা হয়েছে।",
-          timeLimit: q.timeLimit && q.timeLimit >= 15 && q.timeLimit <= 90 ? q.timeLimit : 30,
+          timeLimit: resolvedTimeLimit,
           difficulty: q.difficulty || (params.difficulty && params.difficulty !== "Mixed" ? params.difficulty : "Medium"),
           trade: params.trade,
           topic: params.topic,
           points: 100,
           questionData: {
-            options: q.options,
-            correctIndex: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
-            correctAnswer: q.correctAnswer,
+            options: validated.options,
+            correctIndex: typeof validated.correctAnswer === "number" ? validated.correctAnswer : 0,
+            correctAnswer: validated.correctAnswer,
             pairs: q.pairs,
             items: q.items,
             acceptedAnswers: q.acceptedAnswers,

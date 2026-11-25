@@ -32,6 +32,95 @@ export interface PresentationTheme {
 }
 
 export const PRESENTATION_THEMES: PresentationTheme[] = [
+  // ====================================================================
+  // STRICT CONTRAST-PAIRED THEMES (DEFAULT & HIGH ACCESSIBILITY)
+  // ====================================================================
+  {
+    id: "twilight_indigo",
+    name: "Twilight Indigo (Default)",
+    nameBangla: "🌌 টুইলাইট ইন্ডিগো (ডিফল্ট)",
+    category: "Tech & Cyber",
+    isDark: true,
+    bgColor: "141C2E",
+    bgTailwind: "bg-[#141C2E]",
+    textColor: "F8FAFC",
+    subTextColor: "CBD5E1",
+    accentColor: "6366F1",
+    secondaryAccent: "38BDF8",
+    alertBg: "1E293B",
+    alertText: "FDE047",
+    badgeGradient: "from-indigo-500 to-cyan-500",
+    previewBorder: "border-indigo-500/60"
+  },
+  {
+    id: "midnight_cyber",
+    name: "Midnight Cyber",
+    nameBangla: "⚡ মিডনাইট সাইবার ডার্ক",
+    category: "Tech & Cyber",
+    isDark: true,
+    bgColor: "090D16",
+    bgTailwind: "bg-slate-950",
+    textColor: "F8FAFC",
+    subTextColor: "E2E8F0",
+    accentColor: "06B6D4",
+    secondaryAccent: "818CF8",
+    alertBg: "1E293B",
+    alertText: "F59E0B",
+    badgeGradient: "from-cyan-500 to-blue-600",
+    previewBorder: "border-cyan-500/60"
+  },
+  {
+    id: "emerald_tech",
+    name: "Emerald Tech",
+    nameBangla: "🌿 এমারেল্ড টেক ম্যাট্রিক্স",
+    category: "Engineering & TVET",
+    isDark: true,
+    bgColor: "062B20",
+    bgTailwind: "bg-emerald-950",
+    textColor: "F8FAFC",
+    subTextColor: "D1FAE5",
+    accentColor: "10B981",
+    secondaryAccent: "34D399",
+    alertBg: "064E3B",
+    alertText: "FDE047",
+    badgeGradient: "from-emerald-500 to-teal-600",
+    previewBorder: "border-emerald-500/60"
+  },
+  {
+    id: "sunset_slate",
+    name: "Sunset Slate",
+    nameBangla: "🌅 সানসেট স্লেট ডার্ক",
+    category: "Vibrant & Creative",
+    isDark: true,
+    bgColor: "1E1B2E",
+    bgTailwind: "bg-slate-900",
+    textColor: "F8FAFC",
+    subTextColor: "E2E8F0",
+    accentColor: "F97316",
+    secondaryAccent: "EC4899",
+    alertBg: "2D1F38",
+    alertText: "FBBF24",
+    badgeGradient: "from-orange-500 to-pink-600",
+    previewBorder: "border-orange-500/60"
+  },
+  {
+    id: "clean_academic_light",
+    name: "Clean Academic Light",
+    nameBangla: "🏛️ প্রাতিষ্ঠানিক ক্লিন লাইট",
+    category: "Corporate & Executive",
+    isDark: false,
+    bgColor: "F8FAFC",
+    bgTailwind: "bg-slate-50",
+    textColor: "0F172A",
+    subTextColor: "334155",
+    accentColor: "2563EB",
+    secondaryAccent: "059669",
+    alertBg: "FEF3C7",
+    alertText: "92400E",
+    badgeGradient: "from-blue-600 to-emerald-600",
+    previewBorder: "border-blue-400"
+  },
+
   // 1. Tech & Cyber Category (12 Themes)
   {
     id: "cyber_cyan",

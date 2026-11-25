@@ -1227,4 +1227,217 @@ model ChapterContentItemProgress {
   @@map("chapter_content_item_progress")
 }
 
+// ==========================================
+// INSTITUTIONAL OPERATIONS & HYBRID STORAGE EXTENSIONS
+// ==========================================
+
+/// ক্লাস রুটিন পিরিয়ড ও স্লট (Class Routine Slot)
+model RoutineSlot {
+  id           Int      @id @default(autoincrement())
+  dayOfWeek    String   @db.VarChar(20) // "Sunday", "Monday", ...
+  periodNumber Int      @default(1)     // 1 to 7
+  startTime    String   @db.VarChar(20) // "09:00 AM"
+  endTime      String   @db.VarChar(20) // "09:45 AM"
+  classId      Int      @default(9)
+  className    String   @db.VarChar(100)
+  section      String   @default("A") @db.VarChar(20)
+  shift        String   @default("FIRST_SHIFT") @db.VarChar(50)
+  tradeCode    String?  @db.VarChar(50)
+  subjectCode  String   @db.VarChar(50)
+  subjectName  String   @db.VarChar(150)
+  teacherId    Int?
+  teacherName  String   @db.VarChar(150)
+  roomNumber   String   @default("101") @db.VarChar(50)
+  academicYear String   @default("2026") @db.VarChar(20)
+  status       String   @default("Active") @db.VarChar(30)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([dayOfWeek, classId, section])
+  @@index([teacherId, dayOfWeek])
+  @@index([academicYear])
+  @@map("routine_slots")
+}
+
+/// শিক্ষক অনুপস্থিতিতে স্বয়ংক্রিয় বদলি ক্লাস (Teacher Auto-Substitution Record)
+model TeacherSubstitution {
+  id                  Int      @id @default(autoincrement())
+  date                String   @db.VarChar(20) // YYYY-MM-DD
+  originalTeacherId   Int
+  originalTeacher     String   @db.VarChar(150)
+  substituteTeacherId Int
+  substituteTeacher   String   @db.VarChar(150)
+  periodNumber        Int      @default(1)
+  timeSlot            String   @db.VarChar(50)
+  className           String   @db.VarChar(100)
+  subjectName         String   @db.VarChar(150)
+  reason              String?  @db.Text
+  status              String   @default("Assigned") @db.VarChar(50)
+  notified            Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([date, originalTeacherId])
+  @@index([date, substituteTeacherId])
+  @@map("teacher_substitutions")
+}
+
+/// প্রাতিষ্ঠানিক ও বোর্ড পরীক্ষা মাস্টার (Exam Master Definition)
+model Exam {
+  id             Int      @id @default(autoincrement())
+  examId         String   @unique @db.VarChar(50)
+  name           String   @db.VarChar(150)
+  nameBangla     String   @db.VarChar(150)
+  examType       String   @default("Term") @db.VarChar(50)
+  session        String   @default("2026") @db.VarChar(20)
+  startDate      String   @db.VarChar(30)
+  endDate        String   @db.VarChar(30)
+  classId        Int?
+  tradeId        Int?
+  fullMarks      Float    @default(100)
+  passPercentage Float    @default(40.0)
+  status         String   @default("Active") @db.VarChar(50)
+  rulesJson      String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([session, status])
+  @@index([examType])
+  @@map("exams")
+}
+
+/// চূড়ান্ত পরীক্ষার ফলাফল ও গ্রেডশিট (Tabulated Examination Result)
+model Result {
+  id          Int      @id @default(autoincrement())
+  studentId   Int
+  studentRoll Int
+  studentName String   @db.VarChar(150)
+  className   String   @db.VarChar(100)
+  tradeCode   String?  @db.VarChar(50)
+  session     String   @default("2026") @db.VarChar(20)
+  examName    String   @db.VarChar(150)
+  totalMarks  Float    @default(0)
+  gpa         Float    @default(0.0)
+  grade       String   @default("F") @db.VarChar(10)
+  isPassed    Boolean  @default(false)
+  detailsJson String?  @db.LongText
+  publishedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([studentId, examName, session], name: "unique_student_exam_result")
+  @@index([studentRoll, session])
+  @@index([className, tradeCode])
+  @@index([isPassed, grade])
+  @@map("results")
+}
+
+/// মাল্টিমিডিয়া প্রেজেন্টেশন ও স্লাইড ডেক (Interactive Presentation Deck)
+model Presentation {
+  id          String   @id @default(uuid())
+  title       String   @db.VarChar(255)
+  className   String   @db.VarChar(100)
+  trade       String   @default("All") @db.VarChar(100)
+  subject     String   @db.VarChar(150)
+  theme       String   @default("twilight_indigo") @db.VarChar(100)
+  slideCount  Int      @default(5)
+  slidesJson  String   @db.LongText
+  author      String   @default("PTSC Faculty") @db.VarChar(150)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([className, trade])
+  @@index([theme])
+  @@map("presentations")
+}
+
+/// লাইভ ও অনলাইন কুইজ ফাইনাল ফলাফল আর্কাইভ (Archived Quiz Results & Rank Sheet)
+model QuizResult {
+  id              String   @id @default(uuid())
+  quizId          Int
+  quizTitle       String   @db.VarChar(200)
+  sessionPin      String?  @db.VarChar(20)
+  totalPlayers    Int      @default(0)
+  winnerName      String?  @db.VarChar(150)
+  winnerScore     Int      @default(0)
+  averageScore    Float    @default(0.0)
+  leaderboardJson String   @db.LongText
+  completedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([quizId])
+  @@index([sessionPin])
+  @@index([completedAt])
+  @@map("quiz_results")
+}
+
+/// ফি প্রদান ও হিসাব লেনদেন লেজার (Fee Payment Transaction Ledger)
+model FeeTransaction {
+  id            Int      @id @default(autoincrement())
+  transactionId String   @unique @db.VarChar(100)
+  invoiceId     Int?
+  studentId     Int
+  studentRoll   Int
+  studentName   String   @db.VarChar(150)
+  className     String   @db.VarChar(100)
+  feeType       String   @db.VarChar(100)
+  amount        Float    @default(0)
+  paymentMethod String   @default("Cash") @db.VarChar(50)
+  receivedBy    String   @default("Accounts Office") @db.VarChar(150)
+  status        String   @default("PAID") @db.VarChar(30)
+  receiptNumber String?  @db.VarChar(100)
+  remarks       String?  @db.Text
+  paidAt        DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([studentId, status])
+  @@index([studentRoll])
+  @@index([transactionId])
+  @@index([paidAt])
+  @@map("fee_transactions")
+}
+
+/// অভিভাবক ও শিক্ষক এসএমএস হিস্ট্রি লগ (Guardian SMS Gateway Log)
+model SmsLog {
+  id              Int      @id @default(autoincrement())
+  recipientMobile String   @db.VarChar(30)
+  recipientName   String?  @db.VarChar(150)
+  studentRoll     Int?
+  className       String?  @db.VarChar(100)
+  messageType     String   @default("General") @db.VarChar(50)
+  messageContent  String   @db.Text
+  gatewayProvider String   @default("Teletalk_Gov_SMS") @db.VarChar(100)
+  status          String   @default("SENT") @db.VarChar(30)
+  sentAt          DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([recipientMobile])
+  @@index([studentRoll])
+  @@index([messageType])
+  @@index([sentAt])
+  @@map("sms_logs")
+}
+
+/// প্রতিষ্ঠান সামগ্রিক কনফিগারেশন ও সেটিংস (Institutional Global Settings)
+model SystemSetting {
+  id               Int      @id @default(autoincrement())
+  instituteName    String   @default("Panchagarh Government Technical School & College") @db.VarChar(255)
+  instituteNameBn  String   @default("পঞ্চগড় সরকারি টেকনিক্যাল স্কুল ও কলেজ") @db.VarChar(255)
+  eiinNumber       String   @default("132244") @db.VarChar(50)
+  collegeCode      String   @default("PTSC-5000") @db.VarChar(50)
+  address          String   @default("Panchagarh-5000, Bangladesh") @db.VarChar(255)
+  principalName    String   @default("Md. Rafiqul Islam") @db.VarChar(150)
+  contactPhone     String   @default("01712-345678") @db.VarChar(50)
+  contactEmail     String   @default("info@pgtsc.gov.bd") @db.VarChar(120)
+  academicYear     String   @default("2026") @db.VarChar(20)
+  storageEngine    String   @default("HYBRID") @db.VarChar(50)
+  themeDefault     String   @default("twilight") @db.VarChar(50)
+  smsGatewayActive Boolean  @default(true)
+  settingsJson     String?  @db.LongText
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+
+  @@map("system_settings")
+}
+
 

@@ -3,6 +3,7 @@ import { institutionalDb, ExamMark, ExamMarkAuditEntry } from "@/lib/database";
 import { calculateContinuousAssessment, calculateGradeAndGP, isTradeApplicable } from "@/lib/utils";
 import { calculateBtebContinuousBreakdown, calculateSubjectTotalAndGrade } from "@/lib/resultCalculation";
 import { requireTeacherOrAdmin } from "@/lib/serverAuthGuard";
+import { getHybridMarks, upsertHybridMarks } from "@/lib/hybridStorageEngine";
 
 export async function GET(req: Request) {
   try {
@@ -17,7 +18,20 @@ export async function GET(req: Request) {
     const tradeApplicable = classId ? isTradeApplicable(classId) : true;
     const tradeId = tradeApplicable && rawTradeIdParam && rawTradeIdParam !== "all" ? Number(rawTradeIdParam) : null;
 
-    let list = [...institutionalDb.marks];
+    const hybridList = getHybridMarks();
+    const map = new Map<string, ExamMark>();
+
+    institutionalDb.marks.forEach((m) => {
+      const key = `${m.studentId}_${m.subjectCode}_${m.examId || ""}`;
+      map.set(key, m);
+    });
+
+    hybridList.forEach((m: any) => {
+      const key = `${m.studentId}_${m.subjectCode}_${m.examId || ""}`;
+      map.set(key, { ...(map.get(key) || {}), ...m } as ExamMark);
+    });
+
+    let list = Array.from(map.values());
 
     if (classId) {
       list = list.filter((m) => m.classId === classId || !m.classId);
@@ -58,6 +72,7 @@ export async function POST(req: Request) {
     if (body.batch && Array.isArray(body.items)) {
       const { items, subjectCode, subjectName, subjectNameBangla, maxMarks = 100, passMarks = 33, assessmentDates } = body;
       let savedCount = 0;
+      const savedMarksToSync: ExamMark[] = [];
 
       for (const item of items) {
         const student = institutionalDb.students.find((s) => s.id === Number(item.studentId));
@@ -103,6 +118,7 @@ export async function POST(req: Request) {
         );
 
         const datesToSave = item.assessmentDates || assessmentDates;
+        let recordRef: ExamMark;
 
         if (existingIndex !== -1) {
           institutionalDb.marks[existingIndex] = {
@@ -133,6 +149,7 @@ export async function POST(req: Request) {
             grade: evaluation.grade,
             gradePoint: evaluation.gradePoint,
           };
+          recordRef = institutionalDb.marks[existingIndex];
         } else {
           const newRecord: ExamMark = {
             id: Date.now() + Math.floor(Math.random() * 10000),
@@ -180,8 +197,14 @@ export async function POST(req: Request) {
             publicationStatus: "Draft",
           };
           institutionalDb.marks.push(newRecord);
+          recordRef = newRecord;
         }
+        savedMarksToSync.push(recordRef);
         savedCount++;
+      }
+
+      if (savedMarksToSync.length > 0) {
+        upsertHybridMarks(savedMarksToSync);
       }
 
       return NextResponse.json({
@@ -324,6 +347,8 @@ export async function POST(req: Request) {
       institutionalDb.marks.push(updatedOrNewMark);
     }
 
+    upsertHybridMarks([updatedOrNewMark]);
+
     return NextResponse.json({
       success: true,
       mark: updatedOrNewMark,
@@ -389,6 +414,8 @@ export async function PUT(req: Request) {
       gradePoint,
       auditHistory: [...(current.auditHistory || []), auditEntry],
     };
+
+    upsertHybridMarks([institutionalDb.marks[existingIndex]]);
 
     return NextResponse.json({
       success: true,

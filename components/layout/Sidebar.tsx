@@ -568,7 +568,7 @@ export default function Sidebar({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              className="fixed top-0 bottom-0 left-0 w-72 sm:w-80 z-50 bg-slate-950/95 backdrop-blur-2xl border-r border-slate-800/90 flex flex-col justify-between p-3.5 shadow-2xl md:hidden text-slate-200 select-none font-sans"
+              className="fixed top-0 bottom-0 left-0 w-72 sm:w-80 z-50 bg-[#101726]/95 dark:bg-[#101726]/95 [data-mode=dark]:bg-slate-950/95 backdrop-blur-2xl border-r border-slate-700/40 flex flex-col justify-between p-3.5 shadow-2xl md:hidden text-slate-200 select-none font-sans"
             >
               {renderNavContent(true, handleCloseMobile)}
             </motion.aside>
@@ -589,7 +589,7 @@ export default function Sidebar({
         onMouseLeave={() => {
           if (isCollapsed) setIsHovered(false);
         }}
-        className={`hidden md:flex h-screen max-h-screen sticky top-0 bg-slate-950/95 text-slate-200 border-r border-slate-800/90 flex-col select-none font-sans shrink-0 z-30 shadow-2xl overflow-hidden ${
+        className={`hidden md:flex h-screen max-h-screen sticky top-0 bg-[#101726]/95 dark:bg-[#101726]/95 [data-mode=dark]:bg-slate-950/95 text-slate-200 border-r border-slate-700/40 flex-col select-none font-sans shrink-0 z-30 shadow-2xl overflow-hidden ${
           !isVisuallyExpanded ? "p-2.5" : "p-3.5"
         } ${className}`}
         aria-label="Institutional Unified Master Sidebar"

@@ -1,12 +1,25 @@
 import { NextResponse } from "next/server";
 import { institutionalDb, InstitutionalExam } from "@/lib/database";
+import { getHybridExams, upsertHybridExam } from "@/lib/hybridStorageEngine";
 
 export async function GET() {
   try {
+    const hybridExams = getHybridExams();
+    const dbExams = institutionalDb.exams || [];
+    const map = new Map<any, any>();
+
+    dbExams.forEach((e) => map.set(e.id, e));
+    hybridExams.forEach((e: any) => {
+      const existing = map.get(e.id);
+      map.set(e.id, { ...(existing || {}), ...e });
+    });
+
+    const unified = Array.from(map.values());
+
     return NextResponse.json({
       success: true,
-      exams: institutionalDb.exams,
-      total: institutionalDb.exams.length,
+      exams: unified,
+      total: unified.length,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -54,6 +67,7 @@ export async function POST(req: Request) {
     };
 
     institutionalDb.exams.push(newExam);
+    upsertHybridExam(newExam);
 
     return NextResponse.json({
       success: true,

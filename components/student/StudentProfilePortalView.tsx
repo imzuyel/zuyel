@@ -33,6 +33,7 @@ import { useAuth } from "@/context/AuthContext";
 import PublicHeader from "@/components/layout/PublicHeader";
 import PublicFooter from "@/components/layout/PublicFooter";
 import StudentLoginModal from "@/components/auth/StudentLoginModal";
+import LmsStrictLoginGuard from "@/components/learning/LmsStrictLoginGuard";
 import {
   getActiveStudentAccount,
   logoutStudentAccount,
@@ -83,7 +84,7 @@ const AVATAR_PRESETS = [
 
 export default function StudentProfilePortalView() {
   const router = useRouter();
-  const { logout, showToast, updateCurrentUser } = useAuth();
+  const { isAuthReady, isLoggedIn, currentUser, logout, showToast, updateCurrentUser } = useAuth();
 
   const [student, setStudent] = useState<StudentData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -253,6 +254,36 @@ export default function StudentProfilePortalView() {
     setStudent(null);
     router.push("/");
   };
+
+  // Prevent hydration flicker before auth restoration completes
+  if (!isAuthReady) {
+    return (
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-[#0F172A] text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-semibold text-slate-300">শিক্ষার্থী সেশন যাচাই করা হচ্ছে...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Strict Login Guard: Do not mount protected profile if not authenticated
+  const isAuthStudent = (isLoggedIn && currentUser?.role === "student") || student !== null;
+  if (!isAuthStudent) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-between">
+        <PublicHeader />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <LmsStrictLoginGuard
+            onSuccessLogin={() => fetchProfile()}
+            title="শিক্ষার্থী প্রোফাইল ও সেলফ-সার্ভিস"
+            subtitle="আপনার প্রোফাইল, উপস্থিতি ও রেজাল্ট দেখতে অনুগ্রহ করে শিক্ষার্থী হিসেবে লগইন করুন।"
+          />
+        </div>
+        <PublicFooter />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col justify-between font-sans">

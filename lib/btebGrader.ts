@@ -183,12 +183,27 @@ export function calculateSubjectGrade(
     };
   }
 
-  // Individual Passing Verification
+  // Individual & Dual-Component BTEB Passing Verification
   const failedParts: string[] = [];
   if (!tcPassed) failedParts.push(`TC (<${tcPass})`);
   if (pcBreakdown && !pcPassed) failedParts.push(`PC (<${pcBreakdown.passMarks})`);
   if (!tfPassed) failedParts.push(`TF (<${tfPass})`);
   if (pfBreakdown && !pfPassed) failedParts.push(`PF (<${pfBreakdown.passMarks})`);
+
+  // Mandatory BTEB Dual-Component Pass Rule: (TC+TF >= 40%) AND (PC+PF >= 40%)
+  const theoryTotalObtained = tcObtained + tfObtained;
+  const theoryTotalFull = tcFull + tfFull;
+  const theoryPassMarks = Math.round(theoryTotalFull * (passPercent / 100));
+  const theoryPassed = theoryTotalObtained >= theoryPassMarks;
+
+  const hasPractical = Boolean((subject.pcFullMarks && subject.pcFullMarks > 0) || (subject.pfFullMarks && subject.pfFullMarks > 0));
+  const practicalTotalObtained = (pcBreakdown ? pcBreakdown.obtained : 0) + (pfBreakdown ? pfBreakdown.obtained : 0);
+  const practicalTotalFull = (pcBreakdown ? pcBreakdown.fullMarks : 0) + (pfBreakdown ? pfBreakdown.fullMarks : 0);
+  const practicalPassMarks = Math.round(practicalTotalFull * (passPercent / 100));
+  const practicalPassed = !hasPractical || practicalTotalObtained >= practicalPassMarks;
+
+  if (!theoryPassed) failedParts.push(`তত্ত্বীয় মোট (TC+TF=${theoryTotalObtained} < ${theoryPassMarks})`);
+  if (hasPractical && !practicalPassed) failedParts.push(`ব্যবহারিক মোট (PC+PF=${practicalTotalObtained} < ${practicalPassMarks})`);
 
   const hasIndividualFailure = failedParts.length > 0;
 

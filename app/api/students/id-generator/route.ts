@@ -8,6 +8,7 @@ import {
 } from "@/lib/studentIdEngine";
 import { doesClassHaveTrade, parseClassNumeric } from "@/lib/academicStructure";
 import { verifyBackendAuthorization } from "@/lib/serverAuthGuard";
+import { getHybridStore, saveHybridStore, upsertHybridIdCard } from "@/lib/hybridStorageEngine";
 
 
 // GET: Institutional ID System Status, Integrity Scan, Config, and Audit Logs
@@ -220,8 +221,29 @@ export async function POST(req: NextRequest) {
             timestamp: new Date().toISOString(),
             actionType: "bulk_generate",
           });
+
+          upsertHybridIdCard({
+            studentId: cleanProposed,
+            cardNo: `PGTSC-2026-ID${student.roll}`,
+            roll: student.roll,
+            name: student.nameBangla || student.name,
+            className: student.className,
+            trade: student.tradeNameBangla || student.tradeName,
+            session: "2026",
+            status: "ISSUED",
+          });
         }
       }
+
+      // Sync to Hybrid Store
+      try {
+        const store = getHybridStore();
+        for (const u of updatedIds) {
+          const s = store.students.find((std) => Number(std.roll) === Number(u.id) || std.id === String(u.id));
+          if (s) s.studentId = u.newId;
+        }
+        saveHybridStore(store);
+      } catch {}
 
       // Append new audit logs
       institutionalDb.idAuditLogs.push(...newLogs);
@@ -301,6 +323,23 @@ export async function POST(req: NextRequest) {
 
       student.studentId = cleanNewId;
       institutionalDb.idAuditLogs.push(log);
+
+      try {
+        const store = getHybridStore();
+        const s = store.students.find((std) => Number(std.roll) === Number(student.roll) || std.id === String(student.id));
+        if (s) s.studentId = cleanNewId;
+        saveHybridStore(store);
+        upsertHybridIdCard({
+          studentId: cleanNewId,
+          cardNo: `PGTSC-2026-ID${student.roll}`,
+          roll: student.roll,
+          name: student.nameBangla || student.name,
+          className: student.className,
+          trade: student.tradeNameBangla || student.tradeName,
+          session: "2026",
+          status: "ISSUED",
+        });
+      } catch {}
 
       return NextResponse.json({
         success: true,

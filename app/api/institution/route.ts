@@ -5,9 +5,18 @@ import { apiSuccess, apiError } from "@/lib/apiResponse";
 
 export async function GET() {
   try {
-    return apiSuccess(institutionalDb.institution, {
+    let institutionInfo = institutionalDb.institution;
+    try {
+      const { getHybridInstitutionSettings } = await import("@/lib/hybridStorageEngine");
+      const hybridInst = getHybridInstitutionSettings();
+      if (hybridInst) {
+        institutionInfo = { ...institutionInfo, ...hybridInst };
+      }
+    } catch {}
+
+    return apiSuccess(institutionInfo, {
       extraKeys: {
-        institution: institutionalDb.institution,
+        institution: institutionInfo,
         trades: institutionalDb.trades,
         classes: institutionalDb.classes,
         stats: {
@@ -95,6 +104,11 @@ export async function PUT(req: Request) {
       ...institutionalDb.institution,
       ...sanitizedUpdates,
     };
+
+    try {
+      const { saveHybridInstitutionSettings } = await import("@/lib/hybridStorageEngine");
+      saveHybridInstitutionSettings(institutionalDb.institution);
+    } catch {}
 
     return apiSuccess(institutionalDb.institution, {
       message: "প্রতিষ্ঠান পরিচিতি তথ্য সফলভাবে হালনাগাদ করা হয়েছে।",

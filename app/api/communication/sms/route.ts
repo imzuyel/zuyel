@@ -7,26 +7,40 @@ import {
   BTEB_SMS_TEMPLATES,
   calculateSmsCount,
 } from "@/lib/smsGatewayEngine";
+import { getHybridSmsLogs, getHybridStore, recordHybridSmsLog } from "@/lib/hybridStorageEngine";
 
 export async function GET(req: NextRequest) {
   try {
-    const allStudents = institutionalDb.students || [];
+    const hybridStore = getHybridStore();
+    const allStudents = hybridStore.students?.length ? hybridStore.students : (institutionalDb.students || []);
     const absentStudents = allStudents.filter((s: any) => s.isPresentToday === false);
 
+    // Merge hybrid logs with globalSmsLogs
+    const hybridLogs = getHybridSmsLogs();
+    const seenIds = new Set<string>();
+    const mergedLogs: any[] = [];
+
+    for (const log of [...hybridLogs, ...globalSmsLogs]) {
+      if (log && log.id && !seenIds.has(String(log.id))) {
+        seenIds.add(String(log.id));
+        mergedLogs.push(log);
+      }
+    }
+
     // Calculate aggregated metrics
-    const totalDispatched = globalSmsLogs.length;
-    const totalCost = globalSmsLogs.reduce((acc, curr) => acc + (curr.cost || 0), 0);
+    const totalDispatched = mergedLogs.length;
+    const totalCost = mergedLogs.reduce((acc, curr) => acc + (curr.cost || 0), 0);
     const simulatedBalance = Math.max(0, 5000 - totalCost);
 
     return NextResponse.json({
       success: true,
-      logs: globalSmsLogs,
+      logs: mergedLogs,
       stats: {
         totalDispatched,
         totalCost: Number(totalCost.toFixed(2)),
         simulatedBalance: Number(simulatedBalance.toFixed(2)),
-        todayCount: globalSmsLogs.filter(
-          (l) => new Date(l.createdAt).toDateString() === new Date().toDateString()
+        todayCount: mergedLogs.filter(
+          (l) => new Date(l.createdAt || l.timestamp).toDateString() === new Date().toDateString()
         ).length,
         absentCount: absentStudents.length || 8,
         totalStudentsCount: allStudents.length || 320,
@@ -53,6 +67,9 @@ export async function POST(req: NextRequest) {
       individualPhone = "",
       studentName = "শিক্ষার্থী",
       roll = "১০১",
+      examName = "১ম পর্ব সমাপনী পরীক্ষা",
+      gpa = "৪.৮৮",
+      recipients: explicitRecipients = [],
     } = body || {};
 
     if (!message || !message.trim()) {
@@ -62,6 +79,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const hybridStore = getHybridStore();
+    const allStudents = hybridStore.students?.length ? hybridStore.students : (institutionalDb.students || []);
+
     // Determine target recipient list
     let recipients: {
       phone: string;
@@ -69,11 +89,21 @@ export async function POST(req: NextRequest) {
       studentName: string;
       roll: string;
       trade: string;
+      examName?: string;
+      gpa?: string;
     }[] = [];
 
-    const allStudents = institutionalDb.students || [];
-
-    if (targetAudience === "individual") {
+    if (Array.isArray(explicitRecipients) && explicitRecipients.length > 0) {
+      recipients = explicitRecipients.map((r: any) => ({
+        phone: r.phone || r.guardianPhone || "01712345678",
+        name: r.name || r.guardianName || `${r.studentName || "শিক্ষার্থী"}-এর অভিভাবক`,
+        studentName: r.studentName || "শিক্ষার্থী",
+        roll: String(r.roll || "১০১"),
+        trade: r.trade || r.tradeName || "ভোকেশনাল",
+        examName: r.examName || examName,
+        gpa: r.gpa || gpa,
+      }));
+    } else if (targetAudience === "individual") {
       if (!individualPhone) {
         return NextResponse.json(
           { success: false, message: "নির্দিষ্ট মোবাইল নম্বর দেওয়া আবশ্যক।" },
@@ -86,14 +116,33 @@ export async function POST(req: NextRequest) {
         studentName: studentName || "শিক্ষার্থী",
         roll: roll || "১০১",
         trade: selectedTrade !== "all" ? selectedTrade : "ভোকেশনাল",
+        examName,
+        gpa,
       });
     } else {
       let filtered: any[] = allStudents;
 
       if (targetAudience === "absent") {
+        // Absence Alerts (অনুপস্থিতি সতর্কবার্তা)
         const absents = allStudents.filter((s: any) => s.isPresentToday === false);
         filtered = absents.length > 0 ? absents : allStudents.slice(0, 4);
-      } else if (targetAudience === "trade") {
+      } else if (targetAudience === "exam" || targetAudience === "quiz" || templateType === "result") {
+        // Quiz & Exam Score Alerts (লাইভ কুইজ ও পরীক্ষার ফলাফল)
+        if (selectedClass !== "all") {
+          filtered = filtered.filter((s: any) => String(s.classId) === String(selectedClass) || s.className === selectedClass);
+        }
+        if (selectedTrade !== "all") {
+          filtered = filtered.filter(
+            (s: any) =>
+              (s.tradeName && s.tradeName.toLowerCase().includes(selectedTrade.toLowerCase())) ||
+              (s.tradeCode && s.tradeCode.toLowerCase().includes(selectedTrade.toLowerCase()))
+          );
+        }
+        if (filtered.length === 0) {
+          filtered = allStudents.slice(0, 6);
+        }
+      } else if (targetAudience === "trade" || targetAudience === "department") {
+        // Departmental Notices (জরুরি বিভাগীয় নোটিশ)
         if (selectedTrade !== "all") {
           filtered = allStudents.filter(
             (s: any) =>
@@ -104,6 +153,9 @@ export async function POST(req: NextRequest) {
         if (filtered.length === 0) {
           filtered = allStudents.slice(0, 5);
         }
+      } else if (selectedClass !== "all") {
+        filtered = allStudents.filter((s: any) => String(s.classId) === String(selectedClass) || s.className === selectedClass);
+        if (filtered.length === 0) filtered = allStudents.slice(0, 5);
       }
 
       recipients = filtered.map((s: any) => ({
@@ -112,6 +164,8 @@ export async function POST(req: NextRequest) {
         studentName: s.name,
         roll: String(s.roll || "১০১"),
         trade: s.tradeName || "ভোকেশনাল",
+        examName,
+        gpa,
       }));
     }
 
@@ -128,16 +182,20 @@ export async function POST(req: NextRequest) {
         student_name: rec.studentName,
         roll: rec.roll,
         trade: rec.trade,
-        gpa: "৪.৮৮",
-        exam_name: "১ম পর্ব সমাপনী পরীক্ষা",
+        gpa: rec.gpa || "৪.৮৮",
+        exam_name: rec.examName || "১ম পর্ব সমাপনী পরীক্ষা",
         date: nowBangla,
         institution: "পঞ্চগড় সরকারি টিএসসি",
       });
 
+      const effectiveTemplateType = (templateType === "absence" || templateType === "result" || templateType === "emergency")
+        ? templateType
+        : "custom";
+
       const log = await sendSmsGateway(
         rec.phone,
         formattedMsg,
-        templateType,
+        effectiveTemplateType,
         rec.studentName,
         rec.name
       );
@@ -146,12 +204,14 @@ export async function POST(req: NextRequest) {
       totalCost += log.cost;
     }
 
+    const updatedLogs = getHybridSmsLogs();
+
     return NextResponse.json({
       success: true,
       message: `${sentCount} জন অভিভাবকের মোবাইলে এসএমএস সফলভাবে প্রেরণ করা হয়েছে।`,
       sentCount,
       totalCost: Number(totalCost.toFixed(2)),
-      logs: globalSmsLogs.slice(0, 25),
+      logs: updatedLogs.slice(0, 30),
     });
   } catch (error: any) {
     console.error("[SMS Gateway Error]:", error);
