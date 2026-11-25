@@ -1,5 +1,5 @@
 # PROJECT PROGRESS TRACKER
-> **Status:** 🎉 **100% COMPLETED & PRODUCTION READY** (Phases 1 through 33 fully validated with 0 TypeScript compilation errors)
+> **Status:** 🎉 **100% COMPLETED & PRODUCTION READY** (Phases 1 through 34 fully validated with 0 TypeScript compilation errors)
 
 ## PHASE 1: Codebase Cleanup, Route Deduplication & Critical Security Lockdown
 
@@ -2208,6 +2208,26 @@
 - [x] **TASK 33.3: Clean, Vibrant Mobile-First Student View (`app/quiz/live/page.tsx`)**
   - [x] Updated Waiting Screen to `"✅ তুমি যুক্ত হয়েছ! (You're in!)"` with live classmate count and avatar bubbles.
   - [x] Upgraded student MCQ buttons to matching Kahoot 2x2 tactile color-coded blocks (`#E21B3C ▲`, `#1368CE ◆`, `#D89E00 ●`, `#26890C ■`), paused polling when tab hidden, and polished instant feedback (`🎉 সঠিক উত্তর! (+Points)` / `❌ ভুল উত্তর` + live rank).
+
+## PHASE 34: STOP ADMIN AUTO-RELOADS, UNLOCK STUDENT LIVE SCROLLING, MENTIMETER HOST EXIT GUARD, CROSS-DAY PAUSE/RESUME & QUIZ HISTORY
+
+- [x] **TASK 34.1: Eliminate Dev Fast-Refresh Reloads (`lib/liveSessionStore.ts`, `lib/hybridStorageEngine.ts`, `app/admin/page.tsx`)**
+  - [x] Moved `pgtsc-live-sessions.json` and `pgtsc-hybrid-local-db.json` out of `.next/cache` into `os.tmpdir()` with read-only legacy fallback hydration, preventing Next.js dev server file watcher / Fast Refresh reload loops.
+  - [x] Removed `window.location.reload()` from `app/admin/page.tsx` ErrorBoundary and removed unused `useRouter` / reload patterns from live presenter workspaces.
+
+- [x] **TASK 34.2: Unlock Vertical Scrolling on Student Quiz Pages (`app/quiz/layout.tsx`, `app/quiz/join/page.tsx`, `app/quiz/live/page.tsx`)**
+  - [x] Replaced `h-screen` / `max-h-screen` / `overflow-hidden` root containers with `min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12` across student live and join routes.
+  - [x] Added mount-time overflow reset (`document.body.style.overflow = "auto"`, `document.documentElement.style.overflow = "auto"`) and comfortable `py-6` padding on Waiting Lounge card.
+
+- [x] **TASK 34.3: Mentimeter-Style Host Exit Guard, Heartbeat & Strict Join Validation (`lib/liveSessionStore.ts`, `HostLiveFullscreenStage.tsx`, `/api/live-quizzes/sessions/join`, `/heartbeat`, `/pause`, `/resume`, `StudentModern3DJoinCard.tsx`, `app/quiz/live/page.tsx`)**
+  - [x] Added explicit 4-state lifecycle (`"WAITING" | "ACTIVE" | "PAUSED" | "ENDED"`) and `hostLastSeenAt` tracking with 8-second host heartbeat pings, `navigator.sendBeacon` on `beforeunload` / Exit, and automatic 25-second host inactivity timeout transitioning active sessions to `PAUSED`.
+  - [x] Enforced `INVALID_CODE` and `SESSION_NOT_LIVE` rejection on `/api/live-quizzes/sessions/join` (blocking paused/ended joins) and switched live `/quiz/live` students immediately to a `"⏸️ কুইজটি এখন বিরতিতে আছে (Paused by Teacher)"` screen with preserved score telemetry.
+
+- [x] **TASK 34.4 & 34.5: Cross-Day Pause/Resume, Smart Resume Modal & Persistent Quiz History Tab (`HostLiveFullscreenStage.tsx`, `UnifiedQuizMentimeterWorkspace.tsx`, `QuizSessionHistoryPanel.tsx`, `/api/live-quizzes/sessions`)**
+  - [x] Added `"⏸️ বিরতি ও সেভ (Pause & Resume Later)"` and `"🏁 কুইজ সমাপ্ত করুন (End & Archive)"` controls saving full `currentSlideIndex`, `players`, `scores`, and `answers` to `hybridStorageEngine` + MySQL `LiveSession`.
+  - [x] Added Mentimeter-style Smart Resume Modal (`QuizSmartResumeModal`) prompting `"▶️ আগের জায়গা থেকে চালু করুন"` vs `"🆕 নতুন সেশন শুরু করুন"`, plus returning-player Roll+Name matching across days.
+  - [x] Built `"📜 সেশন হিস্ট্রি (History)"` tab (`QuizSessionHistoryPanel`) showing all past & paused runs per quiz with student-by-student scores, per-question answers breakdown, accuracy analytics, and one-click Resume.
+
 
 
 

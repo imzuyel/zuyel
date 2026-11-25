@@ -50,9 +50,10 @@ import {
   GraduationCap,
   Zap,
   Globe,
+  History,
+  PauseCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { useRouter } from "next/navigation";
 import { institutionalDb, Quiz } from "@/lib/database";
 import {
   ACADEMIC_CLASSES,
@@ -70,6 +71,7 @@ import {
 import SmartAiSlideGeneratorModal from "./SmartAiSlideGeneratorModal";
 import DualDeviceInteractivePreviewModal from "./DualDeviceInteractivePreviewModal";
 import HostLiveFullscreenStage from "./HostLiveFullscreenStage";
+import QuizSessionHistoryPanel, { QuizSmartResumeModal } from "./QuizSessionHistoryPanel";
 
 // =============================================================================
 // SLIDE TYPES & TAXONOMY (Strict 3 Categories)
@@ -278,7 +280,7 @@ export async function compressImageFile(file: File, maxWidth = 800, quality = 0.
             resolve(webpData);
             return;
           }
-        } catch {}
+        } catch { }
         resolve(canvas.toDataURL("image/jpeg", quality));
       };
       img.onerror = reject;
@@ -408,8 +410,6 @@ export default function UnifiedQuizMentimeterWorkspace({
   onLiveStateChange,
   onExitLive,
 }: UnifiedQuizMentimeterWorkspaceProps) {
-  const router = useRouter();
-
   // Try to sync with GlobalAcademicContext safely
   let globalCtx: any = null;
   try {
@@ -419,9 +419,10 @@ export default function UnifiedQuizMentimeterWorkspace({
   }
 
   // ---------------------------------------------------------------------------
-  // VIEW SWITCHER: "gallery" (View 1) vs "studio" (View 2)
+  // VIEW SWITCHER: "gallery" (View 1) vs "studio" (View 2) & STUDIO SUB-TAB
   // ---------------------------------------------------------------------------
   const [activeView, setActiveView] = useState<"gallery" | "studio">("gallery");
+  const [studioTab, setStudioTab] = useState<"editor" | "history">("editor");
 
   // FULLSCREEN FOCUS MODE TOGGLE (Fixes the 4-column ERP sidebar cramp!)
   const [isFullscreenFocus, setIsFullscreenFocus] = useState<boolean>(false);
@@ -436,6 +437,16 @@ export default function UnifiedQuizMentimeterWorkspace({
   const [filterSubject, setFilterSubject] = useState<string>("all");
   const [availableFilterSubjects, setAvailableFilterSubjects] = useState<DynamicSubjectItem[]>([]);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
+
+  // SESSION HISTORY & SMART RESUME STATE (Tasks 4 & 5)
+  const [sessionHistory, setSessionHistory] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [resumePromptData, setResumePromptData] = useState<{
+    deck: DeckItem;
+    pausedSession: any;
+  } | null>(null);
+  const [isResumingOrStarting, setIsResumingOrStarting] = useState(false);
+  const [historyScope, setHistoryScope] = useState<"current" | "all">("current");
 
   // New Presentation Creation Modal State
   const [isCreateDeckModalOpen, setIsCreateDeckModalOpen] = useState(false);
@@ -491,6 +502,9 @@ export default function UnifiedQuizMentimeterWorkspace({
     pin: string;
     deck: DeckItem;
     scheduledStartTime?: string;
+    initialSlideIndex?: number;
+    initialStage?: string;
+    initialPlayers?: any[];
   } | null>(null);
 
   // AI GENERATOR MODAL STATE
@@ -687,9 +701,42 @@ export default function UnifiedQuizMentimeterWorkspace({
     }
   }, [currentDeck, activeView]);
 
+  const fetchSessionHistory = async (targetQuizId?: string) => {
+    setIsLoadingHistory(true);
+    try {
+      const qs = targetQuizId
+        ? `?quizId=${encodeURIComponent(targetQuizId)}&includeHistory=1`
+        : `?includeHistory=1`;
+      const res = await fetch(`/api/live-quizzes/sessions${qs}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.sessions)) {
+          setSessionHistory(data.sessions);
+        }
+      }
+    } catch {
+      // safe fallback
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
   useEffect(() => {
     fetchDecks();
+    fetchSessionHistory();
   }, []);
+
+  // Dismiss open Smart Resume modal with Esc
+  useEffect(() => {
+    if (!resumePromptData) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isResumingOrStarting) {
+        setResumePromptData(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [resumePromptData, isResumingOrStarting]);
 
   // Bi-directional sync: React to external GlobalAcademicContext changes
   useEffect(() => {
@@ -980,7 +1027,19 @@ export default function UnifiedQuizMentimeterWorkspace({
   const handleOpenDeckStudio = (deck: DeckItem) => {
     setCurrentDeck(deck);
     setCurrentSlideId(deck.slides[0]?.id || `slide-${Date.now()}`);
+    setStudioTab("editor");
     setActiveView("studio");
+  };
+
+  // Open quiz History tab directly from Gallery card or Studio
+  const handleOpenQuizHistory = (deck: DeckItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setCurrentDeck(deck);
+    setCurrentSlideId(deck.slides[0]?.id || `slide-${Date.now()}`);
+    setHistoryScope("current");
+    setStudioTab("history");
+    setActiveView("studio");
+    fetchSessionHistory(deck.id);
   };
 
   // Delete a deck with Loader2
@@ -1332,9 +1391,90 @@ export default function UnifiedQuizMentimeterWorkspace({
     }
   };
 
-  // Launch Fullscreen Live Presentation (Task 2: Auto-save + Strict Slide Normalization)
-  const handleLaunchLivePresentation = async (deckToLaunch: DeckItem) => {
+  // Resume an existing PAUSED session from its saved question (Task 4 & Task 5)
+  const handleResumePausedSession = async (pausedSess: any, deckOverride?: DeckItem) => {
+    if (!pausedSess?.id) return;
+    setIsResumingOrStarting(true);
     try {
+      const res = await fetch(`/api/live-quizzes/sessions/${pausedSess.id}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success || !data.session) {
+        showToast(data?.message || "সেশন পুনরায় চালু করতে সমস্যা হয়েছে।", "error");
+        return;
+      }
+
+      const resumed = data.session;
+      const matchedDeck =
+        deckOverride ||
+        decks.find((d) => String(d.id) === String(resumed.quizId || pausedSess.quizId)) ||
+        currentDeck;
+
+      const resolvedSlides =
+        Array.isArray(resumed.slides) && resumed.slides.length > 0
+          ? resumed.slides
+          : matchedDeck.slides;
+
+      setResumePromptData(null);
+      setActiveLivePresenterSession({
+        id: resumed.id,
+        pin: resumed.code || pausedSess.code,
+        deck: {
+          ...matchedDeck,
+          title: resumed.title || matchedDeck.title,
+          slides: resolvedSlides,
+        },
+        scheduledStartTime: resumed.scheduledStartTime || deckSettings.scheduledStartTime,
+        initialSlideIndex: Number(resumed.currentSlideIndex) || 0,
+        initialStage: resumed.stage || "READY_CHECK",
+        initialPlayers: Object.values(resumed.players || {}),
+      });
+      if (onLiveStateChange) onLiveStateChange(true);
+      showToast(
+        `▶️ প্রশ্ন ${(Number(resumed.currentSlideIndex) || 0) + 1} থেকে সেশন পুনরায় চালু হয়েছে!`,
+        "success"
+      );
+    } catch {
+      showToast("সেশন পুনরায় চালু করতে সমস্যা হয়েছে।", "error");
+    } finally {
+      setIsResumingOrStarting(false);
+    }
+  };
+
+  // Launch Fullscreen Live Presentation (Task 2 + Task 4 Smart Resume Prompt)
+  const handleLaunchLivePresentation = async (deckToLaunch: DeckItem, forceFresh = false) => {
+    try {
+      if (!forceFresh) {
+        try {
+          const checkRes = await fetch(
+            `/api/live-quizzes/sessions?quizId=${encodeURIComponent(deckToLaunch.id)}`
+          );
+          if (checkRes.ok) {
+            const checkData = await checkRes.json().catch(() => null);
+            const pausedSess =
+              checkData?.pausedSession ||
+              (Array.isArray(checkData?.sessions)
+                ? checkData.sessions.find((s: any) => s.status === "PAUSED")
+                : null);
+
+            if (pausedSess) {
+              setResumePromptData({
+                deck: deckToLaunch,
+                pausedSession: pausedSess,
+              });
+              return;
+            }
+          }
+        } catch {
+          // Proceed directly to fresh launch if check fails
+        }
+      }
+
+      setIsResumingOrStarting(true);
+      setResumePromptData(null);
       showToast("🚀 লাইভ সেশন প্রস্তুত হচ্ছে...", "info");
 
       // 1. Auto-save deck before launching
@@ -1344,16 +1484,16 @@ export default function UnifiedQuizMentimeterWorkspace({
       const rawSlides = Array.isArray(deckToLaunch.slides) && deckToLaunch.slides.length > 0
         ? deckToLaunch.slides
         : [
-            {
-              id: `slide-${Date.now()}-1`,
-              type: "MCQ" as SlideType,
-              title: "প্রথম প্রশ্ন",
-              options: ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
-              correctAnswer: 0,
-              timeLimit: 20,
-              points: 100,
-            },
-          ];
+          {
+            id: `slide-${Date.now()}-1`,
+            type: "MCQ" as SlideType,
+            title: "প্রথম প্রশ্ন",
+            options: ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
+            correctAnswer: 0,
+            timeLimit: 20,
+            points: 100,
+          },
+        ];
 
       const normalizedSlides = rawSlides.map((s, idx) => ({
         ...s,
@@ -1414,6 +1554,9 @@ export default function UnifiedQuizMentimeterWorkspace({
             ...deckToLaunch,
             slides: finalSlides,
           },
+          initialSlideIndex: 0,
+          initialStage: "READY_CHECK",
+          initialPlayers: [],
         });
         if (onLiveStateChange) onLiveStateChange(true);
         showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
@@ -1426,6 +1569,9 @@ export default function UnifiedQuizMentimeterWorkspace({
             ...deckToLaunch,
             slides: normalizedSlides,
           },
+          initialSlideIndex: 0,
+          initialStage: "READY_CHECK",
+          initialPlayers: [],
         });
         if (onLiveStateChange) onLiveStateChange(true);
         showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
@@ -1436,17 +1582,23 @@ export default function UnifiedQuizMentimeterWorkspace({
         id: `session-${Date.now()}`,
         pin,
         deck: deckToLaunch,
+        initialSlideIndex: 0,
+        initialStage: "READY_CHECK",
+        initialPlayers: [],
       });
       if (onLiveStateChange) onLiveStateChange(true);
       showToast(`🚀 লাইভ সেশন চালু হয়েছে! পিন: ${pin}`, "success");
+    } finally {
+      setIsResumingOrStarting(false);
     }
   };
 
-  // Close Live Presenter
+  // Close Live Presenter (strict React state transition — NEVER reloads page)
   const handleCloseLivePresenter = () => {
     setActiveLivePresenterSession(null);
     if (onExitLive) onExitLive();
     if (onLiveStateChange) onLiveStateChange(false);
+    fetchSessionHistory();
   };
 
   // Filtered decks for Gallery (View 1) with Class, Trade, and Subject cascade matching
@@ -1594,11 +1746,10 @@ export default function UnifiedQuizMentimeterWorkspace({
               <button
                 type="button"
                 onClick={() => setShowAllSavedQuizzes(!showAllSavedQuizzes)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                  showAllSavedQuizzes
-                    ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-indigo-500/30 ring-2 ring-indigo-400"
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-white"
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-sm ${showAllSavedQuizzes
+                  ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-indigo-500/30 ring-2 ring-indigo-400"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-white"
+                  }`}
                 title={showAllSavedQuizzes ? "সকল সংরক্ষিত কুইজ দেখানো হচ্ছে" : "শ্রেণি অনুসারে ফিল্টার সক্রিয়"}
               >
                 <Globe className="w-3.5 h-3.5" />
@@ -1736,36 +1887,64 @@ export default function UnifiedQuizMentimeterWorkspace({
                     )}
                   </div>
 
-                  {/* Body Slide Types Snippets */}
+                  {/* Body Slide Types Snippets & Paused Status */}
                   <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
-                    <div className="flex flex-wrap gap-1.5">
-                      {Array.from(new Set(deck.slides.map((s) => s.type))).slice(0, 4).map((t, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-600 dark:text-slate-400 font-mono"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                      {deck.slides.length > 4 && (
-                        <span className="text-[10px] text-slate-400 self-center">
-                          +{deck.slides.length - 4}টি আরও
-                        </span>
-                      )}
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from(new Set(deck.slides.map((s) => s.type))).slice(0, 4).map((t, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-600 dark:text-slate-400 font-mono"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                        {deck.slides.length > 4 && (
+                          <span className="text-[10px] text-slate-400 self-center">
+                            +{deck.slides.length - 4}টি আরও
+                          </span>
+                        )}
+                      </div>
+
+                      {(() => {
+                        const pausedRun = sessionHistory.find(
+                          (s) => String(s.quizId || "") === String(deck.id) && s.status === "PAUSED"
+                        );
+                        if (!pausedRun) return null;
+                        return (
+                          <div className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-400/40 text-[11px] font-bold text-amber-600 dark:text-amber-300 flex items-center justify-between gap-2">
+                            <span className="flex items-center gap-1.5 truncate">
+                              <PauseCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>বিরতিতে (Q{(Number(pausedRun.currentSlideIndex) || 0) + 1}/{deck.slides.length})</span>
+                            </span>
+                            <span className="font-mono shrink-0">{pausedRun.playerCount || 0} জন</span>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Card Actions */}
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-1.5">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleOpenDeckStudio(deck);
                         }}
-                        className="flex-1 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-2 px-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 font-black text-xs transition flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
-                        <span>✏️ ওপেন স্টুডিও</span>
+                        <span>✏️ স্টুডিও</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenQuizHistory(deck, e)}
+                        className="py-2 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-black text-xs transition flex items-center gap-1 cursor-pointer"
+                        title="সেশন হিস্ট্রি (History)"
+                      >
+                        <History className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>হিস্ট্রি</span>
                       </button>
 
                       <button
@@ -1775,10 +1954,10 @@ export default function UnifiedQuizMentimeterWorkspace({
                           handleLaunchLivePresentation(deck);
                         }}
                         className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition flex items-center gap-1 shadow-md shadow-emerald-600/30 cursor-pointer"
-                        title="লাইভ প্রেজেন্টেশন চালু করুন"
+                        title="লাইভ শুরু করুন"
                       >
                         <Play className="w-3.5 h-3.5" />
-                        <span>▶️ লাইভ</span>
+                        <span>🚀 লাইভ শুরু করুন</span>
                       </button>
 
                       <button
@@ -1814,9 +1993,9 @@ export default function UnifiedQuizMentimeterWorkspace({
             }`}
         >
           {/* 1. TOP STUDIO HEADER (h-14 px-5 border-b bg-white dark:bg-slate-900) */}
-          <header className="h-14 px-4 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-4 shrink-0 shadow-xs z-20">
-            {/* Left: Back button + Presentation Title + Fullscreen Toggle */}
-            <div className="flex items-center gap-3 min-w-0">
+          <header className="h-14 px-4 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3 shrink-0 shadow-xs z-20 overflow-x-auto">
+            {/* Left: Back button + Presentation Title + Studio/History Tabs + Fullscreen Toggle */}
+            <div className="flex items-center gap-2.5 min-w-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1826,7 +2005,7 @@ export default function UnifiedQuizMentimeterWorkspace({
                 className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 cursor-pointer shrink-0"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>← গ্যালারিতে ফিরুন</span>
+                <span>← গ্যালারি</span>
               </button>
 
               <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800 hidden sm:block" />
@@ -1836,13 +2015,43 @@ export default function UnifiedQuizMentimeterWorkspace({
                 value={currentDeck.title}
                 onChange={(e) => setCurrentDeck((prev) => ({ ...prev, title: e.target.value }))}
                 placeholder="প্রেজেন্টেশন শিরোনাম লিখুন..."
-                className="bg-transparent text-sm sm:text-base font-black text-slate-900 dark:text-white focus:outline-none focus:bg-slate-100 dark:focus:bg-slate-800 px-2 py-1 rounded-lg border border-transparent focus:border-indigo-400 transition truncate max-w-xs sm:max-w-md"
+                className="bg-transparent text-sm sm:text-base font-black text-slate-900 dark:text-white focus:outline-none focus:bg-slate-100 dark:focus:bg-slate-800 px-2 py-1 rounded-lg border border-transparent focus:border-indigo-400 transition truncate max-w-[160px] sm:max-w-xs"
               />
+
+              {/* Studio Sub-Tabs: Editor vs 📜 সেশন হিস্ট্রি (History) */}
+              <div className="flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setStudioTab("editor")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition cursor-pointer flex items-center gap-1 ${studioTab === "editor"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:text-indigo-600"
+                    }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>স্লাইড</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistoryScope("current");
+                    setStudioTab("history");
+                    fetchSessionHistory(currentDeck.id);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition cursor-pointer flex items-center gap-1 ${studioTab === "history"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:text-indigo-600"
+                    }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>📜 সেশন হিস্ট্রি (History)</span>
+                </button>
+              </div>
 
               {/* Active Global Academic Mapping Context Pill (Task 1) */}
               <div
                 onClick={() => setIsSettingsDrawerOpen(true)}
-                className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition shrink-0"
+                className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition shrink-0"
                 title="একাডেমিক ম্যাপিং পরিবর্তন করতে সেটিংস ওপেন করুন"
               >
                 <GraduationCap className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
@@ -1852,12 +2061,11 @@ export default function UnifiedQuizMentimeterWorkspace({
                 {currentDeck.subjectName && (
                   <>
                     <span className="opacity-40">•</span>
-                    <span className="truncate max-w-[130px] text-indigo-900 dark:text-indigo-200">
+                    <span className="truncate max-w-[110px] text-indigo-900 dark:text-indigo-200">
                       {currentDeck.subjectName}
                     </span>
                   </>
                 )}
-                <span className="ml-1 text-[10px] text-indigo-500 underline font-semibold">ম্যাপিং বদল</span>
               </div>
 
               {/* Fullscreen Focus Toggle Button (Fixes ERP Sidebar Cramp!) */}
@@ -1868,15 +2076,9 @@ export default function UnifiedQuizMentimeterWorkspace({
                 title={isFullscreenFocus ? "ডকড মোডে ফিরুন" : "ফুলস্ক্রিন ফোকাস মোড"}
               >
                 {isFullscreenFocus ? (
-                  <>
-                    <Minimize2 className="w-3.5 h-3.5" />
-                    <span className="hidden md:inline text-[11px]">↙ সাইডবার দেখান</span>
-                  </>
+                  <Minimize2 className="w-3.5 h-3.5" />
                 ) : (
-                  <>
-                    <Maximize2 className="w-3.5 h-3.5" />
-                    <span className="hidden md:inline text-[11px]">⛶ ফুলস্ক্রিন ফোকাস</span>
-                  </>
+                  <Maximize2 className="w-3.5 h-3.5" />
                 )}
               </button>
             </div>
@@ -1890,7 +2092,7 @@ export default function UnifiedQuizMentimeterWorkspace({
                 title="কুইজ সেটিংস ও টাইমার"
               >
                 <Settings className="w-4 h-4 text-indigo-500" />
-                <span className="hidden sm:inline">⚙️ কুইজ সেটিংস</span>
+                <span className="hidden sm:inline">⚙️ সেটিংস</span>
               </button>
 
               <button
@@ -1914,7 +2116,7 @@ export default function UnifiedQuizMentimeterWorkspace({
                 ) : (
                   <Check className="w-3.5 h-3.5 stroke-[3]" />
                 )}
-                <span>💾 সেভ করুন</span>
+                <span>💾 সেভ</span>
               </button>
 
               <button
@@ -1923,1428 +2125,1441 @@ export default function UnifiedQuizMentimeterWorkspace({
                 className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-black text-xs transition flex items-center gap-1.5 shadow-md shadow-indigo-600/30 cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
-                <span>▶️ Start Presentation</span>
+                <span>🚀 লাইভ শুরু করুন</span>
               </button>
             </div>
           </header>
 
-          {/* 2-COLUMN MAIN BODY (Slim Filmstrip + Giant Center Stage) */}
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-            {/* -----------------------------------------------------------------
+          {/* 2-COLUMN MAIN BODY OR SESSION HISTORY TAB */}
+          {studioTab === "history" ? (
+            <QuizSessionHistoryPanel
+              quizId={currentDeck.id}
+              quizTitle={currentDeck.title}
+              sessions={sessionHistory}
+              isLoading={isLoadingHistory}
+              resumingSessionId={isResumingOrStarting ? "busy" : null}
+              scope={historyScope}
+              onScopeChange={setHistoryScope}
+              onRefresh={() => fetchSessionHistory(historyScope === "current" ? currentDeck.id : undefined)}
+              onResumeSession={(sess) => handleResumePausedSession(sess, currentDeck)}
+              onBackToEditor={() => setStudioTab("editor")}
+            />
+          ) : (
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+              {/* -----------------------------------------------------------------
                 LEFT SLIM FILMSTRIP (Hidden on mobile <768px, replaced by bottom bar)
                 ----------------------------------------------------------------- */}
-            <aside className="hidden md:flex w-48 lg:w-52 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex-col gap-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
-              {/* Top Filmstrip Action Buttons */}
-              <div className="grid grid-cols-2 gap-1.5 relative">
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowNewSlidePopover(!showNewSlidePopover)}
-                    className="w-full py-1.5 px-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer border border-indigo-200 dark:border-indigo-800"
-                  >
-                    <Plus className="w-3.5 h-3.5 shrink-0" />
-                    <span>নতুন স্লাইড</span>
-                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${showNewSlidePopover ? "rotate-180" : ""}`} />
-                  </button>
-
-                  {/* 3-Category Floating Responsive Popover Picker (Portal / Fixed Modal to prevent any clipping) */}
-                  <AnimatePresence>
-                    {showNewSlidePopover && (
-                      <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div
-                          className="fixed inset-0"
-                          onClick={() => setShowNewSlidePopover(false)}
-                        />
-                        <motion.div
-                          initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                          className="relative z-10 w-[94vw] max-w-[560px] max-h-[88vh] rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 text-left overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
-                        >
-                          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                            <div className="flex items-center gap-2.5">
-                              <span className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-lg shadow-md shadow-indigo-500/20">
-                                📑
-                              </span>
-                              <div>
-                                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
-                                  নতুন স্লাইড ও কুইজের ধরন নির্বাচন করুন
-                                </h3>
-                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                  আপনার ক্লাসের প্রয়োজন অনুযায়ী ৩টি ক্যাটাগরি থেকে সঠিক ফরম্যাট বেছে নিন
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setShowNewSlidePopover(false)}
-                              className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 flex items-center justify-center transition cursor-pointer"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          {/* CATEGORY 1: কন্টেন্ট স্লাইড */}
-                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
-                            <div className="flex items-center gap-2 text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-                              <span className="w-6 h-6 rounded-lg bg-blue-500/10 flex items-center justify-center text-sm">📄</span>
-                              <span>১. কন্টেন্ট স্লাইড (Content Slides — No Timer)</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("TEXT_SLIDE");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  📄
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">টেক্সট ও হেডিং স্লাইড</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">টপিক ও মূল বিষয়ের সারসংক্ষেপ</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("IMAGE_COMPARE");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-sky-500 hover:bg-sky-50/50 dark:hover:bg-sky-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-400 to-cyan-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  🖼️
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-sky-600 dark:group-hover:text-sky-400">চিত্র / ডায়াগ্রাম তুলনা</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">পাশাপাশি ২টি সার্কিট বা ডায়াগ্রাম</div>
-                                </div>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* CATEGORY 2: ইন্টারেক্টিভ ওয়ার্মআপ */}
-                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
-                            <div className="flex items-center gap-2 text-xs font-black text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider">
-                              <span className="w-6 h-6 rounded-lg bg-fuchsia-500/10 flex items-center justify-center text-sm">💬</span>
-                              <span>২. ইন্টারেক্টিভ ওয়ার্মআপ (Interactive Warmup — No Timer)</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("WORD_CLOUD");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-fuchsia-500 hover:bg-fuchsia-50/50 dark:hover:bg-fuchsia-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-fuchsia-500 to-pink-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
-                                  ☁️
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-fuchsia-600 dark:group-hover:text-fuchsia-400">ওয়ার্ড ক্লাউড</div>
-                                  <div className="text-[9px] text-slate-400 leading-tight">শিক্ষার্থীদের লাইভ শব্দগুচ্ছ</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("OPEN_ENDED");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-purple-500 hover:bg-purple-50/50 dark:hover:bg-purple-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-purple-500 to-indigo-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
-                                  💭
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-purple-600 dark:group-hover:text-purple-400">মুক্ত মতামত</div>
-                                  <div className="text-[9px] text-slate-400 leading-tight">উন্মুক্ত ভাবনা ও মন্তব্য</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("LIVE_QA");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
-                                  🙋
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400">প্রশ্নোত্তর বোর্ড</div>
-                                  <div className="text-[9px] text-slate-400 leading-tight">লাইভ স্টুডেন্ট প্রশ্নমঞ্চ</div>
-                                </div>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* CATEGORY 3: কুইজ প্রতিযোগিতা */}
-                          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-amber-200/80 dark:border-amber-900/50 space-y-2">
-                            <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-                              <span className="w-6 h-6 rounded-lg bg-amber-500/10 flex items-center justify-center text-sm">🏆</span>
-                              <span>৩. কুইজ প্রতিযোগিতা (Quiz Competition — Timer + Points)</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("MCQ");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-blue-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  🔘
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">MCQ (বহুনির্বাচনী প্রশ্ন)</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">৪টি অপশন থেকে ১টি সঠিক উত্তর</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("FILL_BLANKS");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  📝
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400">শূন্যস্থান পূরণ (Fill in Blanks)</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">ক্যাপসুল স্লটে সঠিক শব্দ বসানো</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("MATCHING");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  🔗
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">ডান-বাম মিলকরণ (Matching)</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">বাম ও ডান কলামের রঙিন ক্রস-লাইন</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("REORDER");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-rose-500 hover:bg-rose-50/50 dark:hover:bg-rose-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  🔢
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400">ধারাবাহিক ক্রম সাজানো</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">কাজের ধাপ ক্রমানুসারে সাজানো</div>
-                                </div>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleAddNewSlide("TRUE_FALSE");
-                                  setShowNewSlidePopover(false);
-                                }}
-                                className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-violet-500 hover:bg-violet-50/50 dark:hover:bg-violet-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs sm:col-span-2"
-                              >
-                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-500 to-indigo-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
-                                  ⚖️
-                                </span>
-                                <div>
-                                  <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-violet-400">সত্য / মিথ্যা (True / False)</div>
-                                  <div className="text-[10px] text-slate-400 leading-tight">বিবৃতি যাচাই ও মূল্যায়ন</div>
-                                </div>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* CATEGORY 4: স্পেশাল লিডারবোর্ড স্লাইড (TASK 3) */}
-                          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-orange-500/10 border border-amber-300 dark:border-amber-700/60 space-y-2">
-                            <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-                              <span className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center text-sm">🏆</span>
-                              <span>৪. লিডারবোর্ড স্লাইড (Leaderboard — Host Controlled)</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleAddNewSlide("LEADERBOARD");
-                                setShowNewSlidePopover(false);
-                              }}
-                              className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-600/60 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/40 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-sm"
-                            >
-                              <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-500 text-white flex items-center justify-center text-base shrink-0 shadow-sm">
-                                🏆
-                              </span>
-                              <div>
-                                <div className="text-xs font-black text-amber-700 dark:text-amber-300 group-hover:text-amber-600 dark:group-hover:text-amber-200">
-                                  🏆 লিডারবোর্ড স্লাইড (LEADERBOARD)
-                                </div>
-                                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                                  যেখানে খুশি বসান — হোস্ট স্লাইডে আসলেই স্টুডেন্টদের ফোনে লাইভ র‍্যাঙ্ক ও টপ ১০ ভেসে উঠবে!
-                                </div>
-                              </div>
-                            </button>
-                          </div>
-                        </motion.div>
-                      </div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAiModal(true)}
-                  className="py-1.5 px-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer border border-amber-200 dark:border-amber-800"
-                >
-                  <Wand2 className="w-3.5 h-3.5" />
-                  <span>✨ AI</span>
-                </button>
-              </div>
-
-              {/* Vertical List of Compact 16:9 Slide Thumbnails */}
-              <div className="space-y-2 flex-1">
-                {currentDeck.slides.map((slide, idx) => {
-                  const isSelected = slide.id === currentSlide.id;
-                  const graded = isGradedQuiz(slide.type);
-
-                  const getThumbStyles = (t: SlideType) => {
-                    switch (t) {
-                      case "LEADERBOARD":
-                        return {
-                          border: isSelected
-                            ? "border-amber-500 ring-2 ring-amber-400/40 bg-amber-50/70 dark:bg-amber-950/50"
-                            : "border-amber-300 dark:border-amber-800 hover:border-amber-500",
-                          badge: "bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black",
-                          label: "🏆 লিডারবোর্ড",
-                        };
-                      case "MCQ":
-                        return {
-                          border: isSelected ? "border-indigo-500 ring-2 ring-indigo-400/40 bg-indigo-50/70 dark:bg-indigo-950/50" : "border-indigo-200/80 dark:border-indigo-900/50 hover:border-indigo-400",
-                          badge: "bg-indigo-600 text-white",
-                          label: "MCQ",
-                        };
-                      case "MATCHING":
-                        return {
-                          border: isSelected ? "border-emerald-500 ring-2 ring-emerald-400/40 bg-emerald-50/70 dark:bg-emerald-950/50" : "border-emerald-200/80 dark:border-emerald-900/50 hover:border-emerald-400",
-                          badge: "bg-emerald-600 text-white",
-                          label: "মিলকরণ",
-                        };
-                      case "FILL_BLANKS":
-                        return {
-                          border: isSelected ? "border-amber-500 ring-2 ring-amber-400/40 bg-amber-50/70 dark:bg-amber-950/50" : "border-amber-200/80 dark:border-amber-900/50 hover:border-amber-400",
-                          badge: "bg-amber-500 text-slate-950 font-black",
-                          label: "শূন্যস্থান",
-                        };
-                      case "REORDER":
-                        return {
-                          border: isSelected ? "border-rose-500 ring-2 ring-rose-400/40 bg-rose-50/70 dark:bg-rose-950/50" : "border-rose-200/80 dark:border-rose-900/50 hover:border-rose-400",
-                          badge: "bg-rose-500 text-white",
-                          label: "ক্রম",
-                        };
-                      case "TRUE_FALSE":
-                        return {
-                          border: isSelected ? "border-violet-500 ring-2 ring-violet-400/40 bg-violet-50/70 dark:bg-violet-950/50" : "border-violet-200/80 dark:border-violet-900/50 hover:border-violet-400",
-                          badge: "bg-violet-600 text-white",
-                          label: "সত্য/মিথ্যা",
-                        };
-                      case "WORD_CLOUD":
-                        return {
-                          border: isSelected ? "border-fuchsia-500 ring-2 ring-fuchsia-400/40 bg-fuchsia-50/70 dark:bg-fuchsia-950/50" : "border-fuchsia-200/80 dark:border-fuchsia-900/50 hover:border-fuchsia-400",
-                          badge: "bg-fuchsia-600 text-white",
-                          label: "ক্লাউড",
-                        };
-                      case "OPEN_ENDED":
-                      case "LIVE_QA":
-                        return {
-                          border: isSelected ? "border-purple-500 ring-2 ring-purple-400/40 bg-purple-50/70 dark:bg-purple-950/50" : "border-purple-200/80 dark:border-purple-900/50 hover:border-purple-400",
-                          badge: "bg-purple-600 text-white",
-                          label: t === "LIVE_QA" ? "Q&A" : "মতামত",
-                        };
-                      default:
-                        return {
-                          border: isSelected ? "border-blue-500 ring-2 ring-blue-400/40 bg-blue-50/70 dark:bg-blue-950/50" : "border-slate-200 dark:border-slate-800 hover:border-blue-400",
-                          badge: "bg-blue-600 text-white",
-                          label: "কন্টেন্ট",
-                        };
-                    }
-                  };
-
-                  const thumbStyle = getThumbStyles(slide.type);
-
-                  return (
-                    <div
-                      key={slide.id}
-                      draggable={true}
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData("text/plain", String(idx));
-                        e.dataTransfer.effectAllowed = "move";
-                        setDraggingIndex(idx);
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        if (dragOverIndex !== idx) setDragOverIndex(idx);
-                      }}
-                      onDragLeave={() => {
-                        if (dragOverIndex === idx) setDragOverIndex(null);
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const fromIdx = Number(e.dataTransfer.getData("text/plain"));
-                        if (!isNaN(fromIdx)) {
-                          handleDropSlide(fromIdx, idx);
-                        }
-                      }}
-                      onDragEnd={() => {
-                        setDraggingIndex(null);
-                        setDragOverIndex(null);
-                      }}
-                      onClick={() => setCurrentSlideId(slide.id)}
-                      className={`group relative rounded-2xl border-2 p-2 transition-all cursor-grab active:cursor-grabbing flex flex-col justify-between aspect-16/10 shadow-xs ${dragOverIndex === idx
-                        ? "border-indigo-500 scale-105 shadow-xl bg-indigo-50/80 dark:bg-indigo-950/60 ring-2 ring-indigo-400"
-                        : draggingIndex === idx
-                          ? "opacity-40 border-dashed border-indigo-400"
-                          : thumbStyle.border
-                        }`}
+              <aside className="hidden md:flex w-48 lg:w-52 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex-col gap-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+                {/* Top Filmstrip Action Buttons */}
+                <div className="grid grid-cols-2 gap-1.5 relative">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewSlidePopover(!showNewSlidePopover)}
+                      className="w-full py-1.5 px-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer border border-indigo-200 dark:border-indigo-800"
                     >
-                      {/* Thumbnail Header */}
-                      <div className="flex items-center justify-between text-[10px] font-black">
-                        <span
-                          className={`w-4 h-4 rounded-md flex items-center justify-center font-mono ${isSelected
-                            ? "bg-slate-950 text-white"
-                            : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                            }`}
-                        >
-                          {idx + 1}
-                        </span>
+                      <Plus className="w-3.5 h-3.5 shrink-0" />
+                      <span>নতুন স্লাইড</span>
+                      <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${showNewSlidePopover ? "rotate-180" : ""}`} />
+                    </button>
 
-                        <span className={`px-1.5 py-0.2 rounded-md font-mono text-[8px] font-black uppercase ${thumbStyle.badge}`}>
-                          {thumbStyle.label}
-                        </span>
-                      </div>
-
-                      {/* Title Preview */}
-                      <p className="text-[11px] font-black text-slate-800 dark:text-slate-200 line-clamp-2 my-auto leading-tight">
-                        {slide.type === "LEADERBOARD"
-                          ? "🏆 লিডারবোর্ড স্লাইড"
-                          : slide.title.trim() || (
-                            <span className="italic opacity-40 font-normal">খালি স্লাইড</span>
-                          )}
-                      </p>
-
-                      {/* Footer: Timer or Points badge + Hover Actions */}
-                      <div className="flex items-center justify-between pt-1 text-[9px]">
-                        {graded ? (
-                          <span className="text-amber-500 font-bold font-mono">
-                            {slide.points}p • {slide.timeLimit}s
-                          </span>
-                        ) : slide.type === "LEADERBOARD" ? (
-                          <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">🏆 লাইভ র‍্যাঙ্ক</span>
-                        ) : (
-                          <span className="text-slate-400 font-medium font-mono">কন্টেন্ট</span>
-                        )}
-
-                        {/* Move Up/Down & Delete */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                          {idx > 0 && (
-                            <button
-                              type="button"
-                              onClick={(e) => handleMoveSlide(idx, "up", e)}
-                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600"
-                              title="উপরে নিন"
-                            >
-                              <ArrowUp className="w-3 h-3" />
-                            </button>
-                          )}
-                          {idx < currentDeck.slides.length - 1 && (
-                            <button
-                              type="button"
-                              onClick={(e) => handleMoveSlide(idx, "down", e)}
-                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600"
-                              title="নিচে নিন"
-                            >
-                              <ArrowDown className="w-3 h-3" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteSlide(slide.id, e)}
-                            className="p-0.5 rounded text-rose-400 hover:text-rose-600"
-                            title="মুছুন"
+                    {/* 3-Category Floating Responsive Popover Picker (Portal / Fixed Modal to prevent any clipping) */}
+                    <AnimatePresence>
+                      {showNewSlidePopover && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
+                          <div
+                            className="fixed inset-0"
+                            onClick={() => setShowNewSlidePopover(false)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                            className="relative z-10 w-[94vw] max-w-[560px] max-h-[88vh] rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 text-left overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
                           >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </aside>
-
-            {/* -----------------------------------------------------------------
-                CENTER GIANT STAGE (flex-1 flex flex-col items-center justify-between p-6 lg:p-10)
-                ----------------------------------------------------------------- */}
-            <main className="flex-1 flex flex-col items-center justify-between p-4 sm:p-6 lg:p-8 overflow-y-auto relative scrollbar-thin">
-              {/* TOP FLOATING CONTEXTUAL TOOLBAR (Replaces the bulky Right Column!) */}
-              <div className="sticky top-0 z-30 mb-4 rounded-2xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 px-4 py-2 flex flex-wrap items-center justify-center gap-3 max-w-3xl backdrop-blur-md">
-                {/* 1. Slide Type Selector Dropdown */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                    স্লাইড টাইপ:
-                  </span>
-                  <select
-                    value={currentSlide.type}
-                    onChange={(e) => {
-                      const newType = e.target.value as SlideType;
-                      const graded = isGradedQuiz(newType);
-                      updateCurrentSlide({
-                        type: newType,
-                        timeLimit: graded ? 30 : 0,
-                        points: graded ? 100 : 0,
-                      });
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-black text-indigo-600 dark:text-indigo-300 focus:outline-none cursor-pointer"
-                  >
-                    <optgroup label="📄 কন্টেন্ট স্লাইড (No Timer)">
-                      <option value="TEXT_SLIDE">📄 টেক্সট ও হেডিং স্লাইড</option>
-                      <option value="IMAGE_COMPARE">🖼️ ইমেজ তুলনা স্লাইড</option>
-                    </optgroup>
-                    <optgroup label="💬 ইন্টারেক্টিভ ওপেন স্লাইড (No Timer)">
-                      <option value="WORD_CLOUD">☁️ লাইভ ওয়ার্ড ক্লাউড</option>
-                      <option value="OPEN_ENDED">💭 মুক্ত মতামত (Open Ended)</option>
-                      <option value="LIVE_QA">🙋 লাইভ প্রশ্নোত্তর বোর্ড</option>
-                    </optgroup>
-                    <optgroup label="🏆 কুইজ প্রতিযোগিতা (Graded)">
-                      <option value="MCQ">🔘 বহুনির্বাচনী প্রশ্ন (MCQ Single)</option>
-                      <option value="FILL_BLANKS">📝 শূন্যস্থান পূরণ (Fill Blanks)</option>
-                      <option value="MATCHING">🔗 ডান-বাম মিলকরণ (Matching)</option>
-                      <option value="REORDER">🔢 ধারাবাহিক ক্রম সাজানো</option>
-                      <option value="TRUE_FALSE">⚖️ সত্য / মিথ্যা (True/False)</option>
-                    </optgroup>
-                    <optgroup label="🏆 স্পেশাল স্লাইড">
-                      <option value="LEADERBOARD">🏆 লাইভ লিডারবোর্ড স্লাইড</option>
-                    </optgroup>
-                  </select>
-                </div>
-
-                {/* STRICT CONDITIONAL TIMER & POINTS PILLS: ONLY SHOWN IF GRADED QUIZ! */}
-                {isGradedQuiz(currentSlide.type) && (
-                  <>
-                    <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
-
-                    {/* Time Limit Pills */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-black text-slate-400">⏱️ সময়:</span>
-                      <div className="flex items-center gap-1">
-                        {[15, 20, 30, 60].map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => updateCurrentSlide({ timeLimit: t })}
-                            className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.timeLimit === t
-                              ? "bg-cyan-500 text-slate-950 border-cyan-400 font-bold"
-                              : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
-                              }`}
-                          >
-                            {t}s
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
-
-                    {/* Points Pills */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-black text-slate-400">⭐ পয়েন্ট:</span>
-                      <div className="flex items-center gap-1">
-                        {[50, 100, 200].map((p) => (
-                          <button
-                            key={p}
-                            type="button"
-                            onClick={() => updateCurrentSlide({ points: p })}
-                            className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.points === p
-                              ? "bg-amber-500 text-slate-950 border-amber-400 font-bold"
-                              : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
-                              }`}
-                          >
-                            {p}p
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Explanation Popover Button */}
-                <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
-                <button
-                  type="button"
-                  onClick={() => setShowExplanationPopover(!showExplanationPopover)}
-                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1 cursor-pointer ${currentSlide.explanation
-                    ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700"
-                    : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-indigo-500"
-                    }`}
-                >
-                  <Info className="w-3.5 h-3.5" />
-                  <span>💡 ব্যাখ্যা {currentSlide.explanation ? "(যুক্ত)" : ""}</span>
-                </button>
-
-                {/* TASK 3: On-Canvas "🪄 AI দিয়ে এই স্লাইডটি আপডেট করুন" Magic Button */}
-                <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
-                <button
-                  type="button"
-                  onClick={() => setShowAiImprovePopover(!showAiImprovePopover)}
-                  className={`px-3 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
-                    showAiImprovePopover
-                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-indigo-600 shadow-indigo-500/20"
-                      : "bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
-                  }`}
-                  title="AI দিয়ে বর্তমান স্লাইডটি পরিমার্জন, রূপান্তর বা উন্নত করুন"
-                >
-                  {isAiImprovingSlide ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
-                  ) : (
-                    <Wand2 className="w-3.5 h-3.5 text-amber-400" />
-                  )}
-                  <span>🪄 AI আপডেট</span>
-                  <ChevronDown className={`w-3 h-3 transition-transform ${showAiImprovePopover ? "rotate-180" : ""}`} />
-                </button>
-              </div>
-
-              {/* Floating Explanation Popover Card */}
-              <AnimatePresence>
-                {showExplanationPopover && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="w-full max-w-xl mb-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-2 z-20"
-                  >
-                    <div className="flex items-center justify-between text-xs font-black text-amber-500">
-                      <span>💡 সঠিক উত্তরের ব্যাখ্যা বা শিক্ষকের নোট:</span>
-                      <button
-                        type="button"
-                        onClick={() => setShowExplanationPopover(false)}
-                        className="p-1 text-slate-400 hover:text-white"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                    <textarea
-                      rows={2}
-                      value={currentSlide.explanation || ""}
-                      onChange={(e) => updateCurrentSlide({ explanation: e.target.value })}
-                      placeholder="শিক্ষার্থীরা উত্তর দেওয়ার পর এই ব্যাখ্যা প্রদর্শিত হবে..."
-                      className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none focus:border-amber-400"
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Floating AI Slide Improve Popover Card (TASK 3) */}
-              <AnimatePresence>
-                {showAiImprovePopover && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="w-full max-w-2xl mb-4 p-5 rounded-3xl bg-white dark:bg-slate-900 border-2 border-indigo-500/40 shadow-2xl space-y-4 z-20"
-                  >
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center gap-2 text-xs font-black text-indigo-600 dark:text-indigo-400">
-                        <Wand2 className="w-4 h-4 text-amber-400" />
-                        <span>🪄 এই স্লাইডটি AI দিয়ে পরিমার্জন ও রূপান্তর করুন</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowAiImprovePopover(false)}
-                        className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                      >
-                        ✕
-                      </button>
-                    </div>
-
-                    {/* 4 Quick 1-Click Action Buttons */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        disabled={isAiImprovingSlide}
-                        onClick={() => handleAiImproveCurrentSlide("beautify")}
-                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                      >
-                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                        <div>
-                          <div className="text-xs font-black text-slate-800 dark:text-slate-200">✨ ভাষা ও বিকল্প সুন্দর করো</div>
-                          <div className="text-[10px] text-slate-400">বানান ও ব্যাকরণ নির্ভুল ও বাস্তবসম্মত করা</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isAiImprovingSlide}
-                        onClick={() => handleAiImproveCurrentSlide("harder")}
-                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                      >
-                        <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
-                        <div>
-                          <div className="text-xs font-black text-slate-800 dark:text-slate-200">🧠 আরেকটু মানসম্মত ও কঠিন করো</div>
-                          <div className="text-[10px] text-slate-400">মুখস্থের বদলে ধারণাগত গভীর প্রশ্ন তৈরি</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isAiImprovingSlide}
-                        onClick={() => handleAiImproveCurrentSlide("explain")}
-                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                      >
-                        <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <div>
-                          <div className="text-xs font-black text-slate-800 dark:text-slate-200">💡 সঠিক উত্তরের ব্যাখ্যা তৈরি করো</div>
-                          <div className="text-[10px] text-slate-400">শিক্ষার্থীদের জন্য সহজবোধ্য বিস্তারিত ব্যাখ্যা</div>
-                        </div>
-                      </button>
-
-                      {/* Convert to another type dropdown */}
-                      <div className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-1.5 bg-slate-50 dark:bg-slate-950">
-                        <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                          🔀 অন্য ধরনে রূপান্তর:
-                        </div>
-                        <select
-                          disabled={isAiImprovingSlide}
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              handleAiImproveCurrentSlide("convert", e.target.value as SlideType);
-                              e.target.value = "";
-                            }
-                          }}
-                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] font-black text-indigo-600 dark:text-indigo-400 cursor-pointer"
-                        >
-                          <option value="">নির্বাচন করুন</option>
-                          <option value="MATCHING">🔗 MATCHING (মিলকরণ)</option>
-                          <option value="FILL_BLANKS">📝 FILL_BLANKS (শূন্যস্থান)</option>
-                          <option value="REORDER">🔢 REORDER (ধারাবাহিক ক্রম)</option>
-                          <option value="TRUE_FALSE">⚖️ TRUE_FALSE (সত্য/মিথ্যা)</option>
-                          <option value="MCQ">🔘 MCQ (বহুনির্বাচনী)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Custom prompt input */}
-                    <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                        <span>✍️ AI-কে বলুন এই স্লাইডে কী পরিবর্তন চান:</span>
-                        {isAiImprovingSlide && (
-                          <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> স্লাইড পরিমার্জন হচ্ছে...
-                          </span>
-                        )}
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={customAiSlidePrompt}
-                          onChange={(e) => setCustomAiSlidePrompt(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && customAiSlidePrompt.trim()) {
-                              handleAiImproveCurrentSlide("custom", undefined, customAiSlidePrompt.trim());
-                            }
-                          }}
-                          placeholder="যেমন: অপশনগুলো আরও সংক্ষিপ্ত করো অথবা বাস্তব জীবনের উদাহরণ দাও..."
-                          className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                        />
-                        <button
-                          type="button"
-                          disabled={isAiImprovingSlide || !customAiSlidePrompt.trim()}
-                          onClick={() => handleAiImproveCurrentSlide("custom", undefined, customAiSlidePrompt.trim())}
-                          className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs transition cursor-pointer disabled:opacity-50 shrink-0"
-                        >
-                          প্রয়োগ করুন
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* ---------------------------------------------------------------
-                  THE 16:9 INTERACTIVE STAGE CARD (w-full max-w-4xl min-h-[460px])
-                  --------------------------------------------------------------- */}
-              <div className="w-full max-w-4xl min-h-[480px] my-auto rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800/80 p-6 sm:p-10 flex flex-col justify-between relative transition-all">
-                {/* 1. BLANK CUSTOM PROMPT TITLE (No prefilled questions!) */}
-                <div className="space-y-1.5 pb-4">
-                  <input
-                    type="text"
-                    value={currentSlide.title}
-                    onChange={(e) => updateCurrentSlide({ title: e.target.value })}
-                    placeholder="এখানে আপনার প্রশ্ন বা আলোচনার বিষয় লিখুন..."
-                    className="w-full text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 bg-transparent border-b-2 border-transparent hover:border-slate-300 dark:hover:border-slate-700 focus:border-indigo-500 focus:outline-none transition py-2 leading-relaxed text-center sm:text-left"
-                  />
-                </div>
-
-                {/* 2. DIRECT ON-CANVAS EDITING BY TYPE */}
-                <div className="flex-1 flex flex-col justify-center py-4">
-                  {/* TYPE: MCQ Single */}
-                  {currentSlide.type === "MCQ" && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        {currentSlide.options.map((opt, optIdx) => {
-                          const isCorrect = currentSlide.correctAnswer === optIdx;
-                          const shapeIcons = ["▲", "◆", "●", "■"];
-
-                          return (
-                            <div
-                              key={optIdx}
-                              className={`p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 relative shadow-sm ${isCorrect
-                                ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-400/40"
-                                : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
-                                }`}
-                            >
-                              {/* Correct Answer Circular Toggle (Click to mark Green Correct) */}
+                            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                              <div className="flex items-center gap-2.5">
+                                <span className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-lg shadow-md shadow-indigo-500/20">
+                                  📑
+                                </span>
+                                <div>
+                                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                                    নতুন স্লাইড ও কুইজের ধরন নির্বাচন করুন
+                                  </h3>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    আপনার ক্লাসের প্রয়োজন অনুযায়ী ৩টি ক্যাটাগরি থেকে সঠিক ফরম্যাট বেছে নিন
+                                  </p>
+                                </div>
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => updateCurrentSlide({ correctAnswer: optIdx })}
-                                className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 transition-transform active:scale-95 cursor-pointer ${isCorrect
-                                  ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
-                                  : "bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
-                                  }`}
-                                title="সঠিক উত্তর হিসেবে চিহ্নিত করুন"
+                                onClick={() => setShowNewSlidePopover(false)}
+                                className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 flex items-center justify-center transition cursor-pointer"
                               >
-                                {isCorrect ? (
-                                  <Check className="w-4 h-4 stroke-[3]" />
-                                ) : (
-                                  shapeIcons[optIdx % 4]
-                                )}
+                                <X className="w-4 h-4" />
                               </button>
+                            </div>
 
-                              {/* In-line Editable Option Input */}
-                              <input
-                                type="text"
-                                value={opt}
-                                onChange={(e) => {
-                                  const updated = [...currentSlide.options];
-                                  updated[optIdx] = e.target.value;
-                                  updateCurrentSlide({ options: updated });
-                                }}
-                                placeholder={`অপশন ${optIdx + 1} লিখুন...`}
-                                className="bg-transparent text-sm font-bold text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none w-full"
-                              />
-
-                              {/* Delete Option */}
-                              {currentSlide.options.length > 2 && (
+                            {/* CATEGORY 1: কন্টেন্ট স্লাইড */}
+                            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                              <div className="flex items-center gap-2 text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                                <span className="w-6 h-6 rounded-lg bg-blue-500/10 flex items-center justify-center text-sm">📄</span>
+                                <span>১. কন্টেন্ট স্লাইড (Content Slides — No Timer)</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const updated = currentSlide.options.filter((_, i) => i !== optIdx);
-                                    updateCurrentSlide({
-                                      options: updated,
-                                      correctAnswer: Math.min(
-                                        Number(currentSlide.correctAnswer),
-                                        updated.length - 1
-                                      ),
-                                    });
+                                    handleAddNewSlide("TEXT_SLIDE");
+                                    setShowNewSlidePopover(false);
                                   }}
-                                  className="text-slate-400 hover:text-rose-500 p-1 transition cursor-pointer"
-                                  title="অপশন মুছুন"
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    📄
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">টেক্সট ও হেডিং স্লাইড</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">টপিক ও মূল বিষয়ের সারসংক্ষেপ</div>
+                                  </div>
                                 </button>
-                              )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("IMAGE_COMPARE");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-sky-500 hover:bg-sky-50/50 dark:hover:bg-sky-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-400 to-cyan-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    🖼️
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-sky-600 dark:group-hover:text-sky-400">চিত্র / ডায়াগ্রাম তুলনা</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">পাশাপাশি ২টি সার্কিট বা ডায়াগ্রাম</div>
+                                  </div>
+                                </button>
+                              </div>
                             </div>
-                          );
-                        })}
+
+                            {/* CATEGORY 2: ইন্টারেক্টিভ ওয়ার্মআপ */}
+                            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                              <div className="flex items-center gap-2 text-xs font-black text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-wider">
+                                <span className="w-6 h-6 rounded-lg bg-fuchsia-500/10 flex items-center justify-center text-sm">💬</span>
+                                <span>২. ইন্টারেক্টিভ ওয়ার্মআপ (Interactive Warmup — No Timer)</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("WORD_CLOUD");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-fuchsia-500 hover:bg-fuchsia-50/50 dark:hover:bg-fuchsia-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-fuchsia-500 to-pink-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
+                                    ☁️
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-fuchsia-600 dark:group-hover:text-fuchsia-400">ওয়ার্ড ক্লাউড</div>
+                                    <div className="text-[9px] text-slate-400 leading-tight">শিক্ষার্থীদের লাইভ শব্দগুচ্ছ</div>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("OPEN_ENDED");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-purple-500 hover:bg-purple-50/50 dark:hover:bg-purple-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-purple-500 to-indigo-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
+                                    💭
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-purple-600 dark:group-hover:text-purple-400">মুক্ত মতামত</div>
+                                    <div className="text-[9px] text-slate-400 leading-tight">উন্মুক্ত ভাবনা ও মন্তব্য</div>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("LIVE_QA");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/30 flex flex-col gap-1.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-7 h-7 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-600 text-white flex items-center justify-center text-xs shrink-0 shadow-xs">
+                                    🙋
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400">প্রশ্নোত্তর বোর্ড</div>
+                                    <div className="text-[9px] text-slate-400 leading-tight">লাইভ স্টুডেন্ট প্রশ্নমঞ্চ</div>
+                                  </div>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* CATEGORY 3: কুইজ প্রতিযোগিতা */}
+                            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-amber-200/80 dark:border-amber-900/50 space-y-2">
+                              <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                                <span className="w-6 h-6 rounded-lg bg-amber-500/10 flex items-center justify-center text-sm">🏆</span>
+                                <span>৩. কুইজ প্রতিযোগিতা (Quiz Competition — Timer + Points)</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("MCQ");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-blue-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    🔘
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400">MCQ (বহুনির্বাচনী প্রশ্ন)</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">৪টি অপশন থেকে ১টি সঠিক উত্তর</div>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("FILL_BLANKS");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    📝
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400">শূন্যস্থান পূরণ (Fill in Blanks)</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">ক্যাপসুল স্লটে সঠিক শব্দ বসানো</div>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("MATCHING");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    🔗
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">ডান-বাম মিলকরণ (Matching)</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">বাম ও ডান কলামের রঙিন ক্রস-লাইন</div>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("REORDER");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-rose-500 hover:bg-rose-50/50 dark:hover:bg-rose-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs"
+                                >
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    🔢
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400">ধারাবাহিক ক্রম সাজানো</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">কাজের ধাপ ক্রমানুসারে সাজানো</div>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleAddNewSlide("TRUE_FALSE");
+                                    setShowNewSlidePopover(false);
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-violet-500 hover:bg-violet-50/50 dark:hover:bg-violet-950/30 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-xs sm:col-span-2"
+                                >
+                                  <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-500 to-indigo-600 text-white flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    ⚖️
+                                  </span>
+                                  <div>
+                                    <div className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-violet-400">সত্য / মিথ্যা (True / False)</div>
+                                    <div className="text-[10px] text-slate-400 leading-tight">বিবৃতি যাচাই ও মূল্যায়ন</div>
+                                  </div>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* CATEGORY 4: স্পেশাল লিডারবোর্ড স্লাইড (TASK 3) */}
+                            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-orange-500/10 border border-amber-300 dark:border-amber-700/60 space-y-2">
+                              <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                                <span className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center text-sm">🏆</span>
+                                <span>৪. লিডারবোর্ড স্লাইড (Leaderboard — Host Controlled)</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleAddNewSlide("LEADERBOARD");
+                                  setShowNewSlidePopover(false);
+                                }}
+                                className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-600/60 hover:border-amber-500 hover:bg-amber-50/50 dark:hover:bg-amber-950/40 flex items-start gap-2.5 text-left transition cursor-pointer group shadow-sm"
+                              >
+                                <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-500 text-white flex items-center justify-center text-base shrink-0 shadow-sm">
+                                  🏆
+                                </span>
+                                <div>
+                                  <div className="text-xs font-black text-amber-700 dark:text-amber-300 group-hover:text-amber-600 dark:group-hover:text-amber-200">
+                                    🏆 লিডারবোর্ড স্লাইড (LEADERBOARD)
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                    যেখানে খুশি বসান — হোস্ট স্লাইডে আসলেই স্টুডেন্টদের ফোনে লাইভ র‍্যাঙ্ক ও টপ ১০ ভেসে উঠবে!
+                                  </div>
+                                </div>
+                              </button>
+                            </div>
+                          </motion.div>
+                        </div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAiModal(true)}
+                    className="py-1.5 px-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[11px] font-black transition flex items-center justify-center gap-1 cursor-pointer border border-amber-200 dark:border-amber-800"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>✨ AI</span>
+                  </button>
+                </div>
+
+                {/* Vertical List of Compact 16:9 Slide Thumbnails */}
+                <div className="space-y-2 flex-1">
+                  {currentDeck.slides.map((slide, idx) => {
+                    const isSelected = slide.id === currentSlide.id;
+                    const graded = isGradedQuiz(slide.type);
+
+                    const getThumbStyles = (t: SlideType) => {
+                      switch (t) {
+                        case "LEADERBOARD":
+                          return {
+                            border: isSelected
+                              ? "border-amber-500 ring-2 ring-amber-400/40 bg-amber-50/70 dark:bg-amber-950/50"
+                              : "border-amber-300 dark:border-amber-800 hover:border-amber-500",
+                            badge: "bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black",
+                            label: "🏆 লিডারবোর্ড",
+                          };
+                        case "MCQ":
+                          return {
+                            border: isSelected ? "border-indigo-500 ring-2 ring-indigo-400/40 bg-indigo-50/70 dark:bg-indigo-950/50" : "border-indigo-200/80 dark:border-indigo-900/50 hover:border-indigo-400",
+                            badge: "bg-indigo-600 text-white",
+                            label: "MCQ",
+                          };
+                        case "MATCHING":
+                          return {
+                            border: isSelected ? "border-emerald-500 ring-2 ring-emerald-400/40 bg-emerald-50/70 dark:bg-emerald-950/50" : "border-emerald-200/80 dark:border-emerald-900/50 hover:border-emerald-400",
+                            badge: "bg-emerald-600 text-white",
+                            label: "মিলকরণ",
+                          };
+                        case "FILL_BLANKS":
+                          return {
+                            border: isSelected ? "border-amber-500 ring-2 ring-amber-400/40 bg-amber-50/70 dark:bg-amber-950/50" : "border-amber-200/80 dark:border-amber-900/50 hover:border-amber-400",
+                            badge: "bg-amber-500 text-slate-950 font-black",
+                            label: "শূন্যস্থান",
+                          };
+                        case "REORDER":
+                          return {
+                            border: isSelected ? "border-rose-500 ring-2 ring-rose-400/40 bg-rose-50/70 dark:bg-rose-950/50" : "border-rose-200/80 dark:border-rose-900/50 hover:border-rose-400",
+                            badge: "bg-rose-500 text-white",
+                            label: "ক্রম",
+                          };
+                        case "TRUE_FALSE":
+                          return {
+                            border: isSelected ? "border-violet-500 ring-2 ring-violet-400/40 bg-violet-50/70 dark:bg-violet-950/50" : "border-violet-200/80 dark:border-violet-900/50 hover:border-violet-400",
+                            badge: "bg-violet-600 text-white",
+                            label: "সত্য/মিথ্যা",
+                          };
+                        case "WORD_CLOUD":
+                          return {
+                            border: isSelected ? "border-fuchsia-500 ring-2 ring-fuchsia-400/40 bg-fuchsia-50/70 dark:bg-fuchsia-950/50" : "border-fuchsia-200/80 dark:border-fuchsia-900/50 hover:border-fuchsia-400",
+                            badge: "bg-fuchsia-600 text-white",
+                            label: "ক্লাউড",
+                          };
+                        case "OPEN_ENDED":
+                        case "LIVE_QA":
+                          return {
+                            border: isSelected ? "border-purple-500 ring-2 ring-purple-400/40 bg-purple-50/70 dark:bg-purple-950/50" : "border-purple-200/80 dark:border-purple-900/50 hover:border-purple-400",
+                            badge: "bg-purple-600 text-white",
+                            label: t === "LIVE_QA" ? "Q&A" : "মতামত",
+                          };
+                        default:
+                          return {
+                            border: isSelected ? "border-blue-500 ring-2 ring-blue-400/40 bg-blue-50/70 dark:bg-blue-950/50" : "border-slate-200 dark:border-slate-800 hover:border-blue-400",
+                            badge: "bg-blue-600 text-white",
+                            label: "কন্টেন্ট",
+                          };
+                      }
+                    };
+
+                    const thumbStyle = getThumbStyles(slide.type);
+
+                    return (
+                      <div
+                        key={slide.id}
+                        draggable={true}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", String(idx));
+                          e.dataTransfer.effectAllowed = "move";
+                          setDraggingIndex(idx);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dragOverIndex !== idx) setDragOverIndex(idx);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverIndex === idx) setDragOverIndex(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const fromIdx = Number(e.dataTransfer.getData("text/plain"));
+                          if (!isNaN(fromIdx)) {
+                            handleDropSlide(fromIdx, idx);
+                          }
+                        }}
+                        onDragEnd={() => {
+                          setDraggingIndex(null);
+                          setDragOverIndex(null);
+                        }}
+                        onClick={() => setCurrentSlideId(slide.id)}
+                        className={`group relative rounded-2xl border-2 p-2 transition-all cursor-grab active:cursor-grabbing flex flex-col justify-between aspect-16/10 shadow-xs ${dragOverIndex === idx
+                          ? "border-indigo-500 scale-105 shadow-xl bg-indigo-50/80 dark:bg-indigo-950/60 ring-2 ring-indigo-400"
+                          : draggingIndex === idx
+                            ? "opacity-40 border-dashed border-indigo-400"
+                            : thumbStyle.border
+                          }`}
+                      >
+                        {/* Thumbnail Header */}
+                        <div className="flex items-center justify-between text-[10px] font-black">
+                          <span
+                            className={`w-4 h-4 rounded-md flex items-center justify-center font-mono ${isSelected
+                              ? "bg-slate-950 text-white"
+                              : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                              }`}
+                          >
+                            {idx + 1}
+                          </span>
+
+                          <span className={`px-1.5 py-0.2 rounded-md font-mono text-[8px] font-black uppercase ${thumbStyle.badge}`}>
+                            {thumbStyle.label}
+                          </span>
+                        </div>
+
+                        {/* Title Preview */}
+                        <p className="text-[11px] font-black text-slate-800 dark:text-slate-200 line-clamp-2 my-auto leading-tight">
+                          {slide.type === "LEADERBOARD"
+                            ? "🏆 লিডারবোর্ড স্লাইড"
+                            : slide.title.trim() || (
+                              <span className="italic opacity-40 font-normal">খালি স্লাইড</span>
+                            )}
+                        </p>
+
+                        {/* Footer: Timer or Points badge + Hover Actions */}
+                        <div className="flex items-center justify-between pt-1 text-[9px]">
+                          {graded ? (
+                            <span className="text-amber-500 font-bold font-mono">
+                              {slide.points}p • {slide.timeLimit}s
+                            </span>
+                          ) : slide.type === "LEADERBOARD" ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">🏆 লাইভ র‍্যাঙ্ক</span>
+                          ) : (
+                            <span className="text-slate-400 font-medium font-mono">কন্টেন্ট</span>
+                          )}
+
+                          {/* Move Up/Down & Delete */}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                            {idx > 0 && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleMoveSlide(idx, "up", e)}
+                                className="p-0.5 rounded text-slate-400 hover:text-indigo-600"
+                                title="উপরে নিন"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                            )}
+                            {idx < currentDeck.slides.length - 1 && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleMoveSlide(idx, "down", e)}
+                                className="p-0.5 rounded text-slate-400 hover:text-indigo-600"
+                                title="নিচে নিন"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteSlide(slide.id, e)}
+                              className="p-0.5 rounded text-rose-400 hover:text-rose-600"
+                              title="মুছুন"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              {/* -----------------------------------------------------------------
+                CENTER GIANT STAGE (flex-1 flex flex-col items-center justify-between p-6 lg:p-10)
+                ----------------------------------------------------------------- */}
+              <main className="flex-1 flex flex-col items-center justify-between p-4 sm:p-6 lg:p-8 overflow-y-auto relative scrollbar-thin">
+                {/* TOP FLOATING CONTEXTUAL TOOLBAR (Replaces the bulky Right Column!) */}
+                <div className="sticky top-0 z-30 mb-4 rounded-2xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 px-4 py-2 flex flex-wrap items-center justify-center gap-3 max-w-3xl backdrop-blur-md">
+                  {/* 1. Slide Type Selector Dropdown */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                      স্লাইড টাইপ:
+                    </span>
+                    <select
+                      value={currentSlide.type}
+                      onChange={(e) => {
+                        const newType = e.target.value as SlideType;
+                        const graded = isGradedQuiz(newType);
+                        updateCurrentSlide({
+                          type: newType,
+                          timeLimit: graded ? 30 : 0,
+                          points: graded ? 100 : 0,
+                        });
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-black text-indigo-600 dark:text-indigo-300 focus:outline-none cursor-pointer"
+                    >
+                      <optgroup label="📄 কন্টেন্ট স্লাইড (No Timer)">
+                        <option value="TEXT_SLIDE">📄 টেক্সট ও হেডিং স্লাইড</option>
+                        <option value="IMAGE_COMPARE">🖼️ ইমেজ তুলনা স্লাইড</option>
+                      </optgroup>
+                      <optgroup label="💬 ইন্টারেক্টিভ ওপেন স্লাইড (No Timer)">
+                        <option value="WORD_CLOUD">☁️ লাইভ ওয়ার্ড ক্লাউড</option>
+                        <option value="OPEN_ENDED">💭 মুক্ত মতামত (Open Ended)</option>
+                        <option value="LIVE_QA">🙋 লাইভ প্রশ্নোত্তর বোর্ড</option>
+                      </optgroup>
+                      <optgroup label="🏆 কুইজ প্রতিযোগিতা (Graded)">
+                        <option value="MCQ">🔘 বহুনির্বাচনী প্রশ্ন (MCQ Single)</option>
+                        <option value="FILL_BLANKS">📝 শূন্যস্থান পূরণ (Fill Blanks)</option>
+                        <option value="MATCHING">🔗 ডান-বাম মিলকরণ (Matching)</option>
+                        <option value="REORDER">🔢 ধারাবাহিক ক্রম সাজানো</option>
+                        <option value="TRUE_FALSE">⚖️ সত্য / মিথ্যা (True/False)</option>
+                      </optgroup>
+                      <optgroup label="🏆 স্পেশাল স্লাইড">
+                        <option value="LEADERBOARD">🏆 লাইভ লিডারবোর্ড স্লাইড</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* STRICT CONDITIONAL TIMER & POINTS PILLS: ONLY SHOWN IF GRADED QUIZ! */}
+                  {isGradedQuiz(currentSlide.type) && (
+                    <>
+                      <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+
+                      {/* Time Limit Pills */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-black text-slate-400">⏱️ সময়:</span>
+                        <div className="flex items-center gap-1">
+                          {[15, 20, 30, 60].map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => updateCurrentSlide({ timeLimit: t })}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.timeLimit === t
+                                ? "bg-cyan-500 text-slate-950 border-cyan-400 font-bold"
+                                : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
+                                }`}
+                            >
+                              {t}s
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Add Option Button */}
-                      {currentSlide.options.length < 6 && (
+                      <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+
+                      {/* Points Pills */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-black text-slate-400">⭐ পয়েন্ট:</span>
+                        <div className="flex items-center gap-1">
+                          {[50, 100, 200].map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => updateCurrentSlide({ points: p })}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer border ${currentSlide.points === p
+                                ? "bg-amber-500 text-slate-950 border-amber-400 font-bold"
+                                : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-white"
+                                }`}
+                            >
+                              {p}p
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Explanation Popover Button */}
+                  <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+                  <button
+                    type="button"
+                    onClick={() => setShowExplanationPopover(!showExplanationPopover)}
+                    className={`px-2.5 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1 cursor-pointer ${currentSlide.explanation
+                      ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700"
+                      : "bg-slate-50 dark:bg-slate-950 text-slate-500 border-slate-200 dark:border-slate-800 hover:text-indigo-500"
+                      }`}
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                    <span>💡 ব্যাখ্যা {currentSlide.explanation ? "(যুক্ত)" : ""}</span>
+                  </button>
+
+                  {/* TASK 3: On-Canvas "🪄 AI দিয়ে এই স্লাইডটি আপডেট করুন" Magic Button */}
+                  <div className="h-5 w-[1px] bg-slate-200 dark:bg-slate-800" />
+                  <button
+                    type="button"
+                    onClick={() => setShowAiImprovePopover(!showAiImprovePopover)}
+                    className={`px-3 py-1 rounded-xl border text-[11px] font-black transition flex items-center gap-1.5 cursor-pointer shadow-xs ${showAiImprovePopover
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-indigo-600 shadow-indigo-500/20"
+                      : "bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                      }`}
+                    title="AI দিয়ে বর্তমান স্লাইডটি পরিমার্জন, রূপান্তর বা উন্নত করুন"
+                  >
+                    {isAiImprovingSlide ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5 text-amber-400" />
+                    )}
+                    <span>🪄 AI আপডেট</span>
+                    <ChevronDown className={`w-3 h-3 transition-transform ${showAiImprovePopover ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
+
+                {/* Floating Explanation Popover Card */}
+                <AnimatePresence>
+                  {showExplanationPopover && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="w-full max-w-xl mb-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-2 z-20"
+                    >
+                      <div className="flex items-center justify-between text-xs font-black text-amber-500">
+                        <span>💡 সঠিক উত্তরের ব্যাখ্যা বা শিক্ষকের নোট:</span>
                         <button
                           type="button"
-                          onClick={() => {
-                            updateCurrentSlide({
-                              options: [...currentSlide.options, `নতুন অপশন`],
-                            });
-                          }}
-                          className="py-2 px-4 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                          onClick={() => setShowExplanationPopover(false)}
+                          className="p-1 text-slate-400 hover:text-white"
                         >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>+ অপশন যোগ করুন</span>
+                          ✕
                         </button>
-                      )}
-                    </div>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={currentSlide.explanation || ""}
+                        onChange={(e) => updateCurrentSlide({ explanation: e.target.value })}
+                        placeholder="শিক্ষার্থীরা উত্তর দেওয়ার পর এই ব্যাখ্যা প্রদর্শিত হবে..."
+                        className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none focus:border-amber-400"
+                      />
+                    </motion.div>
                   )}
+                </AnimatePresence>
 
-                  {/* TYPE: True / False */}
-                  {currentSlide.type === "TRUE_FALSE" && (
-                    <div className="grid grid-cols-2 gap-6 max-w-lg mx-auto w-full py-4">
-                      <button
-                        type="button"
-                        onClick={() => updateCurrentSlide({ correctAnswer: true })}
-                        className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === true
-                          ? "bg-emerald-500 text-white border-emerald-400 shadow-xl shadow-emerald-500/30 scale-102"
-                          : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
-                          }`}
-                      >
-                        <CheckCircle2 className="w-10 h-10" />
-                        <span className="text-base sm:text-lg font-black">সত্য (True)</span>
-                      </button>
+                {/* Floating AI Slide Improve Popover Card (TASK 3) */}
+                <AnimatePresence>
+                  {showAiImprovePopover && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="w-full max-w-2xl mb-4 p-5 rounded-3xl bg-white dark:bg-slate-900 border-2 border-indigo-500/40 shadow-2xl space-y-4 z-20"
+                    >
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-2 text-xs font-black text-indigo-600 dark:text-indigo-400">
+                          <Wand2 className="w-4 h-4 text-amber-400" />
+                          <span>🪄 এই স্লাইডটি AI দিয়ে পরিমার্জন ও রূপান্তর করুন</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAiImprovePopover(false)}
+                          className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                        >
+                          ✕
+                        </button>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => updateCurrentSlide({ correctAnswer: false })}
-                        className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === false
-                          ? "bg-rose-500 text-white border-rose-400 shadow-xl shadow-rose-500/30 scale-102"
-                          : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
-                          }`}
-                      >
-                        <X className="w-10 h-10 stroke-[3]" />
-                        <span className="text-base sm:text-lg font-black">মিথ্যা (False)</span>
-                      </button>
-                    </div>
+                      {/* 4 Quick 1-Click Action Buttons */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={isAiImprovingSlide}
+                          onClick={() => handleAiImproveCurrentSlide("beautify")}
+                          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                          <div>
+                            <div className="text-xs font-black text-slate-800 dark:text-slate-200">✨ ভাষা ও বিকল্প সুন্দর করো</div>
+                            <div className="text-[10px] text-slate-400">বানান ও ব্যাকরণ নির্ভুল ও বাস্তবসম্মত করা</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isAiImprovingSlide}
+                          onClick={() => handleAiImproveCurrentSlide("harder")}
+                          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
+                          <div>
+                            <div className="text-xs font-black text-slate-800 dark:text-slate-200">🧠 আরেকটু মানসম্মত ও কঠিন করো</div>
+                            <div className="text-[10px] text-slate-400">মুখস্থের বদলে ধারণাগত গভীর প্রশ্ন তৈরি</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isAiImprovingSlide}
+                          onClick={() => handleAiImproveCurrentSlide("explain")}
+                          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 text-left transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <div>
+                            <div className="text-xs font-black text-slate-800 dark:text-slate-200">💡 সঠিক উত্তরের ব্যাখ্যা তৈরি করো</div>
+                            <div className="text-[10px] text-slate-400">শিক্ষার্থীদের জন্য সহজবোধ্য বিস্তারিত ব্যাখ্যা</div>
+                          </div>
+                        </button>
+
+                        {/* Convert to another type dropdown */}
+                        <div className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-1.5 bg-slate-50 dark:bg-slate-950">
+                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            🔀 অন্য ধরনে রূপান্তর:
+                          </div>
+                          <select
+                            disabled={isAiImprovingSlide}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                handleAiImproveCurrentSlide("convert", e.target.value as SlideType);
+                                e.target.value = "";
+                              }
+                            }}
+                            className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] font-black text-indigo-600 dark:text-indigo-400 cursor-pointer"
+                          >
+                            <option value="">নির্বাচন করুন</option>
+                            <option value="MATCHING">🔗 MATCHING (মিলকরণ)</option>
+                            <option value="FILL_BLANKS">📝 FILL_BLANKS (শূন্যস্থান)</option>
+                            <option value="REORDER">🔢 REORDER (ধারাবাহিক ক্রম)</option>
+                            <option value="TRUE_FALSE">⚖️ TRUE_FALSE (সত্য/মিথ্যা)</option>
+                            <option value="MCQ">🔘 MCQ (বহুনির্বাচনী)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Custom prompt input */}
+                      <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                          <span>✍️ AI-কে বলুন এই স্লাইডে কী পরিবর্তন চান:</span>
+                          {isAiImprovingSlide && (
+                            <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> স্লাইড পরিমার্জন হচ্ছে...
+                            </span>
+                          )}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={customAiSlidePrompt}
+                            onChange={(e) => setCustomAiSlidePrompt(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && customAiSlidePrompt.trim()) {
+                                handleAiImproveCurrentSlide("custom", undefined, customAiSlidePrompt.trim());
+                              }
+                            }}
+                            placeholder="যেমন: অপশনগুলো আরও সংক্ষিপ্ত করো অথবা বাস্তব জীবনের উদাহরণ দাও..."
+                            className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            disabled={isAiImprovingSlide || !customAiSlidePrompt.trim()}
+                            onClick={() => handleAiImproveCurrentSlide("custom", undefined, customAiSlidePrompt.trim())}
+                            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs transition cursor-pointer disabled:opacity-50 shrink-0"
+                          >
+                            প্রয়োগ করুন
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
                   )}
+                </AnimatePresence>
 
-                  {/* TYPE: Fill in Blanks */}
-                  {currentSlide.type === "FILL_BLANKS" && (
-                    <div className="space-y-4 max-w-2xl mx-auto w-full">
-                      <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-black text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
-                            <span>📝</span>
-                            <span>ক্যাপসুল ব্ল্যাঙ্ক বাক্য (Sentence with Capsule Blanks):</span>
-                          </label>
+                {/* ---------------------------------------------------------------
+                  THE 16:9 INTERACTIVE STAGE CARD (w-full max-w-4xl min-h-[460px])
+                  --------------------------------------------------------------- */}
+                <div className="w-full max-w-4xl min-h-[480px] my-auto rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800/80 p-6 sm:p-10 flex flex-col justify-between relative transition-all">
+                  {/* 1. BLANK CUSTOM PROMPT TITLE (No prefilled questions!) */}
+                  <div className="space-y-1.5 pb-4">
+                    <input
+                      type="text"
+                      value={currentSlide.title}
+                      onChange={(e) => updateCurrentSlide({ title: e.target.value })}
+                      placeholder="এখানে আপনার প্রশ্ন বা আলোচনার বিষয় লিখুন..."
+                      className="w-full text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 bg-transparent border-b-2 border-transparent hover:border-slate-300 dark:hover:border-slate-700 focus:border-indigo-500 focus:outline-none transition py-2 leading-relaxed text-center sm:text-left"
+                    />
+                  </div>
 
+                  {/* 2. DIRECT ON-CANVAS EDITING BY TYPE */}
+                  <div className="flex-1 flex flex-col justify-center py-4">
+                    {/* TYPE: MCQ Single */}
+                    {currentSlide.type === "MCQ" && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          {currentSlide.options.map((opt, optIdx) => {
+                            const isCorrect = currentSlide.correctAnswer === optIdx;
+                            const shapeIcons = ["▲", "◆", "●", "■"];
+
+                            return (
+                              <div
+                                key={optIdx}
+                                className={`p-3.5 rounded-2xl border-2 transition-all flex items-center gap-3 relative shadow-sm ${isCorrect
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-400/40"
+                                  : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                                  }`}
+                              >
+                                {/* Correct Answer Circular Toggle (Click to mark Green Correct) */}
+                                <button
+                                  type="button"
+                                  onClick={() => updateCurrentSlide({ correctAnswer: optIdx })}
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 transition-transform active:scale-95 cursor-pointer ${isCorrect
+                                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
+                                    : "bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
+                                    }`}
+                                  title="সঠিক উত্তর হিসেবে চিহ্নিত করুন"
+                                >
+                                  {isCorrect ? (
+                                    <Check className="w-4 h-4 stroke-[3]" />
+                                  ) : (
+                                    shapeIcons[optIdx % 4]
+                                  )}
+                                </button>
+
+                                {/* In-line Editable Option Input */}
+                                <input
+                                  type="text"
+                                  value={opt}
+                                  onChange={(e) => {
+                                    const updated = [...currentSlide.options];
+                                    updated[optIdx] = e.target.value;
+                                    updateCurrentSlide({ options: updated });
+                                  }}
+                                  placeholder={`অপশন ${optIdx + 1} লিখুন...`}
+                                  className="bg-transparent text-sm font-bold text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none w-full"
+                                />
+
+                                {/* Delete Option */}
+                                {currentSlide.options.length > 2 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = currentSlide.options.filter((_, i) => i !== optIdx);
+                                      updateCurrentSlide({
+                                        options: updated,
+                                        correctAnswer: Math.min(
+                                          Number(currentSlide.correctAnswer),
+                                          updated.length - 1
+                                        ),
+                                      });
+                                    }}
+                                    className="text-slate-400 hover:text-rose-500 p-1 transition cursor-pointer"
+                                    title="অপশন মুছুন"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Add Option Button */}
+                        {currentSlide.options.length < 6 && (
                           <button
                             type="button"
                             onClick={() => {
-                              const cur = currentSlide.content || "";
-                              updateCurrentSlide({ content: cur ? `${cur} ___` : "___" });
+                              updateCurrentSlide({
+                                options: [...currentSlide.options, `নতুন অপশন`],
+                              });
                             }}
-                            className="px-2.5 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-black transition flex items-center gap-1 cursor-pointer active:scale-95"
-                            title="বাক্যের শেষে শূন্যস্থান কোড যোগ করুন"
+                            className="py-2 px-4 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
                           >
                             <Plus className="w-3.5 h-3.5" />
-                            <span>[ ___ শূন্যস্থান যোগ করুন ]</span>
+                            <span>+ অপশন যোগ করুন</span>
                           </button>
-                        </div>
-
-                        <input
-                          type="text"
-                          value={currentSlide.content || ""}
-                          onChange={(e) => updateCurrentSlide({ content: e.target.value })}
-                          placeholder="বাক্যে শূন্যস্থান বোঝাতে '___' ব্যবহার করুন (যেমন: IPv4 এড্রেস সাধারণত ___ বিট।)"
-                          className="w-full text-sm font-bold text-slate-800 dark:text-slate-200 bg-transparent focus:outline-none border-b-2 border-indigo-400 pb-1.5 leading-relaxed"
-                        />
-
-                        {/* Interactive Capsule Slot Live Preview */}
-                        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-1.5">
-                          <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest block">
-                            ✨ স্টুডেন্ট স্ক্রিন ক্যাপসুল লাইভ প্রিভিউ:
-                          </span>
-                          <div className="text-sm font-bold text-slate-800 dark:text-slate-200 leading-relaxed flex flex-wrap items-center gap-1.5">
-                            {(currentSlide.content || "বাক্য লিখুন এবং ___ যোগ করুন").split(/(___+)/g).map((seg, sIdx) => {
-                              if (seg.startsWith("___")) {
-                                return (
-                                  <span
-                                    key={sIdx}
-                                    className="inline-flex items-center px-3 py-1 rounded-full bg-amber-500/20 border-2 border-dashed border-amber-400 text-amber-700 dark:text-amber-300 font-black text-xs shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse"
-                                  >
-                                    [ ক্যাপসুল স্লট: {currentSlide.acceptedAnswers?.[0] || "সঠিক উত্তর"} ]
-                                  </span>
-                                );
-                              }
-                              return <span key={sIdx}>{seg}</span>;
-                            })}
-                          </div>
-                        </div>
+                        )}
                       </div>
+                    )}
 
-                      {/* Correct Answers / Accepted Words & Word Bank Hints */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5">
-                          <label className="text-[11px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
-                            🎯 সঠিক উত্তর (Capsule Word) — কমা দিয়ে একাধিক:
-                          </label>
-                          <input
-                            type="text"
-                            value={(currentSlide.acceptedAnswers || []).join(", ")}
-                            onChange={(e) =>
-                              updateCurrentSlide({
-                                acceptedAnswers: e.target.value.split(",").map((s) => s.trim()),
-                                correctAnswer: e.target.value.split(",")[0]?.trim() || "",
-                              })
-                            }
-                            placeholder="যেমন: ৩২, 32, ৩২ বিট"
-                            className="w-full text-xs font-black text-emerald-800 dark:text-emerald-200 bg-transparent focus:outline-none border-b border-emerald-400/60 pb-1"
-                          />
-                        </div>
+                    {/* TYPE: True / False */}
+                    {currentSlide.type === "TRUE_FALSE" && (
+                      <div className="grid grid-cols-2 gap-6 max-w-lg mx-auto w-full py-4">
+                        <button
+                          type="button"
+                          onClick={() => updateCurrentSlide({ correctAnswer: true })}
+                          className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === true
+                            ? "bg-emerald-500 text-white border-emerald-400 shadow-xl shadow-emerald-500/30 scale-102"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                            }`}
+                        >
+                          <CheckCircle2 className="w-10 h-10" />
+                          <span className="text-base sm:text-lg font-black">সত্য (True)</span>
+                        </button>
 
-                        <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
-                          <label className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">
-                            💡 ঐচ্ছিক শব্দ-ব্যাংক (Word Bank Hints):
-                          </label>
-                          <input
-                            type="text"
-                            value={(currentSlide.options || []).join(", ")}
-                            onChange={(e) =>
-                              updateCurrentSlide({
-                                options: e.target.value.split(",").map((s) => s.trim()),
-                              })
-                            }
-                            placeholder="যেমন: ১৬, ৩২, ৬৪, ১২৮"
-                            className="w-full text-xs font-black text-indigo-800 dark:text-indigo-200 bg-transparent focus:outline-none border-b border-indigo-400/60 pb-1"
-                          />
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateCurrentSlide({ correctAnswer: false })}
+                          className={`p-6 sm:p-8 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer ${currentSlide.correctAnswer === false
+                            ? "bg-rose-500 text-white border-rose-400 shadow-xl shadow-rose-500/30 scale-102"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                            }`}
+                        >
+                          <X className="w-10 h-10 stroke-[3]" />
+                          <span className="text-base sm:text-lg font-black">মিথ্যা (False)</span>
+                        </button>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* TYPE: Matching Pairs */}
-                  {currentSlide.type === "MATCHING" && (
-                    <div className="space-y-3.5 max-w-2xl mx-auto w-full">
-                      <div className="flex items-center justify-between px-1">
-                        <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <span>🔗</span>
-                          <span>বাম পাশ ↔ ডান পাশ মিলকরণ জোড়াসমূহ (Cross-Line Pairs):</span>
-                        </span>
-                        <span className="text-[10px] text-slate-400">স্টুডেন্ট স্ক্রিনে রঙিন লাইন টেনে মিল করতে হবে</span>
-                      </div>
+                    {/* TYPE: Fill in Blanks */}
+                    {currentSlide.type === "FILL_BLANKS" && (
+                      <div className="space-y-4 max-w-2xl mx-auto w-full">
+                        <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-black text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                              <span>📝</span>
+                              <span>ক্যাপসুল ব্ল্যাঙ্ক বাক্য (Sentence with Capsule Blanks):</span>
+                            </label>
 
-                      <div className="space-y-2.5">
-                        {(currentSlide.pairs || []).map((pair, pIdx) => (
-                          <div
-                            key={pIdx}
-                            className="flex items-center gap-2 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xs"
-                          >
-                            <span className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
-                              {pIdx + 1}
-                            </span>
-                            <div className="flex-1 flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={pair.left}
-                                onChange={(e) => {
-                                  const newPairs = [...(currentSlide.pairs || [])];
-                                  newPairs[pIdx].left = e.target.value;
-                                  updateCurrentSlide({ pairs: newPairs });
-                                }}
-                                placeholder={`বাম পাশের বিষয় ${pIdx + 1}`}
-                                className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-900/60 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
-                              />
-                              <ArrowRight className="w-4 h-4 text-emerald-500 shrink-0" />
-                              <input
-                                type="text"
-                                value={pair.right}
-                                onChange={(e) => {
-                                  const newPairs = [...(currentSlide.pairs || [])];
-                                  newPairs[pIdx].right = e.target.value;
-                                  updateCurrentSlide({ pairs: newPairs });
-                                }}
-                                placeholder={`ডান পাশের সঠিক মিল ${pIdx + 1}`}
-                                className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-cyan-200 dark:border-cyan-900/60 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500"
-                              />
-                            </div>
-                            {(currentSlide.pairs || []).length > 2 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const newPairs = (currentSlide.pairs || []).filter((_, i) => i !== pIdx);
-                                  updateCurrentSlide({ pairs: newPairs });
-                                }}
-                                className="text-slate-400 hover:text-rose-500 p-1.5 transition cursor-pointer"
-                                title="জোড়া মুছুন"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newPairs = [...(currentSlide.pairs || []), { left: "", right: "" }];
-                          updateCurrentSlide({ pairs: newPairs });
-                        }}
-                        className="py-2 px-4 rounded-xl border border-dashed border-emerald-400 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>+ নতুন জোড়া যোগ করুন</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* TYPE: Reorder Sequence */}
-                  {currentSlide.type === "REORDER" && (
-                    <div className="space-y-3.5 max-w-2xl mx-auto w-full">
-                      <div className="flex items-center justify-between px-1">
-                        <span className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <span>🔢</span>
-                          <span>সঠিক ধারাবাহিক ক্রম অনুযায়ী ধাপগুলো সাজান:</span>
-                        </span>
-                        <span className="text-[10px] text-slate-400">স্টুডেন্ট স্ক্রিনে এলোমেলো হয়ে যাবে</span>
-                      </div>
-
-                      <div className="space-y-2">
-                        {(currentSlide.items || []).map((step, sIdx) => {
-                          const totalSteps = (currentSlide.items || []).length;
-                          return (
-                            <div
-                              key={sIdx}
-                              className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xs"
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const cur = currentSlide.content || "";
+                                updateCurrentSlide({ content: cur ? `${cur} ___` : "___" });
+                              }}
+                              className="px-2.5 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-black transition flex items-center gap-1 cursor-pointer active:scale-95"
+                              title="বাক্যের শেষে শূন্যস্থান কোড যোগ করুন"
                             >
-                              <span className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400 font-mono font-black text-xs flex items-center justify-center shrink-0">
-                                {sIdx + 1}
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>[ ___ শূন্যস্থান যোগ করুন ]</span>
+                            </button>
+                          </div>
+
+                          <input
+                            type="text"
+                            value={currentSlide.content || ""}
+                            onChange={(e) => updateCurrentSlide({ content: e.target.value })}
+                            placeholder="বাক্যে শূন্যস্থান বোঝাতে '___' ব্যবহার করুন (যেমন: IPv4 এড্রেস সাধারণত ___ বিট।)"
+                            className="w-full text-sm font-bold text-slate-800 dark:text-slate-200 bg-transparent focus:outline-none border-b-2 border-indigo-400 pb-1.5 leading-relaxed"
+                          />
+
+                          {/* Interactive Capsule Slot Live Preview */}
+                          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-1.5">
+                            <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest block">
+                              ✨ স্টুডেন্ট স্ক্রিন ক্যাপসুল লাইভ প্রিভিউ:
+                            </span>
+                            <div className="text-sm font-bold text-slate-800 dark:text-slate-200 leading-relaxed flex flex-wrap items-center gap-1.5">
+                              {(currentSlide.content || "বাক্য লিখুন এবং ___ যোগ করুন").split(/(___+)/g).map((seg, sIdx) => {
+                                if (seg.startsWith("___")) {
+                                  return (
+                                    <span
+                                      key={sIdx}
+                                      className="inline-flex items-center px-3 py-1 rounded-full bg-amber-500/20 border-2 border-dashed border-amber-400 text-amber-700 dark:text-amber-300 font-black text-xs shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse"
+                                    >
+                                      [ ক্যাপসুল স্লট: {currentSlide.acceptedAnswers?.[0] || "সঠিক উত্তর"} ]
+                                    </span>
+                                  );
+                                }
+                                return <span key={sIdx}>{seg}</span>;
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Correct Answers / Accepted Words & Word Bank Hints */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5">
+                            <label className="text-[11px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
+                              🎯 সঠিক উত্তর (Capsule Word) — কমা দিয়ে একাধিক:
+                            </label>
+                            <input
+                              type="text"
+                              value={(currentSlide.acceptedAnswers || []).join(", ")}
+                              onChange={(e) =>
+                                updateCurrentSlide({
+                                  acceptedAnswers: e.target.value.split(",").map((s) => s.trim()),
+                                  correctAnswer: e.target.value.split(",")[0]?.trim() || "",
+                                })
+                              }
+                              placeholder="যেমন: ৩২, 32, ৩২ বিট"
+                              className="w-full text-xs font-black text-emerald-800 dark:text-emerald-200 bg-transparent focus:outline-none border-b border-emerald-400/60 pb-1"
+                            />
+                          </div>
+
+                          <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
+                            <label className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">
+                              💡 ঐচ্ছিক শব্দ-ব্যাংক (Word Bank Hints):
+                            </label>
+                            <input
+                              type="text"
+                              value={(currentSlide.options || []).join(", ")}
+                              onChange={(e) =>
+                                updateCurrentSlide({
+                                  options: e.target.value.split(",").map((s) => s.trim()),
+                                })
+                              }
+                              placeholder="যেমন: ১৬, ৩২, ৬৪, ১২৮"
+                              className="w-full text-xs font-black text-indigo-800 dark:text-indigo-200 bg-transparent focus:outline-none border-b border-indigo-400/60 pb-1"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* TYPE: Matching Pairs */}
+                    {currentSlide.type === "MATCHING" && (
+                      <div className="space-y-3.5 max-w-2xl mx-auto w-full">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <span>🔗</span>
+                            <span>বাম পাশ ↔ ডান পাশ মিলকরণ জোড়াসমূহ (Cross-Line Pairs):</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">স্টুডেন্ট স্ক্রিনে রঙিন লাইন টেনে মিল করতে হবে</span>
+                        </div>
+
+                        <div className="space-y-2.5">
+                          {(currentSlide.pairs || []).map((pair, pIdx) => (
+                            <div
+                              key={pIdx}
+                              className="flex items-center gap-2 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xs"
+                            >
+                              <span className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
+                                {pIdx + 1}
                               </span>
-
-                              <input
-                                type="text"
-                                value={step}
-                                onChange={(e) => {
-                                  const newItems = [...(currentSlide.items || [])];
-                                  newItems[sIdx] = e.target.value;
-                                  updateCurrentSlide({ items: newItems });
-                                }}
-                                placeholder={`ধাপ ${sIdx + 1} লিখুন...`}
-                                className="flex-1 bg-transparent text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
-                              />
-
-                              {/* Up / Down Swap Buttons */}
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  disabled={sIdx === 0}
-                                  onClick={() => {
-                                    if (sIdx > 0) {
-                                      const newItems = [...(currentSlide.items || [])];
-                                      const tmp = newItems[sIdx];
-                                      newItems[sIdx] = newItems[sIdx - 1];
-                                      newItems[sIdx - 1] = tmp;
-                                      updateCurrentSlide({ items: newItems });
-                                    }
+                              <div className="flex-1 flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={pair.left}
+                                  onChange={(e) => {
+                                    const newPairs = [...(currentSlide.pairs || [])];
+                                    newPairs[pIdx].left = e.target.value;
+                                    updateCurrentSlide({ pairs: newPairs });
                                   }}
-                                  className="p-1 rounded-md text-slate-400 hover:text-indigo-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
-                                  title="উপরে নিন"
-                                >
-                                  <ArrowUp className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={sIdx === totalSteps - 1}
-                                  onClick={() => {
-                                    if (sIdx < totalSteps - 1) {
-                                      const newItems = [...(currentSlide.items || [])];
-                                      const tmp = newItems[sIdx];
-                                      newItems[sIdx] = newItems[sIdx + 1];
-                                      newItems[sIdx + 1] = tmp;
-                                      updateCurrentSlide({ items: newItems });
-                                    }
+                                  placeholder={`বাম পাশের বিষয় ${pIdx + 1}`}
+                                  className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-900/60 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500"
+                                />
+                                <ArrowRight className="w-4 h-4 text-emerald-500 shrink-0" />
+                                <input
+                                  type="text"
+                                  value={pair.right}
+                                  onChange={(e) => {
+                                    const newPairs = [...(currentSlide.pairs || [])];
+                                    newPairs[pIdx].right = e.target.value;
+                                    updateCurrentSlide({ pairs: newPairs });
                                   }}
-                                  className="p-1 rounded-md text-slate-400 hover:text-indigo-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
-                                  title="নিচে নিন"
-                                >
-                                  <ArrowDown className="w-3.5 h-3.5" />
-                                </button>
+                                  placeholder={`ডান পাশের সঠিক মিল ${pIdx + 1}`}
+                                  className="flex-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-cyan-200 dark:border-cyan-900/60 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500"
+                                />
                               </div>
-
-                              {totalSteps > 2 && (
+                              {(currentSlide.pairs || []).length > 2 && (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const newItems = (currentSlide.items || []).filter((_, i) => i !== sIdx);
-                                    updateCurrentSlide({ items: newItems });
+                                    const newPairs = (currentSlide.pairs || []).filter((_, i) => i !== pIdx);
+                                    updateCurrentSlide({ pairs: newPairs });
                                   }}
-                                  className="text-slate-400 hover:text-rose-500 p-1 transition cursor-pointer"
-                                  title="ধাপ মুছুন"
+                                  className="text-slate-400 hover:text-rose-500 p-1.5 transition cursor-pointer"
+                                  title="জোড়া মুছুন"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
-                          );
-                        })}
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newPairs = [...(currentSlide.pairs || []), { left: "", right: "" }];
+                            updateCurrentSlide({ pairs: newPairs });
+                          }}
+                          className="py-2 px-4 rounded-xl border border-dashed border-emerald-400 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ নতুন জোড়া যোগ করুন</span>
+                        </button>
                       </div>
+                    )}
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newItems = [...(currentSlide.items || []), `নতুন ধাপ`];
-                          updateCurrentSlide({ items: newItems });
-                        }}
-                        className="py-2 px-4 rounded-xl border border-dashed border-rose-400 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>+ নতুন ধাপ যোগ করুন</span>
-                      </button>
-                    </div>
-                  )}
+                    {/* TYPE: Reorder Sequence */}
+                    {currentSlide.type === "REORDER" && (
+                      <div className="space-y-3.5 max-w-2xl mx-auto w-full">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <span>🔢</span>
+                            <span>সঠিক ধারাবাহিক ক্রম অনুযায়ী ধাপগুলো সাজান:</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">স্টুডেন্ট স্ক্রিনে এলোমেলো হয়ে যাবে</span>
+                        </div>
 
-                  {/* TYPE: Word Cloud (Super-Colorful Dynamic Kinetic Preview) */}
-                  {currentSlide.type === "WORD_CLOUD" && (
-                    <div className="p-8 rounded-3xl bg-slate-950/80 border-2 border-fuchsia-500/30 text-center space-y-5 shadow-2xl relative overflow-hidden">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <span className="text-xs font-black text-fuchsia-400 uppercase tracking-widest flex items-center gap-1.5">
-                          <span>☁️</span>
-                          <span>লাইভ কাইনেটিক ওয়ার্ড ক্লাউড প্রিভিউ (Super-Colorful Kinetic Word Cloud)</span>
-                        </span>
-                        <span className="text-[10px] text-slate-400">শব্দের পুনরাবৃত্তি অনুযায়ী ফন্ট স্কেলিং</span>
+                        <div className="space-y-2">
+                          {(currentSlide.items || []).map((step, sIdx) => {
+                            const totalSteps = (currentSlide.items || []).length;
+                            return (
+                              <div
+                                key={sIdx}
+                                className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xs"
+                              >
+                                <span className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400 font-mono font-black text-xs flex items-center justify-center shrink-0">
+                                  {sIdx + 1}
+                                </span>
+
+                                <input
+                                  type="text"
+                                  value={step}
+                                  onChange={(e) => {
+                                    const newItems = [...(currentSlide.items || [])];
+                                    newItems[sIdx] = e.target.value;
+                                    updateCurrentSlide({ items: newItems });
+                                  }}
+                                  placeholder={`ধাপ ${sIdx + 1} লিখুন...`}
+                                  className="flex-1 bg-transparent text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none"
+                                />
+
+                                {/* Up / Down Swap Buttons */}
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={sIdx === 0}
+                                    onClick={() => {
+                                      if (sIdx > 0) {
+                                        const newItems = [...(currentSlide.items || [])];
+                                        const tmp = newItems[sIdx];
+                                        newItems[sIdx] = newItems[sIdx - 1];
+                                        newItems[sIdx - 1] = tmp;
+                                        updateCurrentSlide({ items: newItems });
+                                      }
+                                    }}
+                                    className="p-1 rounded-md text-slate-400 hover:text-indigo-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                    title="উপরে নিন"
+                                  >
+                                    <ArrowUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={sIdx === totalSteps - 1}
+                                    onClick={() => {
+                                      if (sIdx < totalSteps - 1) {
+                                        const newItems = [...(currentSlide.items || [])];
+                                        const tmp = newItems[sIdx];
+                                        newItems[sIdx] = newItems[sIdx + 1];
+                                        newItems[sIdx + 1] = tmp;
+                                        updateCurrentSlide({ items: newItems });
+                                      }
+                                    }}
+                                    className="p-1 rounded-md text-slate-400 hover:text-indigo-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                    title="নিচে নিন"
+                                  >
+                                    <ArrowDown className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                {totalSteps > 2 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newItems = (currentSlide.items || []).filter((_, i) => i !== sIdx);
+                                      updateCurrentSlide({ items: newItems });
+                                    }}
+                                    className="text-slate-400 hover:text-rose-500 p-1 transition cursor-pointer"
+                                    title="ধাপ মুছুন"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newItems = [...(currentSlide.items || []), `নতুন ধাপ`];
+                            updateCurrentSlide({ items: newItems });
+                          }}
+                          className="py-2 px-4 rounded-xl border border-dashed border-rose-400 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold transition flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ নতুন ধাপ যোগ করুন</span>
+                        </button>
                       </div>
+                    )}
 
-                      <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5 max-w-2xl mx-auto py-4 min-h-[160px]">
-                        {[
-                          { word: "প্রযুক্তি", color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/30", size: "text-3xl sm:text-4xl font-black" },
-                          { word: "স্মার্ট", color: "text-rose-400 bg-rose-500/10 border-rose-500/30", size: "text-2xl sm:text-3xl font-extrabold" },
-                          { word: "অটোমেশন", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", size: "text-4xl sm:text-5xl font-black" },
-                          { word: "উদ্ভাবন", color: "text-amber-300 bg-amber-500/10 border-amber-500/30", size: "text-xl sm:text-2xl font-bold" },
-                          { word: "আইওটি", color: "text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/30", size: "text-3xl sm:text-4xl font-extrabold" },
-                          { word: "নিরাপত্তা", color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30", size: "text-2xl font-bold" },
-                          { word: "ক্লাউড", color: "text-indigo-300 bg-indigo-500/15 border-indigo-400/30", size: "text-3xl font-black" },
-                        ].map((item, i) => (
-                          <motion.span
-                            key={i}
-                            animate={{ y: [0, -5, 0], scale: [1, 1.03, 1] }}
-                            transition={{ repeat: Infinity, duration: 2.5 + (i % 3) * 0.5, ease: "easeInOut" }}
-                            className={`px-4 py-2 rounded-2xl border ${item.color} ${item.size} shadow-lg cursor-default transition-transform hover:scale-110`}
-                          >
-                            {item.word}
-                          </motion.span>
-                        ))}
-                      </div>
+                    {/* TYPE: Word Cloud (Super-Colorful Dynamic Kinetic Preview) */}
+                    {currentSlide.type === "WORD_CLOUD" && (
+                      <div className="p-8 rounded-3xl bg-slate-950/80 border-2 border-fuchsia-500/30 text-center space-y-5 shadow-2xl relative overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                          <span className="text-xs font-black text-fuchsia-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <span>☁️</span>
+                            <span>লাইভ কাইনেটিক ওয়ার্ড ক্লাউড প্রিভিউ (Super-Colorful Kinetic Word Cloud)</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">শব্দের পুনরাবৃত্তি অনুযায়ী ফন্ট স্কেলিং</span>
+                        </div>
 
-                      <p className="text-xs text-slate-400 max-w-lg mx-auto">
-                        লাইভ প্রেজেন্টেশনে শিক্ষার্থীরা তাদের মোবাইল ডিভাইস থেকে শব্দ সাবমিট করামাত্রই শব্দগুলো উজ্জ্বল রঙ ও বাউন্স অ্যানিমেশনে স্বয়ংক্রিয়ভাবে ভাসবে।
-                      </p>
-                    </div>
-                  )}
-
-                  {/* TYPE: Open Ended / Live Q&A */}
-                  {(currentSlide.type === "OPEN_ENDED" || currentSlide.type === "LIVE_QA") && (
-                    <div className="p-8 rounded-3xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center space-y-3">
-                      <span className="text-xs font-black text-amber-500 uppercase tracking-widest block">
-                        💬 মুক্ত মতামত ও রেসপন্স ওয়াল
-                      </span>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                        শিক্ষার্থীরা তাদের ফোন থেকে সরাসরি বিস্তারিত মতামত বা শিক্ষককে প্রশ্ন পাঠাবে, যা রিয়েল-টাইমে এই ক্যানভাসে পিন হয়ে প্রদর্শিত হবে।
-                      </p>
-                    </div>
-                  )}
-
-                  {/* TYPE: Text Slide */}
-                  {currentSlide.type === "TEXT_SLIDE" && (
-                    <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-                      <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block">
-                        স্লাইডের মূল বডি বা বিষয়বস্তু:
-                      </label>
-                      <textarea
-                        rows={5}
-                        value={currentSlide.content || ""}
-                        onChange={(e) => updateCurrentSlide({ content: e.target.value })}
-                        placeholder="এখানে আপনার পাঠের সারসংক্ষেপ, তথ্য বা বুলেট পয়েন্ট লিখুন..."
-                        className="w-full bg-transparent text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-none leading-relaxed"
-                      />
-                    </div>
-                  )}
-
-                  {/* TYPE: Image Compare */}
-                  {currentSlide.type === "IMAGE_COMPARE" && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Left Image Box */}
-                      <div className="p-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px] relative overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
-                        {currentSlide.imageLeftUrl ? (
-                          <div className="relative w-full h-full flex flex-col items-center">
-                            <img
-                              src={currentSlide.imageLeftUrl}
-                              alt="Left comparison"
-                              className="max-h-36 rounded-xl object-contain shadow-sm"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => updateCurrentSlide({ imageLeftUrl: undefined })}
-                              className="mt-2 text-rose-500 hover:text-rose-600 text-xs font-bold underline cursor-pointer"
+                        <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5 max-w-2xl mx-auto py-4 min-h-[160px]">
+                          {[
+                            { word: "প্রযুক্তি", color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/30", size: "text-3xl sm:text-4xl font-black" },
+                            { word: "স্মার্ট", color: "text-rose-400 bg-rose-500/10 border-rose-500/30", size: "text-2xl sm:text-3xl font-extrabold" },
+                            { word: "অটোমেশন", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", size: "text-4xl sm:text-5xl font-black" },
+                            { word: "উদ্ভাবন", color: "text-amber-300 bg-amber-500/10 border-amber-500/30", size: "text-xl sm:text-2xl font-bold" },
+                            { word: "আইওটি", color: "text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/30", size: "text-3xl sm:text-4xl font-extrabold" },
+                            { word: "নিরাপত্তা", color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30", size: "text-2xl font-bold" },
+                            { word: "ক্লাউড", color: "text-indigo-300 bg-indigo-500/15 border-indigo-400/30", size: "text-3xl font-black" },
+                          ].map((item, i) => (
+                            <motion.span
+                              key={i}
+                              animate={{ y: [0, -5, 0], scale: [1, 1.03, 1] }}
+                              transition={{ repeat: Infinity, duration: 2.5 + (i % 3) * 0.5, ease: "easeInOut" }}
+                              className={`px-4 py-2 rounded-2xl border ${item.color} ${item.size} shadow-lg cursor-default transition-transform hover:scale-110`}
                             >
-                              🗑️ ছবি মুছুন
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <ImageIcon className="w-8 h-8 text-slate-400" />
-                            <span className="text-xs font-bold text-slate-500">বাম পাশের চিত্র (ডায়াগ্রাম ১)</span>
-                            <label className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
-                              📷 ছবি আপলোড করুন
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={async (e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    const compressed = await compressImageFile(file);
-                                    updateCurrentSlide({ imageLeftUrl: compressed });
-                                    showToast("ছবি অটো-কম্প্রেস করে যুক্ত হয়েছে!", "success");
-                                  }
-                                }}
-                              />
-                            </label>
-                          </>
-                        )}
-                      </div>
+                              {item.word}
+                            </motion.span>
+                          ))}
+                        </div>
 
-                      {/* Right Image Box */}
-                      <div className="p-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px] relative overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
-                        {currentSlide.imageRightUrl ? (
-                          <div className="relative w-full h-full flex flex-col items-center">
-                            <img
-                              src={currentSlide.imageRightUrl}
-                              alt="Right comparison"
-                              className="max-h-36 rounded-xl object-contain shadow-sm"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => updateCurrentSlide({ imageRightUrl: undefined })}
-                              className="mt-2 text-rose-500 hover:text-rose-600 text-xs font-bold underline cursor-pointer"
-                            >
-                              🗑️ ছবি মুছুন
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <ImageIcon className="w-8 h-8 text-slate-400" />
-                            <span className="text-xs font-bold text-slate-500">ডান পাশের চিত্র (ডায়াগ্রাম ২)</span>
-                            <label className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
-                              📷 ছবি আপলোড করুন
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={async (e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    const compressed = await compressImageFile(file);
-                                    updateCurrentSlide({ imageRightUrl: compressed });
-                                    showToast("ছবি অটো-কম্প্রেস করে যুক্ত হয়েছে!", "success");
-                                  }
-                                }}
-                              />
-                            </label>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TYPE: Leaderboard Slide (TASK 3) */}
-                  {currentSlide.type === "LEADERBOARD" && (
-                    <div className="p-8 rounded-3xl bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-orange-500/10 border-2 border-amber-400/40 text-center space-y-6">
-                      <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black text-xs uppercase tracking-wider border border-amber-400/40">
-                        <Award className="w-4 h-4 text-amber-500" />
-                        <span>লাইভ কুইজ লিডারবোর্ড স্লাইড (Host-Gated)</span>
-                      </div>
-                      <div className="space-y-2">
-                        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-                          🏆 শীর্ষ মেধাতালিকা ও লাইভ র‍্যাংকিং
-                        </h2>
-                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
-                          হোস্ট যখন এই স্লাইডে আসবেন, স্বয়ংক্রিয়ভাবে প্রজেক্টরে অ্যানিমেটেড পোডিয়াম এবং স্টুডেন্টদের ফোনে তাদের ব্যক্তিগত র‍্যাঙ্ক ও টপ ১০ স্কোরার ভেসে উঠবে।
+                        <p className="text-xs text-slate-400 max-w-lg mx-auto">
+                          লাইভ প্রেজেন্টেশনে শিক্ষার্থীরা তাদের মোবাইল ডিভাইস থেকে শব্দ সাবমিট করামাত্রই শব্দগুলো উজ্জ্বল রঙ ও বাউন্স অ্যানিমেশনে স্বয়ংক্রিয়ভাবে ভাসবে।
                         </p>
                       </div>
+                    )}
 
-                      {/* Mock Preview Podium */}
-                      <div className="flex items-end justify-center gap-3 pt-2">
-                        <div className="w-24 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-center space-y-1 h-28 flex flex-col justify-end border border-slate-200 dark:border-slate-700">
-                          <div className="text-xl">🥈</div>
-                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">২য় স্থান</div>
-                          <div className="text-[10px] text-amber-500 font-mono font-bold">২৮০ pt</div>
+                    {/* TYPE: Open Ended / Live Q&A */}
+                    {(currentSlide.type === "OPEN_ENDED" || currentSlide.type === "LIVE_QA") && (
+                      <div className="p-8 rounded-3xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center space-y-3">
+                        <span className="text-xs font-black text-amber-500 uppercase tracking-widest block">
+                          💬 মুক্ত মতামত ও রেসপন্স ওয়াল
+                        </span>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                          শিক্ষার্থীরা তাদের ফোন থেকে সরাসরি বিস্তারিত মতামত বা শিক্ষককে প্রশ্ন পাঠাবে, যা রিয়েল-টাইমে এই ক্যানভাসে পিন হয়ে প্রদর্শিত হবে।
+                        </p>
+                      </div>
+                    )}
+
+                    {/* TYPE: Text Slide */}
+                    {currentSlide.type === "TEXT_SLIDE" && (
+                      <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block">
+                          স্লাইডের মূল বডি বা বিষয়বস্তু:
+                        </label>
+                        <textarea
+                          rows={5}
+                          value={currentSlide.content || ""}
+                          onChange={(e) => updateCurrentSlide({ content: e.target.value })}
+                          placeholder="এখানে আপনার পাঠের সারসংক্ষেপ, তথ্য বা বুলেট পয়েন্ট লিখুন..."
+                          className="w-full bg-transparent text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-none leading-relaxed"
+                        />
+                      </div>
+                    )}
+
+                    {/* TYPE: Image Compare */}
+                    {currentSlide.type === "IMAGE_COMPARE" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Left Image Box */}
+                        <div className="p-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px] relative overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                          {currentSlide.imageLeftUrl ? (
+                            <div className="relative w-full h-full flex flex-col items-center">
+                              <img
+                                src={currentSlide.imageLeftUrl}
+                                alt="Left comparison"
+                                className="max-h-36 rounded-xl object-contain shadow-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updateCurrentSlide({ imageLeftUrl: undefined })}
+                                className="mt-2 text-rose-500 hover:text-rose-600 text-xs font-bold underline cursor-pointer"
+                              >
+                                🗑️ ছবি মুছুন
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <ImageIcon className="w-8 h-8 text-slate-400" />
+                              <span className="text-xs font-bold text-slate-500">বাম পাশের চিত্র (ডায়াগ্রাম ১)</span>
+                              <label className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
+                                📷 ছবি আপলোড করুন
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const compressed = await compressImageFile(file);
+                                      updateCurrentSlide({ imageLeftUrl: compressed });
+                                      showToast("ছবি অটো-কম্প্রেস করে যুক্ত হয়েছে!", "success");
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </>
+                          )}
                         </div>
-                        <div className="w-28 p-3 rounded-2xl bg-amber-500/20 text-center space-y-1 h-36 flex flex-col justify-end border-2 border-amber-400 shadow-lg">
-                          <div className="text-3xl">👑</div>
-                          <div className="text-xs font-black text-amber-700 dark:text-amber-300">১ম স্থান</div>
-                          <div className="text-[11px] text-amber-600 font-mono font-black">৩৫০ pt</div>
-                        </div>
-                        <div className="w-24 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-center space-y-1 h-24 flex flex-col justify-end border border-slate-200 dark:border-slate-700">
-                          <div className="text-xl">🥉</div>
-                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">৩য় স্থান</div>
-                          <div className="text-[10px] text-amber-500 font-mono font-bold">২৫০ pt</div>
+
+                        {/* Right Image Box */}
+                        <div className="p-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2 flex flex-col items-center justify-center min-h-[180px] relative overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                          {currentSlide.imageRightUrl ? (
+                            <div className="relative w-full h-full flex flex-col items-center">
+                              <img
+                                src={currentSlide.imageRightUrl}
+                                alt="Right comparison"
+                                className="max-h-36 rounded-xl object-contain shadow-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updateCurrentSlide({ imageRightUrl: undefined })}
+                                className="mt-2 text-rose-500 hover:text-rose-600 text-xs font-bold underline cursor-pointer"
+                              >
+                                🗑️ ছবি মুছুন
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <ImageIcon className="w-8 h-8 text-slate-400" />
+                              <span className="text-xs font-bold text-slate-500">ডান পাশের চিত্র (ডায়াগ্রাম ২)</span>
+                              <label className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold cursor-pointer transition border border-indigo-200 dark:border-indigo-800">
+                                📷 ছবি আপলোড করুন
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const compressed = await compressImageFile(file);
+                                      updateCurrentSlide({ imageRightUrl: compressed });
+                                      showToast("ছবি অটো-কম্প্রেস করে যুক্ত হয়েছে!", "success");
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
 
-                {/* 3. Stage Card Footer Info */}
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
-                  <span>
-                    স্লাইড {currentDeck.slides.findIndex((s) => s.id === currentSlide.id) + 1} /{" "}
-                    {currentDeck.slides.length}
-                  </span>
-                  <span>
-                    {isGradedQuiz(currentSlide.type) ? "🏆 পয়েন্টযুক্ত প্রশ্ন" : "📄 কন্টেন্ট স্লাইড"}
-                  </span>
-                </div>
-              </div>
-            </main>
+                    {/* TYPE: Leaderboard Slide (TASK 3) */}
+                    {currentSlide.type === "LEADERBOARD" && (
+                      <div className="p-8 rounded-3xl bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-orange-500/10 border-2 border-amber-400/40 text-center space-y-6">
+                        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black text-xs uppercase tracking-wider border border-amber-400/40">
+                          <Award className="w-4 h-4 text-amber-500" />
+                          <span>লাইভ কুইজ লিডারবোর্ড স্লাইড (Host-Gated)</span>
+                        </div>
+                        <div className="space-y-2">
+                          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+                            🏆 শীর্ষ মেধাতালিকা ও লাইভ র‍্যাংকিং
+                          </h2>
+                          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
+                            হোস্ট যখন এই স্লাইডে আসবেন, স্বয়ংক্রিয়ভাবে প্রজেক্টরে অ্যানিমেটেড পোডিয়াম এবং স্টুডেন্টদের ফোনে তাদের ব্যক্তিগত র‍্যাঙ্ক ও টপ ১০ স্কোরার ভেসে উঠবে।
+                          </p>
+                        </div>
 
-            {/* Mobile Horizontal Bottom Slide Bar (< 768px) */}
-            <div className="flex md:hidden w-full bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-2 items-center gap-2 overflow-x-auto shrink-0 z-30 shadow-md">
-              <button
-                type="button"
-                onClick={() => setShowNewSlidePopover(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ স্লাইড</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAiModal(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-[11px] font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer"
-              >
-                <Wand2 className="w-3.5 h-3.5" />
-                <span>AI</span>
-              </button>
-              {currentDeck.slides.map((s, idx) => {
-                const isSelected = s.id === currentSlideId;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setCurrentSlideId(s.id)}
-                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition flex items-center gap-1.5 cursor-pointer ${
-                      isSelected
+                        {/* Mock Preview Podium */}
+                        <div className="flex items-end justify-center gap-3 pt-2">
+                          <div className="w-24 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-center space-y-1 h-28 flex flex-col justify-end border border-slate-200 dark:border-slate-700">
+                            <div className="text-xl">🥈</div>
+                            <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">২য় স্থান</div>
+                            <div className="text-[10px] text-amber-500 font-mono font-bold">২৮০ pt</div>
+                          </div>
+                          <div className="w-28 p-3 rounded-2xl bg-amber-500/20 text-center space-y-1 h-36 flex flex-col justify-end border-2 border-amber-400 shadow-lg">
+                            <div className="text-3xl">👑</div>
+                            <div className="text-xs font-black text-amber-700 dark:text-amber-300">১ম স্থান</div>
+                            <div className="text-[11px] text-amber-600 font-mono font-black">৩৫০ pt</div>
+                          </div>
+                          <div className="w-24 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-center space-y-1 h-24 flex flex-col justify-end border border-slate-200 dark:border-slate-700">
+                            <div className="text-xl">🥉</div>
+                            <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">৩য় স্থান</div>
+                            <div className="text-[10px] text-amber-500 font-mono font-bold">২৫০ pt</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Stage Card Footer Info */}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
+                    <span>
+                      স্লাইড {currentDeck.slides.findIndex((s) => s.id === currentSlide.id) + 1} /{" "}
+                      {currentDeck.slides.length}
+                    </span>
+                    <span>
+                      {isGradedQuiz(currentSlide.type) ? "🏆 পয়েন্টযুক্ত প্রশ্ন" : "📄 কন্টেন্ট স্লাইড"}
+                    </span>
+                  </div>
+                </div>
+              </main>
+
+              {/* Mobile Horizontal Bottom Slide Bar (< 768px) */}
+              <div className="flex md:hidden w-full bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-2 items-center gap-2 overflow-x-auto shrink-0 z-30 shadow-md">
+                <button
+                  type="button"
+                  onClick={() => setShowNewSlidePopover(true)}
+                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ স্লাইড</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAiModal(true)}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white text-[11px] font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  <span>AI</span>
+                </button>
+                {currentDeck.slides.map((s, idx) => {
+                  const isSelected = s.id === currentSlideId;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setCurrentSlideId(s.id)}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition flex items-center gap-1.5 cursor-pointer ${isSelected
                         ? "bg-indigo-600 text-white border-indigo-500 shadow-md ring-2 ring-indigo-400"
                         : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                    }`}
-                  >
-                    <span className="font-mono font-black">{idx + 1}.</span>
-                    <span className="max-w-[80px] truncate">{s.title || "স্লাইড"}</span>
-                  </button>
-                );
-              })}
+                        }`}
+                    >
+                      <span className="font-mono font-black">{idx + 1}.</span>
+                      <span className="max-w-[80px] truncate">{s.title || "স্লাইড"}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ===================================================================
               SLIDE-OVER SETTINGS DRAWER (Task 3: 0px permanent space!)
@@ -3850,7 +4065,7 @@ export default function UnifiedQuizMentimeterWorkspace({
       )}
 
       {/* =======================================================================
-          FULLSCREEN LIVE PRESENTER STAGE (PHASE 3 TASK 3)
+          FULLSCREEN LIVE PRESENTER STAGE (PHASE 3 TASK 3 + TASK 4 PAUSE/RESUME)
           ======================================================================= */}
       {activeLivePresenterSession && (
         <HostLiveFullscreenStage
@@ -3859,13 +4074,50 @@ export default function UnifiedQuizMentimeterWorkspace({
           deckTitle={activeLivePresenterSession.deck.title}
           slides={activeLivePresenterSession.deck.slides}
           scheduledStartTime={activeLivePresenterSession.scheduledStartTime || deckSettings.scheduledStartTime}
+          initialSlideIndex={activeLivePresenterSession.initialSlideIndex}
+          initialStage={activeLivePresenterSession.initialStage}
+          initialPlayers={activeLivePresenterSession.initialPlayers}
           onClose={handleCloseLivePresenter}
+          onPaused={() => {
+            handleCloseLivePresenter();
+            showToast(
+              "⏸️ সেশনটি বিরতি ও সেভ করা হয়েছে! পরবর্তীতে '🚀 লাইভ শুরু করুন' বা হিস্ট্রি থেকে চালু করতে পারবেন।",
+              "success"
+            );
+          }}
+          onEnded={() => {
+            fetchSessionHistory();
+          }}
           className={activeLivePresenterSession.deck.className}
           tradeName={activeLivePresenterSession.deck.trade}
           subjectName={activeLivePresenterSession.deck.subjectName}
           subjectCode={activeLivePresenterSession.deck.subjectCode}
         />
       )}
+
+      {/* =======================================================================
+          SMART RESUME OR START FRESH MODAL (TASK 4)
+          ======================================================================= */}
+      <AnimatePresence>
+        {resumePromptData && (
+          <QuizSmartResumeModal
+            isOpen={Boolean(resumePromptData)}
+            deckTitle={resumePromptData.deck.title}
+            pausedSession={resumePromptData.pausedSession}
+            totalSlides={resumePromptData.deck.slides.length}
+            isBusy={isResumingOrStarting}
+            onResume={() =>
+              handleResumePausedSession(resumePromptData.pausedSession, resumePromptData.deck)
+            }
+            onStartFresh={() =>
+              handleLaunchLivePresentation(resumePromptData.deck, true)
+            }
+            onClose={() => {
+              if (!isResumingOrStarting) setResumePromptData(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* =======================================================================
           NEW PRESENTATION CREATION MODAL WITH GLOBAL ACADEMIC MAPPING CASCADE

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb } from "@/lib/database";
 import { PresenceService, SecurityService } from "@/lib/reconnectService";
+import { touchHostHeartbeat, getLiveSession } from "@/lib/liveSessionStore";
 
 /**
  * Ultra-Lightweight Heartbeat Endpoint
@@ -158,11 +159,22 @@ async function processHeartbeat(
   maybeProcessPresenceTimeouts(now);
 
   // In-memory update - zero database connection used
-  const updated = isHost
+  let liveSessionUpdated = false;
+  if (isHost) {
+    liveSessionUpdated = Boolean(touchHostHeartbeat(sessionId));
+  } else if (playerId) {
+    const liveSess = getLiveSession(sessionId, { skipLivenessCheck: true });
+    if (liveSess && liveSess.players[playerId]) {
+      liveSess.players[playerId].lastSeenAt = now;
+      liveSessionUpdated = true;
+    }
+  }
+
+  const legacyUpdated = isHost
     ? PresenceService.updateHostHeartbeat(sessionId, connectionId)
     : PresenceService.updateHeartbeat(sessionId, playerId!, connectionId);
 
-  if (!updated) {
+  if (!liveSessionUpdated && !legacyUpdated) {
     return jsonResponse(
       { success: false, message: "Session or player not found" },
       404

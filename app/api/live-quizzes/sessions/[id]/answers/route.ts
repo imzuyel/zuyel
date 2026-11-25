@@ -4,7 +4,7 @@ import { institutionalDb, LiveAnswer } from "@/lib/database";
 import { ScoringService } from "@/lib/scoringService";
 import { SecurityService } from "@/lib/reconnectService";
 import { invalidateSessionCache } from "@/lib/sessionCache";
-import { sanitizeUserTextInput } from "@/components/common/SafeHtmlRenderer";
+import { sanitizeUserTextInput } from "@/lib/textSanitizer";
 
 export async function POST(
   req: NextRequest,

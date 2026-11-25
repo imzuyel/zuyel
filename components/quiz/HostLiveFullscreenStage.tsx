@@ -65,7 +65,12 @@ interface HostLiveFullscreenStageProps {
   deckTitle: string;
   slides: PresentationSlide[];
   scheduledStartTime?: string;
+  initialSlideIndex?: number;
+  initialStage?: string;
+  initialPlayers?: any[];
   onClose: () => void;
+  onPaused?: (sessionData?: any) => void;
+  onEnded?: () => void;
 }
 
 export default function HostLiveFullscreenStage({
@@ -74,13 +79,18 @@ export default function HostLiveFullscreenStage({
   deckTitle,
   slides,
   scheduledStartTime,
+  initialSlideIndex = 0,
+  initialStage = "READY_CHECK",
+  initialPlayers = [],
   onClose,
+  onPaused,
+  onEnded,
   className,
   tradeName,
   subjectName,
 }: HostLiveFullscreenStageProps) {
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
-  const [stage, setStage] = useState<string>("READY_CHECK");
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(initialSlideIndex);
+  const [stage, setStage] = useState<string>(initialStage);
   const [stageEndsAt, setStageEndsAt] = useState<number>(() => Date.now() + 30000);
   const [serverOffsetMs, setServerOffsetMs] = useState<number>(0);
 
@@ -93,10 +103,11 @@ export default function HostLiveFullscreenStage({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [soundMuted, setSoundMuted] = useState(isSoundMuted());
   const [isAdvancingSlide, setIsAdvancingSlide] = useState(false);
+  const [isPausingExit, setIsPausingExit] = useState(false);
   const [isFinalPodiumOpen, setIsFinalPodiumOpen] = useState(false);
 
   // Live Concurrency Telemetry
-  const [players, setPlayers] = useState<any[]>([]);
+  const [players, setPlayers] = useState<any[]>(initialPlayers);
   const [readyCount, setReadyCount] = useState<number>(0);
   const [answers, setAnswers] = useState<any[]>([]);
   const [liveOptionStats, setLiveOptionStats] = useState<number[]>([]);
@@ -109,6 +120,45 @@ export default function HostLiveFullscreenStage({
   const prevCountdownBeepRef = useRef<number>(-1);
   const prevRevealStageRef = useRef<string>("");
   const autoSkippedRef = useRef<string>("");
+  const hasEndedOrPausedRef = useRef<boolean>(false);
+
+  // Keep host alive with an 8-second heartbeat & auto-pause beacon on beforeunload
+  useEffect(() => {
+    if (!sessionId) return;
+    hasEndedOrPausedRef.current = false;
+
+    const sendHeartbeat = () => {
+      if (hasEndedOrPausedRef.current) return;
+      fetch(`/api/live-quizzes/sessions/${sessionId}/heartbeat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "host" }),
+      }).catch(() => {});
+    };
+
+    sendHeartbeat();
+    const hbInterval = setInterval(sendHeartbeat, 8000);
+
+    const handleBeforeUnload = () => {
+      if (hasEndedOrPausedRef.current) return;
+      try {
+        if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+          navigator.sendBeacon(
+            `/api/live-quizzes/sessions/${sessionId}/pause`,
+            new Blob([JSON.stringify({ reason: "beforeunload" })], { type: "application/json" })
+          );
+        }
+      } catch {
+        // safe unload fallback
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      clearInterval(hbInterval);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [sessionId]);
 
   // Scheduled start optional countdown
   const [scheduledSecondsLeft, setScheduledSecondsLeft] = useState<number>(() => {
@@ -385,6 +435,7 @@ export default function HostLiveFullscreenStage({
   };
 
   const handleEndAndShowPodium = async () => {
+    hasEndedOrPausedRef.current = true;
     setIsFinalPodiumOpen(true);
     setStage("ENDED");
     triggerFireworks();
@@ -395,8 +446,42 @@ export default function HostLiveFullscreenStage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+      if (onEnded) onEnded();
     } catch (e) {
       console.error("Archive failed:", e);
+    }
+  };
+
+  const handlePauseAndExit = async () => {
+    // If quiz is already finalized/ended, just close cleanly without reverting ENDED to PAUSED
+    if (stage === "ENDED" || isFinalPodiumOpen) {
+      hasEndedOrPausedRef.current = true;
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => null);
+      }
+      onClose();
+      return;
+    }
+
+    hasEndedOrPausedRef.current = true;
+    setIsPausingExit(true);
+    try {
+      const res = await fetch(`/api/live-quizzes/sessions/${sessionId}/pause`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "host_pause_exit" }),
+      }).catch(() => null);
+      const data = res ? await res.json().catch(() => null) : null;
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => null);
+      }
+      if (onPaused) {
+        onPaused(data?.session || data);
+      } else {
+        onClose();
+      }
+    } finally {
+      setIsPausingExit(false);
     }
   };
 
@@ -564,11 +649,12 @@ export default function HostLiveFullscreenStage({
 
           <button
             type="button"
-            onClick={onClose}
-            className="p-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/30 text-rose-300 hover:text-white transition cursor-pointer"
-            title="প্রজেক্টর বন্ধ করুন"
+            disabled={isPausingExit}
+            onClick={handlePauseAndExit}
+            className="p-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/30 text-rose-300 hover:text-white transition cursor-pointer disabled:opacity-50"
+            title="বিরতি ও প্রস্থান (Pause & Exit)"
           >
-            <X className="w-4 h-4" />
+            {isPausingExit ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
           </button>
         </div>
       </header>
@@ -741,14 +827,25 @@ export default function HostLiveFullscreenStage({
         {/* STAGE C: READY_CHECK ON SUBSEQUENT SLIDES (Quick Start Trigger)   */}
         {/* ----------------------------------------------------------------- */}
         {!isLobby && !isFinalPodiumOpen && (stage === "READY_CHECK" || stage === "WELCOME_WAITING") && (
-          <div className="max-w-3xl mx-auto text-center space-y-6 p-10 rounded-3xl bg-white/5 border border-white/15 backdrop-blur-xl">
-            <span className="px-4 py-1.5 rounded-full bg-indigo-500/20 text-indigo-300 font-black text-sm">
-              পরবর্তী প্রশ্ন {currentSlideIndex + 1} / {slides.length}
-            </span>
+          <div className="max-w-3xl mx-auto text-center space-y-6 p-8 sm:p-10 rounded-3xl bg-white/5 border border-white/15 backdrop-blur-xl shadow-2xl">
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <span className="px-4 py-1.5 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 font-black text-sm">
+                পরবর্তী প্রশ্ন {currentSlideIndex + 1} / {slides.length}
+              </span>
+              <span className="px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 font-black text-sm font-mono">
+                রুম পিন: {sessionCode}
+              </span>
+              <span className="px-4 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-black text-sm">
+                👥 {players.length} জন যুক্ত
+              </span>
+            </div>
             <h2 className="text-3xl sm:text-5xl font-black text-white leading-snug">
               শিক্ষার্থীরা প্রস্তুত হলে শুরু করুন
             </h2>
-            <div className="flex justify-center gap-4 pt-2">
+            <p className="text-xs sm:text-sm text-slate-300 font-medium">
+              নতুন বা পূর্বের শিক্ষার্থীরা <span className="text-cyan-300 font-mono font-bold">{joinOrigin}/quiz/join</span>-এ পিন <span className="text-amber-300 font-mono font-bold">{sessionCode}</span> দিয়ে জয়েন করতে পারবে
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 pt-2">
               <button
                 type="button"
                 onClick={handleStartQuestion}
@@ -1136,11 +1233,21 @@ export default function HostLiveFullscreenStage({
 
           <button
             type="button"
+            disabled={isPausingExit}
+            onClick={handlePauseAndExit}
+            className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/50 text-amber-200 text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition"
+          >
+            {isPausingExit ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>⏸️</span>}
+            <span>⏸️ বিরতি ও সেভ (Pause & Resume Later)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleEndAndShowPodium}
-            className="px-4 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/40 text-rose-200 text-xs font-black flex items-center gap-1.5 cursor-pointer"
+            className="px-4 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/40 text-rose-200 text-xs font-black flex items-center gap-1.5 cursor-pointer transition"
           >
             <Flag className="w-4 h-4" />
-            <span>সমাপ্ত ও MySQL আর্কাইভ</span>
+            <span>🏁 কুইজ সমাপ্ত করুন (End & Archive)</span>
           </button>
         </div>
       </footer>

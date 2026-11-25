@@ -68,9 +68,6 @@ class AdminViewErrorBoundary extends React.Component<
 
   componentDidCatch(error: any, errorInfo: any) {
     console.error("Admin view error:", error, errorInfo);
-    if (error.name === "ChunkLoadError" || error.message?.includes("ChunkLoadError")) {
-      window.location.reload();
-    }
   }
 
   render() {
@@ -84,16 +81,16 @@ class AdminViewErrorBoundary extends React.Component<
             {this.props.title ? `${this.props.title} প্রদর্শনে সমস্যা হয়েছে` : "ভিউ প্রদর্শনে সমস্যা হয়েছে"}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-            মডিউল রেন্ডারিংয়ে একটি সমস্যা দেখা দিয়েছে। রিফ্রেশ করে আবার চেষ্টা করুন।
+            মডিউল রেন্ডারিংয়ে একটি সমস্যা দেখা দিয়েছে। রিসেট করে আবার চেষ্টা করুন।
           </p>
           <button
+            type="button"
             onClick={() => {
               this.setState({ hasError: false, error: null });
-              window.location.reload();
             }}
             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/20"
           >
-            রিলোড করুন
+            পুনরায় চেষ্টা করুন
           </button>
         </div>
       );

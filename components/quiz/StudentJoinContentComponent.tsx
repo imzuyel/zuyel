@@ -490,40 +490,41 @@ export function StudentJoinContentComponent() {
       }).catch(() => null);
 
       let data: any = null;
-      if (res && res.ok && (res.headers.get("content-type") || "").includes("application/json")) {
+      if (res && (res.headers.get("content-type") || "").includes("application/json")) {
         data = await res.json().catch(() => null);
       }
       setLoading(false);
 
-      if (data && data.success) {
-        setJoined(true);
-        setActiveSession(data.session);
-        setPlayerToken(data.participant.playerToken || data.participant.id);
-        setParticipantId(data.participant.id);
-        setReconnectToken(data.reconnectToken || "");
-        
-        // Store inside localStorage to enable reconnection on refresh
-        const sessionStore: SavedPlayerSession = {
-          sessionId: data.session.id,
-          sessionCode: data.session.sessionCode,
-          displayName: data.participant.displayName,
-          playerToken: data.participant.playerToken || data.participant.id,
-          playerId: data.participant.id,
-          studentId: data.participant.studentId,
-          reconnectToken: data.reconnectToken || ""
+      if (res?.ok && data && (data.success || (data.playerId && data.sessionId))) {
+        const resolvedSessionId = data.sessionId || data.session?.id;
+        const resolvedCode = String(data.code || data.session?.code || data.session?.sessionCode || sessionCode.trim());
+        const resolvedPlayerId = data.playerId || data.player?.id || data.participant?.id;
+        const playerName = data.player?.name || data.participant?.displayName || displayName.trim();
+        const playerRoll = data.player?.roll || "—";
+        const playerAvatar = data.player?.avatar || selectedAvatar || "🚀";
+
+        const canonicalPlayer = {
+          sessionId: resolvedSessionId,
+          code: resolvedCode,
+          playerId: resolvedPlayerId,
+          name: playerName,
+          roll: playerRoll,
+          avatar: playerAvatar,
         };
-        localStorage.setItem("pgtsc_active_live_quiz", JSON.stringify(sessionStore));
-        localStorage.setItem("pgtsc_live_quiz_player", JSON.stringify(sessionStore));
-        
-        if (data.quiz) {
-          setQuizDetails({
-            title: data.quiz.title,
-            questionCount: data.quiz.questionCount || 0
-          });
-        }
-        if (data.session.totalQuestions) {
-          setTotalQuestions(data.session.totalQuestions);
-        }
+        const canonicalKey = `pgtsc_live_player_${resolvedCode}`;
+        try {
+          sessionStorage.setItem(canonicalKey, JSON.stringify(canonicalPlayer));
+          localStorage.setItem(canonicalKey, JSON.stringify(canonicalPlayer));
+        } catch {}
+
+        window.location.href =
+          "/quiz/live?code=" +
+          encodeURIComponent(resolvedCode) +
+          "&sessionId=" +
+          encodeURIComponent(resolvedSessionId) +
+          "&playerId=" +
+          encodeURIComponent(resolvedPlayerId);
+        return;
       } else {
         if (data?.eligibilityBlocked) {
           setErrorMessage(`⛔ কুইজ অংশগ্রহণের যোগ্যতা শর্ত পূরণ হয়নি: ${data.message || data.error}`);

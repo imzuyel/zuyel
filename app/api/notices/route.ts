@@ -7,7 +7,7 @@ import {
   upsertHybridNotice,
   deleteHybridNotice,
 } from "@/lib/hybridStorageEngine";
-import { sanitizeUserTextInput, sanitizeHtml } from "@/components/common/SafeHtmlRenderer";
+import { sanitizeUserTextInput, sanitizeHtml } from "@/lib/textSanitizer";
 
 export async function GET(req: NextRequest) {
   try {

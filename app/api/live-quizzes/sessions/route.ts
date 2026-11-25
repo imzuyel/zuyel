@@ -2,14 +2,134 @@ import { NextRequest, NextResponse } from "next/server";
 import { institutionalDb, LiveSession } from "@/lib/database";
 import { ReconnectService } from "@/lib/reconnectService";
 import { TeamService } from "@/lib/teamService";
-import { createLiveSession, getLiveSession, normalizeSlide } from "@/lib/liveSessionStore";
+import {
+  createLiveSession,
+  getLiveSession,
+  listLiveSessions,
+  normalizeSlide,
+  LiveSessionRecord,
+} from "@/lib/liveSessionStore";
 import { getSessionQuestions } from "@/lib/liveQuizHelper";
+import { getHybridStore } from "@/lib/hybridStorageEngine";
+import { prisma, isPrismaAvailable } from "@/lib/prisma";
+
+function buildSessionHistorySummary(session: LiveSessionRecord) {
+  const playersArr = Object.values(session.players || {}).sort(
+    (a, b) => (b.score || 0) - (a.score || 0)
+  );
+  const topScorer = playersArr[0] || null;
+  const totalQuestions = Math.max(1, session.slides?.length || 1);
+  const answeredSlideIndices = Object.keys(session.answers || {}).filter(
+    (k) => Object.keys(session.answers[k] || {}).length > 0
+  );
+  const maxAnsweredSlide = answeredSlideIndices.reduce((acc, k) => {
+    const idx = parseInt(k, 10);
+    return Number.isFinite(idx) && idx + 1 > acc ? idx + 1 : acc;
+  }, 0);
+
+  const questionsCompleted =
+    session.status === "ENDED"
+      ? totalQuestions
+      : Math.max(
+          maxAnsweredSlide,
+          session.stage === "RESULT_REVEAL"
+            ? Math.min(totalQuestions, (session.currentSlideIndex || 0) + 1)
+            : session.currentSlideIndex || 0
+        );
+
+  const questionAnalytics = (session.slides || []).map((slide, idx) => {
+    const slideAnswers = Object.values((session.answers || {})[String(idx)] || {});
+    const correctCount = slideAnswers.filter((a) => a.isCorrect).length;
+    const answeredCount = slideAnswers.length;
+    return {
+      slideIndex: idx,
+      questionText: slide.questionText || slide.title || slide.question || `প্রশ্ন ${idx + 1}`,
+      questionType: slide.type || slide.questionType || "MCQ",
+      answeredCount,
+      correctCount,
+      accuracy: answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0,
+    };
+  });
+
+  // Per-student detailed breakdown including per-question answers
+  const studentDetails = playersArr.map((p, idx) => {
+    const playerAnswers = Object.entries(session.answers || {})
+      .map(([slideIdxStr, byPlayer]) => {
+        const ans = byPlayer?.[p.id];
+        if (!ans) return null;
+        const sIdx = parseInt(slideIdxStr, 10);
+        const slide = session.slides?.[sIdx];
+        return {
+          slideIndex: sIdx,
+          questionText: slide?.questionText || slide?.title || slide?.question || `প্রশ্ন ${sIdx + 1}`,
+          answerPayload: ans.answerPayload,
+          isCorrect: ans.isCorrect,
+          points: ans.points,
+          responseTimeMs: ans.responseTimeMs,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      id: p.id,
+      name: p.name,
+      roll: p.roll || "—",
+      avatar: p.avatar || "🚀",
+      score: p.score || 0,
+      streak: p.streak || 0,
+      rank: idx + 1,
+      answeredCount: playerAnswers.length,
+      correctCount: playerAnswers.filter((a: any) => a?.isCorrect).length,
+      answers: playerAnswers,
+    };
+  });
+
+  return {
+    id: session.id,
+    code: session.code,
+    quizId: session.quizId || "",
+    title: session.title || "লাইভ কুইজ সেশন",
+    className: session.className,
+    trade: session.trade,
+    subject: session.subject,
+    status: session.status,
+    stage: session.stage,
+    currentSlideIndex: session.currentSlideIndex || 0,
+    totalQuestions,
+    questionsCompleted,
+    playerCount: playersArr.length,
+    topScorer: topScorer
+      ? {
+          id: topScorer.id,
+          name: topScorer.name,
+          roll: topScorer.roll || "—",
+          avatar: topScorer.avatar || "👑",
+          score: topScorer.score || 0,
+        }
+      : null,
+    avgScore:
+      playersArr.length > 0
+        ? Math.round(playersArr.reduce((acc, p) => acc + (p.score || 0), 0) / playersArr.length)
+        : 0,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    pausedAt: session.pausedAt,
+    endedAt: session.endedAt,
+    slides: session.slides || [],
+    players: session.players || {},
+    answers: session.answers || {},
+    studentDetails,
+    questionAnalytics,
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const hostId = searchParams.get("hostUserId");
     const code = searchParams.get("code") || searchParams.get("pin");
+    const quizId = searchParams.get("quizId");
+    const includeHistory = searchParams.get("includeHistory") === "1";
 
     if (code) {
       const session = getLiveSession(code);
@@ -19,6 +139,162 @@ export async function GET(req: NextRequest) {
           session,
         });
       }
+      return NextResponse.json(
+        {
+          success: false,
+          error: "INVALID_CODE",
+          message: "❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।",
+        },
+        { status: 404 }
+      );
+    }
+
+    // If querying for a specific quizId OR requesting session history (Tasks 4 & 5)
+    if (quizId || includeHistory) {
+      const liveStoreList = listLiveSessions(quizId ? { quizId } : undefined);
+      const summaryMap = new Map<string, any>();
+
+      for (const sess of liveStoreList) {
+        summaryMap.set(sess.id, buildSessionHistorySummary(sess));
+      }
+
+      // Also merge archived QuizResults from hybridStorageEngine if not already present in liveStoreList
+      try {
+        const store = getHybridStore();
+        const results = Array.isArray(store.quizResults) ? store.quizResults : [];
+        for (const resItem of results) {
+          if (quizId && String(resItem.quizId || "") !== String(quizId)) continue;
+          const sid = String(resItem.sessionId || resItem.id);
+          if (!summaryMap.has(sid)) {
+            const rawParts = Array.isArray(resItem.rawParticipants)
+              ? resItem.rawParticipants
+              : Array.isArray(resItem.topPerformers)
+              ? resItem.topPerformers
+              : [];
+            const top = rawParts[0] || null;
+            summaryMap.set(sid, {
+              id: sid,
+              code: resItem.sessionCode || "—",
+              quizId: resItem.quizId || "",
+              title: resItem.title || "লাইভ কুইজ সেশন",
+              className: resItem.className || "",
+              trade: resItem.trade || "",
+              subject: resItem.subject || "",
+              status: "ENDED",
+              stage: "ENDED",
+              currentSlideIndex: Math.max(0, (resItem.totalQuestions || 1) - 1),
+              totalQuestions: resItem.totalQuestions || 1,
+              questionsCompleted: resItem.questionsCompleted || resItem.totalQuestions || 1,
+              playerCount: resItem.totalParticipants || rawParts.length,
+              topScorer: top
+                ? {
+                    id: top.id,
+                    name: top.name,
+                    roll: top.roll || "—",
+                    avatar: top.avatar || "👑",
+                    score: top.score || 0,
+                  }
+                : null,
+              avgScore: resItem.avgScore || 0,
+              createdAt: resItem.completedAt ? new Date(resItem.completedAt).getTime() : Date.now(),
+              updatedAt: resItem.completedAt ? new Date(resItem.completedAt).getTime() : Date.now(),
+              endedAt: resItem.completedAt ? new Date(resItem.completedAt).getTime() : Date.now(),
+              studentDetails: rawParts.map((p: any, idx: number) => ({
+                id: p.id,
+                name: p.name,
+                roll: p.roll || "—",
+                avatar: p.avatar || "🎓",
+                score: p.score || 0,
+                streak: p.streak || 0,
+                rank: p.rank || idx + 1,
+                answeredCount: 0,
+                correctCount: 0,
+                answers: [],
+              })),
+              questionAnalytics: resItem.questionAnalytics || [],
+            });
+          }
+        }
+      } catch {
+        // ignore hybrid store error
+      }
+
+      // Merge MySQL QuizResult & LiveSession rows if online and not yet present
+      if (isPrismaAvailable() && prisma) {
+        try {
+          const numericQuizId = quizId ? parseInt(String(quizId).replace(/\D/g, ""), 10) : NaN;
+          if (prisma.liveSession && (!quizId || !Number.isNaN(numericQuizId))) {
+            const dbSessions = await prisma.liveSession.findMany({
+              where: !Number.isNaN(numericQuizId) ? { quizId: numericQuizId } : undefined,
+              orderBy: { updatedAt: "desc" },
+              take: 30,
+            });
+            for (const ds of dbSessions) {
+              let parsedMeta: any = null;
+              try {
+                parsedMeta = ds.participantsJson ? JSON.parse(ds.participantsJson) : null;
+              } catch {
+                parsedMeta = null;
+              }
+              const metaId = parsedMeta?.sessionId || `mysql-sess-${ds.id}`;
+              if (!summaryMap.has(metaId)) {
+                const playersArr = Array.isArray(parsedMeta?.players)
+                  ? parsedMeta.players
+                  : Array.isArray(parsedMeta)
+                  ? parsedMeta
+                  : [];
+                const derivedStatus =
+                  parsedMeta?.status ||
+                  (ds.status === "COMPLETED" ? "ENDED" : ds.status === "CLOSED" ? "PAUSED" : ds.status);
+                summaryMap.set(metaId, {
+                  id: metaId,
+                  code: ds.pin,
+                  quizId: parsedMeta?.quizId || String(ds.quizId),
+                  title: parsedMeta?.title || "লাইভ কুইজ সেশন",
+                  status: derivedStatus,
+                  stage: parsedMeta?.stage || (derivedStatus === "ENDED" ? "ENDED" : "READY_CHECK"),
+                  currentSlideIndex: ds.currentQuestion || 0,
+                  totalQuestions: ds.totalQuestions || 1,
+                  questionsCompleted: ds.currentQuestion || 0,
+                  playerCount: playersArr.length,
+                  topScorer: playersArr[0] || null,
+                  createdAt: new Date(ds.createdAt).getTime(),
+                  updatedAt: new Date(ds.updatedAt).getTime(),
+                  pausedAt: parsedMeta?.pausedAt,
+                  endedAt: ds.endedAt ? new Date(ds.endedAt).getTime() : undefined,
+                  studentDetails: playersArr.map((p: any, idx: number) => ({
+                    id: p.id,
+                    name: p.name,
+                    roll: p.roll || "—",
+                    avatar: p.avatar || "🎓",
+                    score: p.score || 0,
+                    streak: p.streak || 0,
+                    rank: p.rank || idx + 1,
+                    answeredCount: 0,
+                    correctCount: 0,
+                    answers: [],
+                  })),
+                  questionAnalytics: [],
+                });
+              }
+            }
+          }
+        } catch {
+          // Offline safe fallback
+        }
+      }
+
+      const sessions = Array.from(summaryMap.values()).sort(
+        (a, b) => (Number(b.updatedAt || b.createdAt) || 0) - (Number(a.updatedAt || a.createdAt) || 0)
+      );
+      const pausedSession = sessions.find((s) => s.status === "PAUSED") || null;
+
+      return NextResponse.json({
+        success: true,
+        sessions,
+        pausedSession,
+        history: sessions,
+      });
     }
 
     let sessions = [...institutionalDb.liveSessions];
@@ -110,7 +386,7 @@ export async function POST(req: NextRequest) {
       const duplicate = institutionalDb.liveSessions.some(
         (s) => s.sessionCode === pin && ["CREATED", "LOBBY"].includes(s.status)
       );
-      if (!duplicate) {
+      if (!duplicate && !getLiveSession(pin, { skipLivenessCheck: true })) {
         sessionCode = pin;
         break;
       }
@@ -146,6 +422,7 @@ export async function POST(req: NextRequest) {
       currentSlideIndex: 0,
       stageStartedAt: Date.now(),
       stageEndsAt: Date.now() + 30000,
+      hostLastSeenAt: Date.now(),
       slides: normalizedSlides,
       players: {},
       answers: {},

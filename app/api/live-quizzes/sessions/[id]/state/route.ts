@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLiveSession, evaluateAndAdvanceSessionStage, LiveSessionRecord, saveLiveSession } from "@/lib/liveSessionStore";
+import {
+  getLiveSession,
+  evaluateAndAdvanceSessionStage,
+  touchHostHeartbeat,
+  saveLiveSession,
+} from "@/lib/liveSessionStore";
 import { SecurityService } from "@/lib/reconnectService";
 
 export async function GET(
@@ -21,6 +26,11 @@ export async function GET(
       );
     }
 
+    // If HOST is polling state actively while WAITING/ACTIVE, refresh hostLastSeenAt before liveness check
+    if (playerId === "HOST") {
+      touchHostHeartbeat(sessionId);
+    }
+
     // 1. Single Source of Truth lookup from high-concurrency engine
     const session = getLiveSession(sessionId);
     if (!session) {
@@ -30,8 +40,7 @@ export async function GET(
       );
     }
 
-    // 2. CRITICAL AUTO-STAGE ADVANCEMENT (Task 2)
-    // Evaluates stage timers & auto-advances so neither Host nor Students ever get stuck!
+    // 2. CRITICAL AUTO-STAGE ADVANCEMENT & 25s HOST LIVENESS CHECK
     evaluateAndAdvanceSessionStage(session);
 
     const now = Date.now();
@@ -138,7 +147,11 @@ export async function GET(
       }
     }
 
-    const canSubmitAnswer = session.stage === "ANSWERING_ACTIVE" && !hasAnsweredCurrent;
+    const canSubmitAnswer =
+      session.status !== "PAUSED" &&
+      session.status !== "ENDED" &&
+      session.stage === "ANSWERING_ACTIVE" &&
+      !hasAnsweredCurrent;
 
     return NextResponse.json({
       success: true,
@@ -146,6 +159,9 @@ export async function GET(
       serverTimestamp: now,
       sessionStatus: session.status,
       status: session.status,
+      isPaused: session.status === "PAUSED",
+      pausedAt: session.pausedAt,
+      hostLastSeenAt: session.hostLastSeenAt,
       stage: session.stage,
       phase,
       currentSlideIndex,

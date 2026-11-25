@@ -28,13 +28,14 @@ import {
   Heart,
   Volume2,
   VolumeX,
+  PauseCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import StudentModern3DJoinCard, { StudentAuthIdentity } from "@/components/quiz/StudentModern3DJoinCard";
 import FloatingReactionOverlay, { emitLiveReaction } from "@/components/quiz/FloatingReactionOverlay";
 import { triggerFireworks } from "@/lib/confetti";
 
-export function computeSafeRemainingSeconds(
+function computeSafeRemainingSeconds(
   stageEndsAt?: any,
   serverOffsetMs = 0,
   fallbackSeconds = 3
@@ -57,6 +58,7 @@ function LiveQuizArenaContent() {
   // URL parameters
   const paramSessionId = searchParams?.get("sessionId") || "";
   const paramCode = searchParams?.get("code") || searchParams?.get("pin") || "";
+  const paramPlayerId = searchParams?.get("playerId") || "";
 
   // Student Identity State
   const [identity, setIdentity] = useState<StudentAuthIdentity | null>(null);
@@ -64,8 +66,17 @@ function LiveQuizArenaContent() {
 
   // Live Session Polled State
   const [sessionState, setSessionState] = useState<any | null>(null);
+  const [sessionMissing, setSessionMissing] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
+
+  // Unlock vertical scrolling on mount so no previous modal can leave body/html scroll-locked
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "auto";
+      document.documentElement.style.overflow = "auto";
+    }
+  }, []);
 
   // Local Client Timer
   const [displaySeconds, setDisplaySeconds] = useState(20);
@@ -92,35 +103,76 @@ function LiveQuizArenaContent() {
   const currentSlideIndexRef = useRef<number>(-1);
   const questionStartTimeRef = useRef<number>(Date.now());
 
-  // 1. Recover Identity from sessionStorage (per tab) or localStorage fallback
+  // 1. Recover Identity from canonical URL params + sessionStorage + localStorage (`pgtsc_live_player_${code}`)
   useEffect(() => {
     try {
+      const canonicalKey = paramCode ? `pgtsc_live_player_${paramCode}` : "";
       const codeKey = paramCode ? `live_quiz_player_${paramCode}` : "";
-      const pgtscKey = paramCode ? `pgtsc_player_${paramCode}` : "";
-      const raw =
+      const rawCanonical =
+        (canonicalKey && typeof window !== "undefined" && window.sessionStorage.getItem(canonicalKey)) ||
+        (canonicalKey && typeof window !== "undefined" && window.localStorage.getItem(canonicalKey));
+
+      const rawLegacy =
         (typeof window !== "undefined" && window.sessionStorage.getItem("live_quiz_player")) ||
         (codeKey && typeof window !== "undefined" && window.sessionStorage.getItem(codeKey)) ||
-        (pgtscKey && typeof window !== "undefined" && window.sessionStorage.getItem(pgtscKey)) ||
         (codeKey && typeof window !== "undefined" && window.localStorage.getItem(codeKey)) ||
         (typeof window !== "undefined" && window.localStorage.getItem("pgtsc_live_quiz_player"));
 
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.playerId && parsed.playerName) {
-          setIdentity(parsed);
-        }
+      const parsedCanonical = rawCanonical ? JSON.parse(rawCanonical) : null;
+      const parsedLegacy = rawLegacy ? JSON.parse(rawLegacy) : null;
+      const source = parsedCanonical || parsedLegacy;
+
+      const resolvedPlayerId = paramPlayerId || source?.playerId || "";
+      const resolvedSessionIdFromStore = paramSessionId || source?.sessionId || "";
+      const resolvedCodeFromStore = paramCode || source?.code || source?.roomCode || "";
+
+      if (resolvedPlayerId && (resolvedCodeFromStore || resolvedSessionIdFromStore)) {
+        setIdentity({
+          playerId: resolvedPlayerId,
+          playerName: source?.name || source?.playerName || "শিক্ষার্থী",
+          roll: source?.roll || "—",
+          avatar: source?.avatar || "🚀",
+          sessionId: resolvedSessionIdFromStore,
+          roomCode: resolvedCodeFromStore,
+        });
       }
     } catch {
-      // ignore
+      // ignore parse errors; URL fallback still guards below
+      if (paramPlayerId && (paramCode || paramSessionId)) {
+        setIdentity({
+          playerId: paramPlayerId,
+          playerName: "শিক্ষার্থী",
+          roll: "—",
+          avatar: "🚀",
+          sessionId: paramSessionId,
+          roomCode: paramCode,
+        });
+      }
     } finally {
       setIsIdentityRestored(true);
     }
-  }, [paramCode]);
+  }, [paramCode, paramSessionId, paramPlayerId]);
+
+  // Guarantee zero redirect-back loop when URL carries playerId + code/sessionId
+  const effectiveIdentity: StudentAuthIdentity | null = useMemo(() => {
+    if (identity) return identity;
+    if (paramPlayerId && (paramCode || paramSessionId)) {
+      return {
+        playerId: paramPlayerId,
+        playerName: "শিক্ষার্থী",
+        roll: "—",
+        avatar: "🚀",
+        sessionId: paramSessionId,
+        roomCode: paramCode,
+      };
+    }
+    return null;
+  }, [identity, paramPlayerId, paramCode, paramSessionId]);
 
   // Session ID resolution
   const resolvedSessionId = useMemo(() => {
-    return paramSessionId || identity?.sessionId || paramCode || "";
-  }, [paramSessionId, identity, paramCode]);
+    return paramSessionId || effectiveIdentity?.sessionId || paramCode || "";
+  }, [paramSessionId, effectiveIdentity, paramCode]);
 
   // 2. Poll /api/live-quizzes/sessions/[id]/state every 1000ms
   useEffect(() => {
@@ -133,12 +185,34 @@ function LiveQuizArenaContent() {
     const pollState = async () => {
       if (typeof document !== "undefined" && document.hidden) return;
       try {
-        const playerIdQuery = identity?.playerId ? `?playerId=${identity.playerId}` : "";
+        const activePlayerId = effectiveIdentity?.playerId;
+        const playerIdQuery = activePlayerId ? `?playerId=${encodeURIComponent(activePlayerId)}` : "";
         const res = await fetch(`/api/live-quizzes/sessions/${resolvedSessionId}/state${playerIdQuery}`);
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
 
-        if (isMounted && data.success) {
+        if (isMounted && res.status === 404) {
+          setSessionMissing(true);
+          return;
+        }
+
+        if (isMounted && data?.success) {
+          setSessionMissing(false);
           setSessionState(data);
+
+          // Hydrate real name/avatar from server players list if needed
+          if (activePlayerId && Array.isArray(data.allPlayers || data.players)) {
+            const matchedPlayer = (data.allPlayers || data.players).find((p: any) => p.id === activePlayerId);
+            if (matchedPlayer) {
+              setIdentity((prev) => ({
+                playerId: activePlayerId,
+                playerName: matchedPlayer.displayName || matchedPlayer.name || prev?.playerName || "শিক্ষার্থী",
+                roll: matchedPlayer.roll || prev?.roll || "—",
+                avatar: matchedPlayer.avatar || prev?.avatar || "🚀",
+                sessionId: data.session?.id || prev?.sessionId || resolvedSessionId,
+                roomCode: data.session?.code || prev?.roomCode || paramCode,
+              }));
+            }
+          }
 
           // Calculate server clock offset
           if (data.serverNow || data.serverTimestamp) {
@@ -149,8 +223,8 @@ function LiveQuizArenaContent() {
           }
 
           // Check if server recorded readiness
-          if (identity?.playerId && Array.isArray(data.readyPlayers)) {
-            const foundReady = data.readyPlayers.some((p: any) => p.playerId === identity.playerId || p.id === identity.playerId);
+          if (activePlayerId && Array.isArray(data.readyPlayers)) {
+            const foundReady = data.readyPlayers.some((p: any) => p.playerId === activePlayerId || p.id === activePlayerId);
             setIsReady(foundReady);
           }
 
@@ -183,7 +257,7 @@ function LiveQuizArenaContent() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [resolvedSessionId, identity?.playerId]);
+  }, [resolvedSessionId, effectiveIdentity?.playerId, paramCode]);
 
   // 3. High-Frequency Local 100ms Timer (Strictly NaN-proof)
   useEffect(() => {
@@ -243,7 +317,7 @@ function LiveQuizArenaContent() {
 
   // 5. Handle "I am Ready" Tap
   const handleReadyTap = async () => {
-    if (!resolvedSessionId || !identity || isTappingReady) return;
+    if (!resolvedSessionId || !effectiveIdentity || isTappingReady) return;
     setIsTappingReady(true);
     const nextReady = !isReady;
 
@@ -257,10 +331,10 @@ function LiveQuizArenaContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          playerId: identity.playerId,
-          studentName: identity.playerName,
-          roll: identity.roll,
-          avatar: identity.avatar,
+          playerId: effectiveIdentity.playerId,
+          studentName: effectiveIdentity.playerName,
+          roll: effectiveIdentity.roll,
+          avatar: effectiveIdentity.avatar,
           isReady: nextReady,
         }),
       });
@@ -274,7 +348,7 @@ function LiveQuizArenaContent() {
 
   // 6. Handle Answer Submission (Strict O(1) submission)
   const handleSubmitAnswer = async (payload: any) => {
-    if (hasSubmitted || isSubmitting || !resolvedSessionId || !identity) return;
+    if (hasSubmitted || isSubmitting || !resolvedSessionId || !effectiveIdentity) return;
     setIsSubmitting(true);
     setSelectedAnswer(payload);
 
@@ -289,14 +363,14 @@ function LiveQuizArenaContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          playerId: identity.playerId,
+          playerId: effectiveIdentity.playerId,
           slideIndex: currentSlideIndex,
           questionId: currentSlide?.id || `slide-${currentSlideIndex}`,
           answerPayload: payload,
           responseTimeMs,
-          displayName: identity.playerName,
-          roll: identity.roll,
-          avatar: identity.avatar,
+          displayName: effectiveIdentity.playerName,
+          roll: effectiveIdentity.roll,
+          avatar: effectiveIdentity.avatar,
         }),
       });
 
@@ -320,15 +394,17 @@ function LiveQuizArenaContent() {
   // =========================================================================
   // CONDITIONAL VIEW 0: Unjoined State -> Modern 3D Join Card
   // =========================================================================
-  if (isIdentityRestored && !identity) {
+  if (isIdentityRestored && !effectiveIdentity) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-slate-950 p-4 sm:p-6">
-        <StudentModern3DJoinCard
-          initialCode={paramCode}
-          onJoined={(newIdentity) => {
-            setIdentity(newIdentity);
-          }}
-        />
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex items-center justify-center bg-slate-950 p-4 sm:p-6">
+        <div className="w-full my-auto py-4">
+          <StudentModern3DJoinCard
+            initialCode={paramCode}
+            onJoined={(newIdentity) => {
+              setIdentity(newIdentity);
+            }}
+          />
+        </div>
       </div>
     );
   }
@@ -336,7 +412,7 @@ function LiveQuizArenaContent() {
   // Initial Loader
   if (isInitialLoading) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-4 space-y-4 text-center">
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col items-center justify-center bg-slate-950 p-4 space-y-4 text-center">
         <div className="w-16 h-16 rounded-3xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center shadow-[0_0_40px_rgba(99,102,241,0.5)]">
           <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
         </div>
@@ -347,9 +423,37 @@ function LiveQuizArenaContent() {
     );
   }
 
-  // Current session stage
+  // Session Missing / Invalid Room Notice
+  if (sessionMissing && !sessionState) {
+    return (
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col items-center justify-center bg-slate-950 p-4 sm:p-6 text-center">
+        <div className="w-full max-w-md mx-auto my-auto rounded-3xl bg-slate-900/90 border border-rose-500/40 p-6 sm:p-8 space-y-5 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-500/40 flex items-center justify-center mx-auto text-rose-400">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-black text-white">❌ কুইজ সেশনটি পাওয়া যায়নি</h2>
+            <p className="text-xs sm:text-sm text-slate-400">
+              রুম কোডটি সঠিক নয় অথবা কুইজ সেশনটির মেয়াদ শেষ হয়েছে। অনুগ্রহ করে সঠিক ৬ ডিজিটের কোড দিয়ে পুনরায় যোগ দাও।
+            </p>
+          </div>
+          <a
+            href="/quiz/join"
+            className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 text-white font-black text-sm shadow-lg"
+          >
+            <span>রুম কোড দিয়ে পুনরায় জয়েন করো</span>
+            <ArrowRight className="w-4 h-4" />
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Current session stage & status
   const rawStage = sessionState?.stage || sessionState?.phase || "READY_CHECK";
   const stage = rawStage.toUpperCase();
+  const liveSessionStatus = String(sessionState?.status || sessionState?.sessionStatus || "ACTIVE").toUpperCase();
+  const isSessionPaused = Boolean(sessionState?.isPaused) || liveSessionStatus === "PAUSED";
 
   const totalPlayers = sessionState?.totalPlayers || 1;
   const myRank = sessionState?.myRank || 1;
@@ -358,17 +462,82 @@ function LiveQuizArenaContent() {
   const safeTimeLeft = Number.isFinite(displaySeconds) ? Math.max(0, displaySeconds) : 0;
 
   // =========================================================================
+  // PAUSED GUARD: Mentimeter-Style Paused Notice when Teacher Exits / Pauses
+  // =========================================================================
+  if (isSessionPaused && stage !== "ENDED") {
+    return (
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col items-center bg-slate-950 p-4 sm:p-6 relative select-none">
+        <div className="fixed inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-amber-500/15 rounded-full blur-[110px]" />
+          <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-500/15 rounded-full blur-[110px]" />
+        </div>
+
+        <div className="relative z-10 w-full max-w-md mx-auto my-auto py-6">
+          <div className="rounded-3xl bg-slate-900/90 border-2 border-amber-400/50 shadow-[0_20px_60px_rgba(0,0,0,0.75)] backdrop-blur-2xl p-6 sm:p-8 text-center space-y-6">
+            <div className="w-20 h-20 rounded-3xl bg-amber-500/20 border-2 border-amber-400/60 flex items-center justify-center mx-auto text-amber-300 shadow-[0_0_35px_rgba(245,158,11,0.3)]">
+              <PauseCircle className="w-10 h-10" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 text-xs font-black">
+                <span>সেশন বিরতিতে</span>
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-white leading-snug">
+                ⏸️ কুইজটি এখন বিরতিতে আছে (Paused by Teacher)
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                শিক্ষক আপাতত কুইজটি বিরতি ও সেভ করেছেন। শিক্ষক পুনরায় লাইভ শুরু করলেই তোমার স্ক্রিন স্বয়ংক্রিয়ভাবে পরের প্রশ্নে ফিরে যাবে।
+              </p>
+            </div>
+
+            {/* Preserved Progress Card */}
+            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-center gap-2.5">
+                <span className="text-2xl">{effectiveIdentity?.avatar || "🚀"}</span>
+                <div className="text-left">
+                  <p className="text-sm font-black text-white">{effectiveIdentity?.playerName || "শিক্ষার্থী"}</p>
+                  <p className="text-[11px] font-bold text-slate-400">
+                    রোল: <span className="text-amber-300">{effectiveIdentity?.roll || "—"}</span>
+                  </p>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-around text-xs font-bold">
+                <span className="text-cyan-300 font-mono">⭐ স্কোর: {myScore} pts</span>
+                <span className="text-indigo-300 font-mono">প্রশ্ন: {currentSlideIndex + 1}/{totalSlides}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 text-xs text-amber-300/90 font-bold">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>শিক্ষক পুনরায় শুরু করার অপেক্ষায়...</span>
+            </div>
+
+            <a
+              href="/quiz/join"
+              className="block w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-300 transition"
+            >
+              অন্য রুম কোড দিয়ে জয়েন করো
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
   // STATE A: WELCOME_WAITING / WARMUP_ACTIVE / READY_CHECK / LOBBY
   // =========================================================================
   if (stage === "WELCOME_WAITING" || stage === "WARMUP_ACTIVE" || stage === "READY_CHECK" || stage === "LOBBY" || stage === "READY") {
     return (
-      <div className="min-h-screen w-full flex flex-col justify-between items-center bg-slate-950 p-4 sm:p-6 relative overflow-hidden select-none">
-        {/* Ambient Neon Blobs */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-500/15 rounded-full blur-[100px] pointer-events-none" />
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col items-center bg-slate-950 p-4 sm:p-6 relative select-none">
+        {/* Ambient Neon Blobs inside fixed container so page scrolling never clips */}
+        <div className="fixed inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 rounded-full blur-[100px]" />
+          <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-500/15 rounded-full blur-[100px]" />
+        </div>
 
         {/* Top Header */}
-        <div className="w-full max-w-md mx-auto text-center space-y-2 pt-2">
+        <div className="relative z-10 w-full max-w-md mx-auto text-center space-y-2 pt-2 pb-4">
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-black text-xs uppercase tracking-widest shadow-[0_0_20px_rgba(16,185,129,0.2)]">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span>লাইভ সেশন সক্রিয়</span>
@@ -379,8 +548,8 @@ function LiveQuizArenaContent() {
           </h2>
         </div>
 
-        {/* Main Student Status Card */}
-        <div className="w-full max-w-md mx-auto relative">
+        {/* Main Student Status Card with comfortable py-6 */}
+        <div className="relative z-10 w-full max-w-md mx-auto my-auto py-6">
           <div className="relative rounded-3xl bg-slate-900/80 border border-slate-700/60 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-2xl p-6 sm:p-8 text-center space-y-6">
             {/* Glowing Emerald Confirmation Banner */}
             <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/25 via-teal-500/25 to-emerald-500/25 border-2 border-emerald-400/70 shadow-[0_0_30px_rgba(16,185,129,0.35)]">
@@ -393,13 +562,13 @@ function LiveQuizArenaContent() {
             {/* Student Avatar, Name & Roll */}
             <div className="space-y-3">
               <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center mx-auto text-5xl shadow-[0_0_35px_rgba(6,182,212,0.5)] border-2 border-white/40">
-                <span>{identity?.avatar || "🚀"}</span>
+                <span>{effectiveIdentity?.avatar || "🚀"}</span>
               </div>
 
               <div>
-                <h3 className="text-2xl font-black text-white">{identity?.playerName}</h3>
+                <h3 className="text-2xl font-black text-white">{effectiveIdentity?.playerName}</h3>
                 <p className="text-xs font-bold text-slate-400">
-                  রোল: <span className="text-amber-300">{identity?.roll || "—"}</span> | বর্তমান পয়েন্ট: <span className="text-cyan-400">{myScore} pts</span>
+                  রোল: <span className="text-amber-300">{effectiveIdentity?.roll || "—"}</span> | বর্তমান পয়েন্ট: <span className="text-cyan-400">{myScore} pts</span>
                 </p>
               </div>
             </div>
@@ -442,11 +611,10 @@ function LiveQuizArenaContent() {
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               onClick={handleReadyTap}
-              className={`w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-3 cursor-pointer transition-all shadow-xl ${
-                isReady
-                  ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-[0_0_35px_rgba(16,185,129,0.5)] border-2 border-emerald-300"
-                  : "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-[0_0_35px_rgba(245,158,11,0.5)] border-2 border-amber-300"
-              }`}
+              className={`w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-3 cursor-pointer transition-all shadow-xl ${isReady
+                ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-[0_0_35px_rgba(16,185,129,0.5)] border-2 border-emerald-300"
+                : "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-[0_0_35px_rgba(245,158,11,0.5)] border-2 border-amber-300"
+                }`}
             >
               {isTappingReady ? (
                 <Loader2 className="w-6 h-6 animate-spin text-slate-950" />
@@ -493,7 +661,7 @@ function LiveQuizArenaContent() {
         </div>
 
         {/* Footer info */}
-        <p className="text-[11px] text-slate-500 text-center pb-2">
+        <p className="relative z-10 text-[11px] text-slate-500 text-center pt-2 pb-4">
           শিক্ষক স্লাইড স্টার্ট করলেই স্ক্রিন স্বয়ংক্রিয়ভাবে প্রশ্নের কাউন্টডাউনে যাবে।
         </p>
 
@@ -509,11 +677,11 @@ function LiveQuizArenaContent() {
   if (stage === "COUNTDOWN_321") {
     const countdownNumber = Math.max(1, safeTimeLeft);
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-4 relative overflow-hidden select-none text-center">
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col items-center justify-center bg-slate-950 p-4 relative select-none text-center">
         {/* Neon Ambient Background */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-cyan-600/20 via-indigo-600/20 to-purple-600/20 blur-[130px] pointer-events-none" />
+        <div className="fixed inset-0 bg-gradient-to-tr from-cyan-600/20 via-indigo-600/20 to-purple-600/20 blur-[130px] pointer-events-none" />
 
-        <div className="relative space-y-6 max-w-sm mx-auto">
+        <div className="relative z-10 space-y-6 max-w-sm mx-auto my-auto py-6">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black uppercase tracking-widest">
             <Sparkles className="w-4 h-4 text-cyan-400" />
             <span>প্রশ্ন {currentSlideIndex + 1} / {totalSlides} আসছে...</span>
@@ -549,7 +717,7 @@ function LiveQuizArenaContent() {
     const questionText = currentSlide?.questionText || currentSlide?.title || currentSlide?.question || "প্রশ্ন";
 
     return (
-      <div className="min-h-screen w-full flex flex-col justify-between bg-slate-950 text-white select-none relative">
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col justify-between bg-slate-950 text-white select-none relative">
         {/* Top Sticky Bar */}
         <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-xl border-b border-slate-800 px-4 py-3">
           <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
@@ -566,11 +734,10 @@ function LiveQuizArenaContent() {
             {/* Synchronized Seconds Badge */}
             <div className="flex items-center gap-2">
               <div
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full font-mono text-xs font-black shadow-lg ${
-                  safeTimeLeft <= 5
-                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 animate-pulse"
-                    : "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
-                }`}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full font-mono text-xs font-black shadow-lg ${safeTimeLeft <= 5
+                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 animate-pulse"
+                  : "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                  }`}
               >
                 <Clock className="w-3.5 h-3.5" />
                 <span>{Number.isFinite(safeTimeLeft) ? safeTimeLeft : 0}s</span>
@@ -586,9 +753,8 @@ function LiveQuizArenaContent() {
           {/* Synchronized Countdown Progress Bar */}
           <div className="w-full bg-slate-800 h-1 mt-2 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all duration-100 ease-linear ${
-                safeTimeLeft <= 5 ? "bg-rose-500" : "bg-gradient-to-r from-cyan-400 to-indigo-500"
-              }`}
+              className={`h-full transition-all duration-100 ease-linear ${safeTimeLeft <= 5 ? "bg-rose-500" : "bg-gradient-to-r from-cyan-400 to-indigo-500"
+                }`}
               style={{
                 width: `${Math.min(100, Math.max(0, (safeTimeLeft / (Number(currentSlide?.timeLimit) || 20)) * 100))}%`,
               }}
@@ -686,9 +852,8 @@ function LiveQuizArenaContent() {
                         disabled={isSubmitting}
                         onClick={() => handleSubmitAnswer(idx)}
                         style={{ backgroundColor: theme.hex }}
-                        className={`p-5 rounded-2xl border-b-4 border-black/35 text-left font-black text-base sm:text-lg flex items-center gap-3.5 cursor-pointer transition-all shadow-xl min-h-[76px] ${
-                          isSelected ? "ring-4 ring-white scale-[1.02]" : ""
-                        }`}
+                        className={`p-5 rounded-2xl border-b-4 border-black/35 text-left font-black text-base sm:text-lg flex items-center gap-3.5 cursor-pointer transition-all shadow-xl min-h-[76px] ${isSelected ? "ring-4 ring-white scale-[1.02]" : ""
+                          }`}
                       >
                         <span className="w-10 h-10 rounded-xl bg-black/25 flex items-center justify-center font-black text-white shrink-0 text-xl">
                           {theme.shape}
@@ -828,13 +993,12 @@ function LiveQuizArenaContent() {
                             key={idx}
                             type="button"
                             onClick={() => setMatchingSelectedLeft(leftText)}
-                            className={`w-full p-3 rounded-2xl border-2 text-left text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
-                              isSelected
-                                ? "bg-cyan-500/30 border-cyan-400 text-cyan-200 ring-2 ring-cyan-400"
-                                : isPaired
+                            className={`w-full p-3 rounded-2xl border-2 text-left text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${isSelected
+                              ? "bg-cyan-500/30 border-cyan-400 text-cyan-200 ring-2 ring-cyan-400"
+                              : isPaired
                                 ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-200"
                                 : "bg-slate-900 border-slate-700 text-slate-200 hover:border-slate-500"
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-1">
                               <span className="truncate">{leftText}</span>
@@ -867,13 +1031,12 @@ function LiveQuizArenaContent() {
                                 setMatchingSelectedLeft(null);
                               }
                             }}
-                            className={`w-full p-3 rounded-2xl border-2 text-left text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
-                              pairedLeft
-                                ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-200"
-                                : matchingSelectedLeft
+                            className={`w-full p-3 rounded-2xl border-2 text-left text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${pairedLeft
+                              ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-200"
+                              : matchingSelectedLeft
                                 ? "bg-amber-500/10 border-amber-400/60 hover:bg-amber-500/20 text-amber-200 animate-pulse"
                                 : "bg-slate-900 border-slate-700 text-slate-200 hover:border-slate-500"
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-1">
                               <span className="truncate">{rightText}</span>
@@ -964,39 +1127,36 @@ function LiveQuizArenaContent() {
     const correctAnswer = sessionState?.correctAnswer !== undefined ? sessionState.correctAnswer : currentSlide?.correctAnswer;
 
     return (
-      <div className="min-h-screen w-full flex flex-col justify-between items-center bg-slate-950 p-4 sm:p-6 text-white relative select-none">
+      <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col justify-between items-center bg-slate-950 p-4 sm:p-6 text-white relative select-none">
         {/* Ambient Glow */}
         <div
-          className={`absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${
-            isCorrect ? "bg-emerald-500/20" : "bg-rose-500/20"
-          }`}
+          className={`fixed top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[120px] pointer-events-none ${isCorrect ? "bg-emerald-500/20" : "bg-rose-500/20"
+            }`}
         />
 
         {/* Top Header */}
-        <div className="w-full max-w-md mx-auto text-center pt-2">
+        <div className="relative z-10 w-full max-w-md mx-auto text-center pt-2">
           <span className="px-3 py-1 rounded-full bg-slate-900 border border-slate-700 text-xs font-bold text-slate-400">
             প্রশ্ন {currentSlideIndex + 1} ফলাফল
           </span>
         </div>
 
         {/* Main Result Card */}
-        <div className="w-full max-w-md mx-auto space-y-4">
+        <div className="relative z-10 w-full max-w-md mx-auto my-auto py-4 space-y-4">
           <motion.div
             initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`p-6 sm:p-8 rounded-3xl border-2 text-center space-y-5 shadow-2xl backdrop-blur-2xl ${
-              isCorrect
-                ? "bg-slate-900/90 border-emerald-400/80 shadow-[0_0_50px_rgba(16,185,129,0.3)]"
-                : "bg-slate-900/90 border-rose-400/80 shadow-[0_0_50px_rgba(244,63,94,0.3)]"
-            }`}
+            className={`p-6 sm:p-8 rounded-3xl border-2 text-center space-y-5 shadow-2xl backdrop-blur-2xl ${isCorrect
+              ? "bg-slate-900/90 border-emerald-400/80 shadow-[0_0_50px_rgba(16,185,129,0.3)]"
+              : "bg-slate-900/90 border-rose-400/80 shadow-[0_0_50px_rgba(244,63,94,0.3)]"
+              }`}
           >
             {/* Icon */}
             <div
-              className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto text-4xl shadow-xl ${
-                isCorrect
-                  ? "bg-gradient-to-tr from-emerald-400 to-teal-500 text-slate-950 shadow-emerald-500/50"
-                  : "bg-gradient-to-tr from-rose-500 to-pink-600 text-white shadow-rose-500/50"
-              }`}
+              className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto text-4xl shadow-xl ${isCorrect
+                ? "bg-gradient-to-tr from-emerald-400 to-teal-500 text-slate-950 shadow-emerald-500/50"
+                : "bg-gradient-to-tr from-rose-500 to-pink-600 text-white shadow-rose-500/50"
+                }`}
             >
               <span>{isCorrect ? "🎉" : "❌"}</span>
             </div>
@@ -1043,7 +1203,7 @@ function LiveQuizArenaContent() {
         </div>
 
         {/* Footer info */}
-        <p className="text-[11px] text-slate-500 text-center pb-2">
+        <p className="relative z-10 text-[11px] text-slate-500 text-center pb-2">
           শিক্ষক পরবর্তী প্রশ্ন শুরু করার অপেক্ষায়...
         </p>
       </div>
@@ -1057,7 +1217,7 @@ function LiveQuizArenaContent() {
   const allPlayers = sessionState?.players || [];
 
   return (
-    <div className="min-h-screen w-full flex flex-col justify-between bg-slate-950 text-white p-4 sm:p-6 select-none relative">
+    <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex flex-col justify-between bg-slate-950 text-white p-4 sm:p-6 select-none relative">
       <div className="w-full max-w-2xl mx-auto space-y-6">
         {/* Top Header */}
         <div className="text-center space-y-2 pt-2">
@@ -1075,12 +1235,12 @@ function LiveQuizArenaContent() {
         <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-indigo-900/60 via-purple-900/60 to-indigo-900/60 border-2 border-indigo-400/50 shadow-2xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-2xl">
-              <span>{identity?.avatar || "🚀"}</span>
+              <span>{effectiveIdentity?.avatar || "🚀"}</span>
             </div>
             <div>
-              <h4 className="text-base font-black text-white">{identity?.playerName}</h4>
+              <h4 className="text-base font-black text-white">{effectiveIdentity?.playerName}</h4>
               <p className="text-xs text-slate-300 font-bold">
-                রোল: {identity?.roll || "—"}
+                রোল: {effectiveIdentity?.roll || "—"}
               </p>
             </div>
           </div>
@@ -1136,15 +1296,14 @@ function LiveQuizArenaContent() {
 
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
             {topPlayers.map((p: any, idx: number) => {
-              const isCurrent = p.id === identity?.playerId;
+              const isCurrent = p.id === effectiveIdentity?.playerId;
               return (
                 <div
                   key={p.id || idx}
-                  className={`p-3 rounded-2xl flex items-center justify-between border transition-all ${
-                    isCurrent
-                      ? "bg-emerald-500/20 border-emerald-400/80 ring-2 ring-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
-                      : "bg-slate-900/70 border-slate-800"
-                  }`}
+                  className={`p-3 rounded-2xl flex items-center justify-between border transition-all ${isCurrent
+                    ? "bg-emerald-500/20 border-emerald-400/80 ring-2 ring-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+                    : "bg-slate-900/70 border-slate-800"
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     <span className="w-6 text-center font-mono font-black text-xs text-slate-400">
@@ -1175,7 +1334,7 @@ export default function LiveQuizPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen w-full flex items-center justify-center bg-slate-950">
+        <div className="min-h-dvh w-full overflow-y-auto overflow-x-hidden pb-12 flex items-center justify-center bg-slate-950">
           <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
         </div>
       }

@@ -9,27 +9,36 @@ import { usePathname } from "next/navigation";
 export default function QuizLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isJoinPage = pathname === "/quiz/join" || pathname?.endsWith("/join");
+  const isStudioRoot = pathname === "/quiz";
 
   return (
     <QuizSessionProvider>
-      <div className="h-screen max-h-screen w-full relative overflow-hidden font-sans selection:bg-cyan-500 selection:text-slate-950">
+      <div className="min-h-dvh w-full relative overflow-y-auto overflow-x-hidden pb-12 font-sans selection:bg-cyan-500 selection:text-slate-950 flex flex-col">
         <TechBackground />
-        
+
         <main
-          className={`relative z-10 w-full flex flex-col items-center justify-center ${
-            isJoinPage
-              ? "h-screen max-h-screen overflow-hidden px-2.5 sm:px-4 py-2"
-              : "min-h-screen px-3.5 sm:px-6 pt-16 sm:pt-24 lg:pt-28 pb-8 sm:pb-16 overflow-y-auto"
+          className={`relative z-10 w-full flex-1 flex flex-col items-center ${
+            isStudioRoot
+              ? "px-0 py-0"
+              : isJoinPage
+              ? "px-3 sm:px-6 py-4 sm:py-8 pb-12"
+              : "px-3.5 sm:px-6 pt-20 sm:pt-24 pb-12"
           }`}
         >
           <AnimatePresence mode="wait">
             <motion.div
               key={pathname}
-              initial={{ opacity: 0, scale: 0.98, filter: "blur(10px)" }}
-              animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-              exit={{ opacity: 0, scale: 1.02, filter: "blur(10px)" }}
-              transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-              className={`w-full ${isJoinPage ? "max-w-md sm:max-w-lg h-full flex flex-col justify-center" : "max-w-xl mx-auto"}`}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.99 }}
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className={`w-full ${
+                isStudioRoot
+                  ? "w-full"
+                  : isJoinPage
+                  ? "max-w-lg mx-auto my-auto"
+                  : "max-w-2xl mx-auto my-auto"
+              }`}
             >
               {children}
             </motion.div>

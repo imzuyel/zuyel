@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { institutionalDb } from "./database";
 
@@ -46,7 +47,9 @@ export type LiveSessionStage =
   | "LEADERBOARD_VIEW"
   | "ENDED";
 
-export type LiveSessionStatus = "WAITING" | "ACTIVE" | "ENDED";
+export type LiveSessionStatus = "WAITING" | "ACTIVE" | "PAUSED" | "ENDED";
+
+export const HOST_HEARTBEAT_TIMEOUT_MS = 25_000;
 
 export interface LiveSessionRecord {
   id: string;
@@ -61,6 +64,9 @@ export interface LiveSessionRecord {
   currentSlideIndex: number;
   stageStartedAt: number; // ALWAYS a valid Unix ms number (Date.now())
   stageEndsAt: number;    // ALWAYS a valid Unix ms number (Date.now() + durationMs)
+  hostLastSeenAt: number; // Numeric Unix ms timestamp for 25s host exit guard
+  pausedAt?: number;
+  endedAt?: number;
   slides: any[];          // Full normalized array of slides/questions
   players: Record<string, LivePlayerRecord>; // Keyed by playerId for O(1) concurrent writes
   answers: Record<string, Record<string, LiveAnswerRecord>>; // Keyed by `${slideIndex}` -> `${playerId}`
@@ -77,8 +83,8 @@ export interface LiveSessionRecord {
 }
 
 // ============================================================================
-// ATOMIC FILE-BACKED SINGLETON (.next/cache/pgtsc-live-sessions.json)
-// Multi-worker Next.js dev server & Localtunnel persistence engine
+// ATOMIC FILE-BACKED SINGLETON (Stored in os.tmpdir() outside Next.js workspace
+// so writes NEVER trigger Fast Refresh / dev page reloads)
 // ============================================================================
 
 declare global {
@@ -90,27 +96,97 @@ declare global {
   var __pgtscLiveDiskWriteTimer: ReturnType<typeof setTimeout> | undefined;
   // eslint-disable-next-line no-var
   var __pgtscLiveMysqlSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  // eslint-disable-next-line no-var
+  var __pgtscLiveHybridHydrated: boolean | undefined;
 }
 
-const CACHE_DIR = path.join(process.cwd(), ".next", "cache");
+const CACHE_DIR = os.tmpdir();
 const CACHE_FILE = path.join(CACHE_DIR, "pgtsc-live-sessions.json");
-const LEGACY_CACHE_FILE = path.join(CACHE_DIR, "live-sessions-v3.json");
+const LEGACY_READ_FILES = [
+  path.join(process.cwd(), ".next", "cache", "pgtsc-live-sessions.json"),
+  path.join(process.cwd(), ".next", "cache", "live-sessions-v3.json"),
+];
+
+function hydrateSessionRecord(item: any): LiveSessionRecord | null {
+  if (!item || !item.id) return null;
+  const now = Date.now();
+  const validStatuses: LiveSessionStatus[] = ["WAITING", "ACTIVE", "PAUSED", "ENDED"];
+  const rawStatus = String(item.status || "WAITING").toUpperCase() as LiveSessionStatus;
+  const status: LiveSessionStatus = validStatuses.includes(rawStatus) ? rawStatus : "WAITING";
+  const createdAt = Number(item.createdAt) || now;
+  const updatedAt = Number(item.updatedAt) || createdAt;
+  const hostLastSeenAt = Number.isFinite(Number(item.hostLastSeenAt)) && Number(item.hostLastSeenAt) > 0
+    ? Number(item.hostLastSeenAt)
+    : updatedAt;
+
+  return {
+    ...item,
+    id: String(item.id),
+    code: String(item.code || item.sessionCode || "100000"),
+    title: String(item.title || "লাইভ কুইজ সেশন"),
+    className: String(item.className || "দশম শ্রেণি"),
+    trade: String(item.trade || "জেনারেল"),
+    subject: String(item.subject || "সাধারণ জ্ঞান"),
+    hostName: String(item.hostName || "হোস্ট শিক্ষক"),
+    status,
+    stage: (item.stage || "READY_CHECK") as LiveSessionStage,
+    currentSlideIndex: Math.max(0, Number(item.currentSlideIndex) || 0),
+    stageStartedAt: Number.isFinite(Number(item.stageStartedAt)) ? Number(item.stageStartedAt) : now,
+    stageEndsAt: Number.isFinite(Number(item.stageEndsAt)) ? Number(item.stageEndsAt) : now + 20000,
+    hostLastSeenAt,
+    pausedAt: item.pausedAt ? Number(item.pausedAt) : undefined,
+    endedAt: item.endedAt ? Number(item.endedAt) : undefined,
+    slides: Array.isArray(item.slides) ? item.slides : [],
+    players: item.players && typeof item.players === "object" ? item.players : {},
+    answers: item.answers && typeof item.answers === "object" ? item.answers : {},
+    smsInterval: item.smsInterval || "EVERY_3",
+    updatedAt,
+    createdAt,
+  };
+}
+
+function hydrateFromHybridStoreIntoMap(map: Map<string, LiveSessionRecord>): void {
+  if (globalThis.__pgtscLiveHybridHydrated) return;
+  globalThis.__pgtscLiveHybridHydrated = true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getHybridStore } = require("./hybridStorageEngine") as {
+      getHybridStore: () => { liveSessions?: Record<string, any> };
+    };
+    const hybrid = getHybridStore();
+    if (hybrid?.liveSessions && typeof hybrid.liveSessions === "object") {
+      for (const rawItem of Object.values(hybrid.liveSessions)) {
+        const rec = hydrateSessionRecord(rawItem);
+        if (rec) {
+          const existing = map.get(rec.id);
+          if (!existing || rec.updatedAt > existing.updatedAt) {
+            map.set(rec.id, rec);
+          }
+        }
+      }
+    }
+  } catch {
+    // Safe fallback if called before hybrid store initialization
+  }
+}
 
 function syncMapFromDisk(): Map<string, LiveSessionRecord> {
   // Fast-path (<1ms): Never block high-concurrency 60-student routes on synchronous disk I/O
   if (globalThis.__pgtscLiveSessionMap) {
+    if (!globalThis.__pgtscLiveHybridHydrated) {
+      hydrateFromHybridStoreIntoMap(globalThis.__pgtscLiveSessionMap);
+    }
     return globalThis.__pgtscLiveSessionMap;
   }
 
-  globalThis.__pgtscLiveSessionMap = new Map<string, LiveSessionRecord>();
+  const map = new Map<string, LiveSessionRecord>();
+  globalThis.__pgtscLiveSessionMap = map;
 
-  // Cold-start hydration from disk snapshot
+  // Cold-start hydration from os.tmpdir() snapshot (or legacy workspace snapshot read-only once)
   try {
     const targetFile = fs.existsSync(CACHE_FILE)
       ? CACHE_FILE
-      : fs.existsSync(LEGACY_CACHE_FILE)
-      ? LEGACY_CACHE_FILE
-      : null;
+      : LEGACY_READ_FILES.find((f) => fs.existsSync(f)) || null;
 
     if (targetFile) {
       const stats = fs.statSync(targetFile);
@@ -119,14 +195,9 @@ function syncMapFromDisk(): Map<string, LiveSessionRecord> {
       const list: LiveSessionRecord[] = JSON.parse(raw);
       if (Array.isArray(list)) {
         for (const item of list) {
-          if (item && item.id) {
-            item.stageStartedAt = Number.isFinite(Number(item.stageStartedAt)) ? Number(item.stageStartedAt) : Date.now();
-            item.stageEndsAt = Number.isFinite(Number(item.stageEndsAt)) ? Number(item.stageEndsAt) : Date.now() + 20000;
-            item.updatedAt = Number(item.updatedAt) || Date.now();
-            item.createdAt = Number(item.createdAt) || Date.now();
-            item.players = item.players || {};
-            item.answers = item.answers || {};
-            globalThis.__pgtscLiveSessionMap.set(item.id, item);
+          const hydrated = hydrateSessionRecord(item);
+          if (hydrated) {
+            map.set(hydrated.id, hydrated);
           }
         }
       }
@@ -135,71 +206,168 @@ function syncMapFromDisk(): Map<string, LiveSessionRecord> {
     console.warn("[liveSessionStore] Cold-start disk read warning:", (err as Error).message);
   }
 
-  return globalThis.__pgtscLiveSessionMap;
+  // Merge permanently saved sessions (including cross-day PAUSED / ENDED sessions) from hybridStorageEngine
+  hydrateFromHybridStoreIntoMap(map);
+
+  return map;
 }
 
-function flushMapToDisk(): void {
+async function writeDiskSnapshotAsync(): Promise<void> {
+  try {
+    await fs.promises.mkdir(CACHE_DIR, { recursive: true });
+    const map = syncMapFromDisk();
+    const list = Array.from(map.values());
+    const serialized = JSON.stringify(list);
+    const tmp = `${CACHE_FILE}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 6)}`;
+    await fs.promises.writeFile(tmp, serialized, "utf-8");
+    try {
+      await fs.promises.rename(tmp, CACHE_FILE);
+    } catch {
+      await fs.promises.writeFile(CACHE_FILE, serialized, "utf-8");
+      await fs.promises.unlink(tmp).catch(() => {});
+    }
+    globalThis.__pgtscLiveSessionsLastMtime = Date.now();
+  } catch (err) {
+    console.warn("[liveSessionStore] Async disk flush warning:", (err as Error).message);
+  }
+}
+
+function flushMapToDisk(immediate = false): void {
   if (globalThis.__pgtscLiveDiskWriteTimer) {
     clearTimeout(globalThis.__pgtscLiveDiskWriteTimer);
+    globalThis.__pgtscLiveDiskWriteTimer = undefined;
   }
-  globalThis.__pgtscLiveDiskWriteTimer = setTimeout(async () => {
-    try {
-      await fs.promises.mkdir(CACHE_DIR, { recursive: true });
-      const map = syncMapFromDisk();
-      const list = Array.from(map.values());
-      const serialized = JSON.stringify(list);
-      const tmp = `${CACHE_FILE}.tmp.${Date.now()}`;
-      await fs.promises.writeFile(tmp, serialized, "utf-8");
-      await fs.promises.rename(tmp, CACHE_FILE);
-      globalThis.__pgtscLiveSessionsLastMtime = Date.now();
-    } catch (err) {
-      console.warn("[liveSessionStore] Async disk flush warning:", (err as Error).message);
-    }
+  if (immediate) {
+    void writeDiskSnapshotAsync();
+    return;
+  }
+  globalThis.__pgtscLiveDiskWriteTimer = setTimeout(() => {
+    void writeDiskSnapshotAsync();
   }, 500);
 }
 
 /**
- * Asynchronous background MySQL persistence for active live session state.
- * Never stalls the <1ms classroom concurrency loop.
+ * Sync live session state to hybridStorageEngine permanently (for Pause/Resume across days & History).
  */
+function persistSessionToHybridStore(session: LiveSessionRecord): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getHybridStore, saveHybridStore } = require("./hybridStorageEngine") as {
+      getHybridStore: () => any;
+      saveHybridStore: (s: any) => void;
+    };
+    const store = getHybridStore();
+    if (!store.liveSessions || typeof store.liveSessions !== "object") {
+      store.liveSessions = {};
+    }
+    store.liveSessions[session.id] = {
+      ...session,
+      players: { ...(session.players || {}) },
+      answers: { ...(session.answers || {}) },
+      slides: Array.isArray(session.slides) ? session.slides : [],
+    };
+    saveHybridStore(store);
+  } catch {
+    // Non-fatal fallback
+  }
+}
+
+/**
+ * Persists a LiveSessionRecord to MySQL `LiveSession` table safely.
+ * Never throws or blocks offline mode.
+ */
+export async function syncLiveSessionToMysqlNow(session: LiveSessionRecord): Promise<void> {
+  try {
+    const { prisma, isPrismaAvailable, markPrismaFailure } = await import("./prisma");
+    if (!isPrismaAvailable() || !prisma?.liveSession) return;
+
+    const sortedPlayers = Object.values(session.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0));
+    const dbStatus =
+      session.status === "ENDED"
+        ? "COMPLETED"
+        : session.status === "PAUSED"
+        ? "CLOSED"
+        : session.status === "ACTIVE"
+        ? "ACTIVE"
+        : "WAITING";
+
+    const snapshotPayload = JSON.stringify({
+      __pgtscSessionV2: true,
+      sessionId: session.id,
+      quizId: session.quizId,
+      title: session.title,
+      status: session.status,
+      stage: session.stage,
+      currentSlideIndex: session.currentSlideIndex || 0,
+      pausedAt: session.pausedAt,
+      endedAt: session.endedAt,
+      players: sortedPlayers,
+      answers: session.answers || {},
+    });
+
+    try {
+      const existing = await prisma.liveSession.findFirst({
+        where: { pin: session.code },
+      });
+
+      if (existing) {
+        await prisma.liveSession.update({
+          where: { id: existing.id },
+          data: {
+            status: dbStatus,
+            currentQuestion: session.currentSlideIndex || 0,
+            totalQuestions: session.slides?.length || 1,
+            participantsJson: snapshotPayload,
+            startedAt: session.status === "ACTIVE" && !existing.startedAt ? new Date() : existing.startedAt,
+            endedAt: session.status === "ENDED" ? new Date() : existing.endedAt,
+          },
+        });
+      } else if (prisma.quiz) {
+        const numericQuizId = parseInt(String(session.quizId || "").replace(/\D/g, ""), 10) || 1;
+        let targetQuiz = await prisma.quiz.findFirst({ where: { id: numericQuizId } }).catch(() => null);
+        if (!targetQuiz) {
+          targetQuiz = await prisma.quiz.findFirst().catch(() => null);
+        }
+        if (targetQuiz) {
+          await prisma.liveSession.upsert({
+            where: { pin: session.code },
+            update: {
+              status: dbStatus,
+              currentQuestion: session.currentSlideIndex || 0,
+              totalQuestions: session.slides?.length || 1,
+              participantsJson: snapshotPayload,
+            },
+            create: {
+              pin: session.code,
+              quizId: targetQuiz.id,
+              hostName: session.hostName || "হোস্ট শিক্ষক",
+              status: dbStatus,
+              currentQuestion: session.currentSlideIndex || 0,
+              totalQuestions: session.slides?.length || 1,
+              participantsJson: snapshotPayload,
+              startedAt: session.status === "ACTIVE" ? new Date() : null,
+              endedAt: session.status === "ENDED" ? new Date() : null,
+            },
+          });
+        }
+      }
+    } catch (dbErr: any) {
+      const msg = dbErr?.message || String(dbErr);
+      if (msg.includes("P1001") || msg.includes("ECONNREFUSED") || msg.includes("timed out")) {
+        markPrismaFailure();
+      }
+    }
+  } catch {
+    // Safe non-blocking background sync
+  }
+}
+
 function scheduleMysqlLiveSync(session: LiveSessionRecord): void {
   if (globalThis.__pgtscLiveMysqlSyncTimer) {
     clearTimeout(globalThis.__pgtscLiveMysqlSyncTimer);
   }
-  globalThis.__pgtscLiveMysqlSyncTimer = setTimeout(async () => {
-    try {
-      const { prisma, isPrismaAvailable, markPrismaFailure } = await import("./prisma");
-      if (!isPrismaAvailable() || !prisma?.liveSession) return;
-
-      const sortedPlayers = Object.values(session.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0));
-      const dbStatus = session.status === "ENDED" ? "COMPLETED" : session.status === "ACTIVE" ? "ACTIVE" : "WAITING";
-
-      try {
-        const existing = await prisma.liveSession.findFirst({
-          where: { pin: session.code },
-        });
-        if (existing) {
-          await prisma.liveSession.update({
-            where: { id: existing.id },
-            data: {
-              status: dbStatus,
-              currentQuestion: session.currentSlideIndex || 0,
-              totalQuestions: session.slides?.length || 1,
-              participantsJson: JSON.stringify(sortedPlayers),
-              startedAt: session.status === "ACTIVE" && !existing.startedAt ? new Date() : existing.startedAt,
-              endedAt: session.status === "ENDED" ? new Date() : existing.endedAt,
-            },
-          });
-        }
-      } catch (dbErr: any) {
-        const msg = dbErr?.message || String(dbErr);
-        if (msg.includes("P1001") || msg.includes("ECONNREFUSED") || msg.includes("timed out")) {
-          markPrismaFailure();
-        }
-      }
-    } catch {
-      // Safe non-blocking background sync
-    }
+  globalThis.__pgtscLiveMysqlSyncTimer = setTimeout(() => {
+    void syncLiveSessionToMysqlNow(session);
   }, 1500);
 }
 
@@ -295,10 +463,48 @@ export function normalizeSlideForLive(raw: any, index: number): any {
 export const normalizeSlide = normalizeSlideForLive;
 
 // ============================================================================
+// HOST HEARTBEAT & 25-SECOND INACTIVITY / EXIT GUARD
+// ============================================================================
+
+export function isHostTimedOut(session: LiveSessionRecord, now = Date.now()): boolean {
+  if (!session) return false;
+  if (session.status !== "WAITING" && session.status !== "ACTIVE") return false;
+  const lastSeen =
+    Number(session.hostLastSeenAt) > 0
+      ? Number(session.hostLastSeenAt)
+      : Number(session.updatedAt) || Number(session.createdAt) || now;
+  return now - lastSeen > HOST_HEARTBEAT_TIMEOUT_MS;
+}
+
+export function syncSessionHostLiveness(session: LiveSessionRecord, now = Date.now()): boolean {
+  if (!isHostTimedOut(session, now)) return false;
+  session.status = "PAUSED";
+  session.pausedAt = now;
+  session.updatedAt = now;
+  if (session.stage === "COUNTDOWN_321") {
+    session.stage = "READY_CHECK";
+  }
+  saveLiveSession(session);
+  return true;
+}
+
+export function touchHostHeartbeat(idOrCode: string): LiveSessionRecord | null {
+  const session = getLiveSession(idOrCode, { skipLivenessCheck: true });
+  if (!session) return null;
+  if (session.status === "WAITING" || session.status === "ACTIVE") {
+    session.hostLastSeenAt = Date.now();
+  }
+  return session;
+}
+
+// ============================================================================
 // SESSION LOOKUP, CREATION & PERSISTENCE
 // ============================================================================
 
-export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
+export function getLiveSession(
+  idOrCode: string,
+  options?: { skipLivenessCheck?: boolean }
+): LiveSessionRecord | null {
   if (!idOrCode) return null;
   const map = syncMapFromDisk();
   const needle = String(idOrCode).trim();
@@ -306,14 +512,32 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
 
   // 1. Direct ID lookup
   if (map.has(needle)) {
-    return map.get(needle)!;
+    const found = map.get(needle)!;
+    if (!options?.skipLivenessCheck) {
+      syncSessionHostLiveness(found);
+    }
+    return found;
   }
 
-  // 2. Code lookup
+  // 2. Code lookup (prefer WAITING/ACTIVE, then PAUSED, then most recent ENDED)
+  const codeMatches: LiveSessionRecord[] = [];
   for (const session of map.values()) {
     if (session.code === needle || (digitsOnly.length >= 4 && session.code === digitsOnly)) {
-      return session;
+      codeMatches.push(session);
     }
+  }
+  if (codeMatches.length > 0) {
+    codeMatches.sort((a, b) => {
+      const rank = (s: LiveSessionRecord) =>
+        s.status === "ACTIVE" ? 4 : s.status === "WAITING" ? 3 : s.status === "PAUSED" ? 2 : 1;
+      const diff = rank(b) - rank(a);
+      return diff !== 0 ? diff : (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+    const best = codeMatches[0];
+    if (!options?.skipLivenessCheck) {
+      syncSessionHostLiveness(best);
+    }
+    return best;
   }
 
   // 3. Fallback: Check institutionalDb.liveSessions to bridge legacy in-memory sessions
@@ -327,6 +551,15 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
   if (legacy) {
     const rawSlides = (legacy as any).slides || (legacy as any).questions || [];
     const normalizedSlides = rawSlides.map((s: any, idx: number) => normalizeSlideForLive(s, idx));
+    const now = Date.now();
+    const mappedStatus: LiveSessionStatus =
+      legacy.status === "COMPLETED"
+        ? "ENDED"
+        : (legacy.status as string) === "PAUSED"
+        ? "PAUSED"
+        : legacy.status === "LOBBY"
+        ? "WAITING"
+        : "ACTIVE";
 
     const converted: LiveSessionRecord = {
       id: legacy.id,
@@ -336,17 +569,18 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
       trade: legacy.tradeName || "জেনারেল",
       subject: legacy.subjectName || "সাধারণ জ্ঞান",
       hostName: "হোস্ট শিক্ষক",
-      status: legacy.status === "COMPLETED" ? "ENDED" : legacy.status === "LOBBY" ? "WAITING" : "ACTIVE",
+      status: mappedStatus,
       stage: (legacy as any).stage || (legacy.status === "LOBBY" ? "READY_CHECK" : "ANSWERING_ACTIVE"),
       currentSlideIndex: legacy.currentQuestionIndex || 0,
-      stageStartedAt: (legacy as any).stageStartedAt ? Number((legacy as any).stageStartedAt) : Date.now(),
-      stageEndsAt: (legacy as any).stageEndsAt ? Number((legacy as any).stageEndsAt) : Date.now() + 30000,
+      stageStartedAt: (legacy as any).stageStartedAt ? Number((legacy as any).stageStartedAt) : now,
+      stageEndsAt: (legacy as any).stageEndsAt ? Number((legacy as any).stageEndsAt) : now + 30000,
+      hostLastSeenAt: legacy.hostLastSeenAt ? new Date(legacy.hostLastSeenAt).getTime() : now,
       slides: normalizedSlides.length > 0 ? normalizedSlides : [normalizeSlideForLive({}, 0)],
       players: {},
       answers: {},
       smsInterval: "EVERY_3",
-      updatedAt: Date.now(),
-      createdAt: Date.now(),
+      updatedAt: now,
+      createdAt: now,
       quizId: legacy.quizId,
       scheduledStartTime: (legacy as any).scheduledStartTime,
       isLocked: legacy.isLocked || false,
@@ -364,20 +598,46 @@ export function getLiveSession(idOrCode: string): LiveSessionRecord | null {
         score: p.totalScore || 0,
         streak: p.currentStreak || 0,
         rank: p.rank || 0,
-        lastSeenAt: Date.now(),
-        joinedAt: Date.now(),
+        lastSeenAt: now,
+        joinedAt: now,
       };
     }
 
     map.set(converted.id, converted);
     flushMapToDisk();
+    if (!options?.skipLivenessCheck) {
+      syncSessionHostLiveness(converted);
+    }
     return converted;
   }
 
   return null;
 }
 
-export function saveLiveSession(session: LiveSessionRecord): void {
+export function listLiveSessions(filters?: {
+  quizId?: string;
+  status?: LiveSessionStatus | "ALL";
+}): LiveSessionRecord[] {
+  const map = syncMapFromDisk();
+  const list = Array.from(map.values());
+
+  for (const s of list) {
+    syncSessionHostLiveness(s);
+  }
+
+  let filtered = list;
+  if (filters?.quizId) {
+    const targetQuizId = String(filters.quizId).trim();
+    filtered = filtered.filter((s) => String(s.quizId || "").trim() === targetQuizId);
+  }
+  if (filters?.status && filters.status !== "ALL") {
+    filtered = filtered.filter((s) => s.status === filters.status);
+  }
+
+  return filtered.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+}
+
+export function saveLiveSession(session: LiveSessionRecord, immediate = false): void {
   if (!session || !session.id) return;
   const map = syncMapFromDisk();
 
@@ -388,16 +648,25 @@ export function saveLiveSession(session: LiveSessionRecord): void {
   session.stageEndsAt = Number(session.stageEndsAt);
   if (!Number.isFinite(session.stageEndsAt)) session.stageEndsAt = Date.now() + 3000;
 
+  if (!Number.isFinite(Number(session.hostLastSeenAt)) || Number(session.hostLastSeenAt) <= 0) {
+    session.hostLastSeenAt = Date.now();
+  }
+
   session.updatedAt = Date.now();
   map.set(session.id, session);
-  flushMapToDisk();
-  scheduleMysqlLiveSync(session);
+  flushMapToDisk(immediate);
+  persistSessionToHybridStore(session);
+  if (!immediate) {
+    scheduleMysqlLiveSync(session);
+  }
 
   // Sync to institutionalDb for legacy consumers
   const legacyIdx = institutionalDb.liveSessions.findIndex((s) => s.id === session.id);
   const legacyStatus =
     session.status === "ENDED"
       ? "COMPLETED"
+      : session.status === "PAUSED"
+      ? "PAUSED"
       : session.stage === "READY_CHECK"
       ? "READY"
       : session.status === "WAITING"
@@ -408,6 +677,7 @@ export function saveLiveSession(session: LiveSessionRecord): void {
     const leg = institutionalDb.liveSessions[legacyIdx];
     leg.status = legacyStatus as any;
     leg.currentQuestionIndex = session.currentSlideIndex;
+    leg.hostLastSeenAt = new Date(session.hostLastSeenAt).toISOString();
     (leg as any).stage = session.stage;
     (leg as any).stageStartedAt = session.stageStartedAt;
     (leg as any).stageEndsAt = session.stageEndsAt;
@@ -459,6 +729,7 @@ export function createLiveSession(data: Partial<LiveSessionRecord>): LiveSession
     currentSlideIndex: Number(data.currentSlideIndex) || 0,
     stageStartedAt: Number(data.stageStartedAt) || now,
     stageEndsAt: Number(data.stageEndsAt) || now + 30000,
+    hostLastSeenAt: Number(data.hostLastSeenAt) || now,
     slides: normalizedSlides.length > 0 ? normalizedSlides : [normalizeSlideForLive({}, 0)],
     players: data.players || {},
     answers: data.answers || {},
@@ -472,8 +743,65 @@ export function createLiveSession(data: Partial<LiveSessionRecord>): LiveSession
     joinToken: data.joinToken || `join-${now}-${Math.random().toString(36).substr(2, 7)}`,
   };
 
-  saveLiveSession(sessionRecord);
+  saveLiveSession(sessionRecord, true);
   return sessionRecord;
+}
+
+/**
+ * Pause and permanently save the live session (preserving currentSlideIndex, players, scores, answers).
+ */
+export async function pauseLiveSession(idOrCode: string): Promise<LiveSessionRecord | null> {
+  const session = getLiveSession(idOrCode, { skipLivenessCheck: true });
+  if (!session) return null;
+  if (session.status === "ENDED") return session;
+
+  const now = Date.now();
+  session.status = "PAUSED";
+  session.pausedAt = now;
+  session.updatedAt = now;
+  if (session.stage === "COUNTDOWN_321") {
+    session.stage = "READY_CHECK";
+  }
+
+  saveLiveSession(session, true);
+  await syncLiveSessionToMysqlNow(session);
+  return session;
+}
+
+/**
+ * Resume a previously PAUSED session from its saved question (or Q[X+1] if RESULT_REVEAL had finished),
+ * reactivating status = "ACTIVE" and keeping every student's previous score & answers intact.
+ */
+export async function resumeLiveSession(
+  idOrCode: string,
+  slideIndexOverride?: number
+): Promise<LiveSessionRecord | null> {
+  const session = getLiveSession(idOrCode, { skipLivenessCheck: true });
+  if (!session) return null;
+
+  const now = Date.now();
+  const totalSlides = Math.max(1, session.slides?.length || 1);
+
+  let targetSlide = session.currentSlideIndex || 0;
+  if (typeof slideIndexOverride === "number" && Number.isFinite(slideIndexOverride)) {
+    targetSlide = slideIndexOverride;
+  } else if (session.stage === "RESULT_REVEAL" && targetSlide + 1 < totalSlides) {
+    // Finished previous question before pausing -> automatically continue on the next question!
+    targetSlide = targetSlide + 1;
+  }
+
+  session.currentSlideIndex = Math.min(Math.max(0, targetSlide), totalSlides - 1);
+  session.status = "ACTIVE";
+  session.stage = "READY_CHECK";
+  session.stageStartedAt = now;
+  session.stageEndsAt = now + 60_000;
+  session.hostLastSeenAt = now;
+  session.pausedAt = undefined;
+  session.updatedAt = now;
+
+  saveLiveSession(session, true);
+  await syncLiveSessionToMysqlNow(session);
+  return session;
 }
 
 // ============================================================================
@@ -484,7 +812,7 @@ export function addOrUpdatePlayer(
   sessionId: string,
   player: Partial<LivePlayerRecord> & { id: string; name: string }
 ): LivePlayerRecord | null {
-  const session = getLiveSession(sessionId);
+  const session = getLiveSession(sessionId, { skipLivenessCheck: true });
   if (!session) return null;
 
   const existing = session.players[player.id];
@@ -534,6 +862,8 @@ export function addOrUpdatePlayer(
     part.status = "JOINED";
     part.connectionStatus = "online";
     part.lastSeenAt = new Date(now).toISOString();
+    part.totalScore = updated.score;
+    part.currentStreak = updated.streak;
     (part as any).isReady = updated.isReady;
   }
 
@@ -541,7 +871,7 @@ export function addOrUpdatePlayer(
 }
 
 export function setPlayerReady(sessionId: string, playerId: string, isReady: boolean): boolean {
-  const session = getLiveSession(sessionId);
+  const session = getLiveSession(sessionId, { skipLivenessCheck: true });
   if (!session || !session.players[playerId]) return false;
 
   session.players[playerId].isReady = isReady;
@@ -561,7 +891,7 @@ export function recordPlayerAnswer(
   playerId: string,
   answer: LiveAnswerRecord
 ): boolean {
-  const session = getLiveSession(sessionId);
+  const session = getLiveSession(sessionId, { skipLivenessCheck: true });
   if (!session) return false;
 
   const slideKey = String(slideIndex);
@@ -594,6 +924,15 @@ export function recordPlayerAnswer(
 export function syncAndAutoAdvanceSession(session: LiveSessionRecord): boolean {
   if (!session) return false;
   const now = Date.now();
+
+  // Check host 25-second timeout before advancing any timers
+  if (syncSessionHostLiveness(session, now)) {
+    return true;
+  }
+
+  if (session.status === "PAUSED" || session.status === "ENDED") {
+    return false;
+  }
 
   // Enforce strictly finite numeric timestamps
   if (!Number.isFinite(session.stageStartedAt)) session.stageStartedAt = now;
@@ -671,14 +1010,15 @@ export function computeSafeRemainingSeconds(
 // ============================================================================
 
 export async function archiveLiveSessionToDb(sessionId: string): Promise<any> {
-  const session = getLiveSession(sessionId);
+  const session = getLiveSession(sessionId, { skipLivenessCheck: true });
   if (!session) return null;
 
   const now = Date.now();
   session.stage = "ENDED";
   session.status = "ENDED";
+  session.endedAt = now;
   session.updatedAt = now;
-  saveLiveSession(session);
+  saveLiveSession(session, true);
 
   const playersList = Object.values(session.players || {});
   const sortedPlayers = [...playersList].sort((a, b) => (b.score || 0) - (a.score || 0));
@@ -720,6 +1060,7 @@ export async function archiveLiveSessionToDb(sessionId: string): Promise<any> {
     subject: session.subject || "সাধারণ বিষয়",
     totalParticipants,
     totalQuestions,
+    questionsCompleted: Math.min(totalQuestions, (session.currentSlideIndex || 0) + 1),
     avgScore,
     completedAt: new Date(now).toISOString(),
     topPerformers: sortedPlayers.slice(0, 10).map((p) => ({
@@ -736,9 +1077,11 @@ export async function archiveLiveSessionToDb(sessionId: string): Promise<any> {
       name: p.name,
       roll: p.roll,
       score: p.score,
+      streak: p.streak || 0,
       avatar: p.avatar,
       rank: p.rank,
     })),
+    answers: session.answers || {},
   };
 
   try {
@@ -758,18 +1101,10 @@ export async function archiveLiveSessionToDb(sessionId: string): Promise<any> {
     }
     saveHybridStore(store);
 
+    await syncLiveSessionToMysqlNow(session);
+
     if (isPrismaAvailable() && prismaClient) {
       try {
-        if (prismaClient.liveSession) {
-          await prismaClient.liveSession.updateMany({
-            where: { pin: session.code },
-            data: {
-              status: "COMPLETED",
-              endedAt: new Date(),
-              participantsJson: JSON.stringify(sortedPlayers),
-            },
-          });
-        }
         if (prismaClient.quizResult) {
           const numericQuizId = parseInt(String(session.quizId || "").replace(/\D/g, ""), 10) || 1;
           await prismaClient.quizResult.create({

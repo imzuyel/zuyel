@@ -5,30 +5,47 @@ import {
   syncAndAutoAdvanceSession,
 } from "@/lib/liveSessionStore";
 import { ReconnectService, SecurityService } from "@/lib/reconnectService";
-import { sanitizeUserTextInput } from "@/components/common/SafeHtmlRenderer";
+import { sanitizeUserTextInput } from "@/lib/textSanitizer";
 
-// GET: Auto-validate room code & fetch session metadata for student join card
+const INVALID_CODE_MSG = "❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।";
+const SESSION_NOT_LIVE_MSG =
+  "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।";
+
+// GET: Strict room-code & live-status validation before student joins
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const code = searchParams.get("code") || searchParams.get("pin") || "";
+    const code = (searchParams.get("code") || searchParams.get("pin") || "").trim();
 
     if (!code) {
       return NextResponse.json(
-        { success: false, message: "রুম কোড (PIN) প্রদান করুন।" },
+        { success: false, error: "INVALID_CODE", message: "রুম কোড (PIN) প্রদান করুন।" },
         { status: 400 }
       );
     }
 
     const session = getLiveSession(code);
-    if (!session || session.status === "ENDED") {
+    if (!session) {
       return NextResponse.json(
-        { success: false, message: "রুম কোডটি সঠিক নয় অথবা কুইজটি সমাপ্ত হয়েছে।" },
+        { success: false, error: "INVALID_CODE", message: INVALID_CODE_MSG },
         { status: 404 }
       );
     }
 
+    // Evaluate stage/host liveness (25s timeout auto-pauses if host vanished)
     syncAndAutoAdvanceSession(session);
+
+    if (session.status === "PAUSED" || session.status === "ENDED") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "SESSION_NOT_LIVE",
+          status: session.status,
+          message: SESSION_NOT_LIVE_MSG,
+        },
+        { status: 403 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
@@ -42,6 +59,7 @@ export async function GET(req: NextRequest) {
         status: session.status,
         stage: session.stage,
         totalSlides: session.slides.length,
+        currentSlideIndex: session.currentSlideIndex,
         playerCount: Object.keys(session.players || {}).length,
       },
     });
@@ -53,7 +71,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Join or reconnect a player to the live session
+// POST: Strict Join or Seamless Cross-Day Reconnect
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -67,12 +85,12 @@ export async function POST(req: NextRequest) {
       playerId: clientPlayerId,
     } = body;
 
-    const userAgent = req.headers.get("user-agent") || "unknown";
     const ipAddress = req.headers.get("x-forwarded-for") || "127.0.0.1";
 
-    if (!sessionCode) {
+    const cleanCode = (sessionCode || "").toString().trim();
+    if (!cleanCode) {
       return NextResponse.json(
-        { success: false, message: "গেম পিন (Room PIN) আবশ্যক।" },
+        { success: false, error: "INVALID_CODE", message: INVALID_CODE_MSG },
         { status: 400 }
       );
     }
@@ -92,35 +110,69 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const cleanCode = (sessionCode || "").toString().trim();
+    // 1. Validate session existence + host liveness
     const session = getLiveSession(cleanCode);
 
-    if (!session || session.status === "ENDED") {
+    if (!session) {
       return NextResponse.json(
-        { success: false, message: "ভুল রুম কোড অথবা কুইজ সেশনটি সমাপ্ত হয়ে গেছে।" },
+        { success: false, error: "INVALID_CODE", message: INVALID_CODE_MSG },
         { status: 404 }
+      );
+    }
+
+    syncAndAutoAdvanceSession(session);
+
+    // 2. Strict Inactive / Paused / Ended Guard (Task 3)
+    if (session.status === "PAUSED" || session.status === "ENDED") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "SESSION_NOT_LIVE",
+          status: session.status,
+          message: SESSION_NOT_LIVE_MSG,
+        },
+        { status: 403 }
       );
     }
 
     if (session.isLocked) {
       return NextResponse.json(
-        { success: false, message: "এই সেশনটি হোস্ট কর্তৃক লক করা রয়েছে।" },
+        { success: false, error: "SESSION_LOCKED", message: "এই সেশনটি হোস্ট কর্তৃক লক করা রয়েছে।" },
         { status: 403 }
       );
     }
 
-    // Determine unique tab-scoped player ID
-    const effectivePlayerId =
-      clientPlayerId ||
-      (playerToken && playerToken.startsWith("p-") ? playerToken.replace("p-", "") : null) ||
-      `player_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    // 3. Determine playerId — match existing returning player (for cross-day resume score preservation!)
+    const sanitizedName = sanitizeUserTextInput(displayName, 50);
+    const rawRoll = roll || studentId || (displayName.match(/রোল[:\s]*(\d+)/i)?.[1] ?? "—");
+    const sanitizedRoll = sanitizeUserTextInput(String(rawRoll), 20);
 
-    const playerRoll = roll || studentId || (displayName.match(/রোল[:\s]*(\d+)/i)?.[1] ?? "—");
+    let effectivePlayerId =
+      (clientPlayerId && session.players[clientPlayerId] ? clientPlayerId : null) ||
+      (playerToken && playerToken.startsWith("p-") ? playerToken.replace("p-", "") : null);
+
+    if (!effectivePlayerId && sanitizedRoll && sanitizedRoll !== "—") {
+      const normalizedInputName = sanitizedName.trim().toLowerCase();
+      const normalizedInputRoll = sanitizedRoll.trim().toLowerCase();
+      const returningPlayer = Object.values(session.players || {}).find(
+        (p) =>
+          String(p.roll || "").trim().toLowerCase() === normalizedInputRoll &&
+          p.name.trim().toLowerCase() === normalizedInputName
+      );
+      if (returningPlayer) {
+        effectivePlayerId = returningPlayer.id;
+      }
+    }
+
+    if (!effectivePlayerId) {
+      effectivePlayerId =
+        clientPlayerId || `player_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
 
     const playerRecord = addOrUpdatePlayer(session.id, {
       id: effectivePlayerId,
-      name: sanitizeUserTextInput(displayName, 50),
-      roll: sanitizeUserTextInput(String(playerRoll), 20),
+      name: sanitizedName,
+      roll: sanitizedRoll,
       avatar: avatar || "🚀",
     });
 
@@ -128,18 +180,22 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      sessionId: session.id,
+      code: session.code,
+      playerId: effectivePlayerId,
+      player: playerRecord,
+      participant: playerRecord,
       message: "সফলভাবে লাইভ রুমে জয়েন হয়েছ!",
       session: {
         id: session.id,
         code: session.code,
+        sessionCode: session.code,
         title: session.title,
         status: session.status,
         stage: session.stage,
+        currentSlideIndex: session.currentSlideIndex,
         totalSlides: session.slides.length,
       },
-      player: playerRecord,
-      participant: playerRecord,
-      playerId: effectivePlayerId,
       reconnectToken,
     });
   } catch (error: any) {

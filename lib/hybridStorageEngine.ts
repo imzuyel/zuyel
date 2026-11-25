@@ -4,7 +4,7 @@
  * Features:
  * 1. Dual-Mode Detection:
  *    - LOCAL_MEMORY: In-memory store (globalThis.__pgtscHybridStore) backed by atomic disk snapshots
- *      in `.next/cache/pgtsc-hybrid-local-db.json` with <1ms latency.
+ *      in `os.tmpdir()/pgtsc-hybrid-local-db.json` with <1ms latency (outside Next.js workspace to prevent Fast Refresh reloads).
  *    - MYSQL_LIVE: Real-time queries through Prisma ORM when MySQL is active and reachable.
  *    - AUTO: Automatically uses MySQL if connected, falling back seamlessly to Local Memory.
  * 2. Auto-Seeding:
@@ -17,6 +17,7 @@
  */
 
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { prisma, isPrismaAvailable, markPrismaFailure } from "./prisma";
 import { institutionalDb } from "./database";
@@ -202,12 +203,13 @@ declare global {
   var __pgtscDiskWriteInFlight: boolean | undefined;
 }
 
-const CACHE_DIR = path.join(process.cwd(), ".next", "cache");
+const CACHE_DIR = os.tmpdir();
 const DISK_FILE = path.join(CACHE_DIR, "pgtsc-hybrid-local-db.json");
+const LEGACY_DISK_FILE = path.join(process.cwd(), ".next", "cache", "pgtsc-hybrid-local-db.json");
 const STAGING_STUDENTS_FILE = path.join(process.cwd(), "prisma", "students-staging.json");
 
 // ---------------------------------------------------------------------------
-// Disk Persistence Helpers (Async Debounced 3s Background Snapshots)
+// Disk Persistence Helpers (Async Debounced 3s Background Snapshots in os.tmpdir())
 // ---------------------------------------------------------------------------
 function ensureCacheDir() {
   try {
@@ -229,9 +231,15 @@ function writeSnapshotToDisk(store: HybridStoreCollections) {
     try {
       await fs.promises.mkdir(CACHE_DIR, { recursive: true });
       const latest = globalThis.__pgtscHybridStore || store;
+      const serialized = JSON.stringify(latest);
       const tempFile = `${DISK_FILE}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 6)}`;
-      await fs.promises.writeFile(tempFile, JSON.stringify(latest), "utf-8");
-      await fs.promises.rename(tempFile, DISK_FILE);
+      await fs.promises.writeFile(tempFile, serialized, "utf-8");
+      try {
+        await fs.promises.rename(tempFile, DISK_FILE);
+      } catch {
+        await fs.promises.writeFile(DISK_FILE, serialized, "utf-8");
+        await fs.promises.unlink(tempFile).catch(() => {});
+      }
       globalThis.__pgtscDiskSyncMtime = Date.now();
     } catch (err) {
       console.warn("[HybridStore] Failed async writing snapshot to disk:", err);
@@ -243,10 +251,15 @@ function writeSnapshotToDisk(store: HybridStoreCollections) {
 
 function readSnapshotFromDisk(): HybridStoreCollections | null {
   try {
-    if (fs.existsSync(DISK_FILE)) {
-      const stats = fs.statSync(DISK_FILE);
+    const sourceFile = fs.existsSync(DISK_FILE)
+      ? DISK_FILE
+      : fs.existsSync(LEGACY_DISK_FILE)
+      ? LEGACY_DISK_FILE
+      : null;
+    if (sourceFile) {
+      const stats = fs.statSync(sourceFile);
       globalThis.__pgtscDiskSyncMtime = stats.mtimeMs;
-      const raw = fs.readFileSync(DISK_FILE, "utf-8");
+      const raw = fs.readFileSync(sourceFile, "utf-8");
       return JSON.parse(raw);
     }
   } catch (err) {
@@ -963,8 +976,8 @@ export function getHybridStore(): HybridStoreCollections {
     return globalThis.__pgtscHybridStore;
   }
 
-  // 2. Cold-start only: Hydrate from disk snapshot if available
-  if (fs.existsSync(DISK_FILE)) {
+  // 2. Cold-start only: Hydrate from disk snapshot in os.tmpdir() (with legacy read-only fallback)
+  if (fs.existsSync(DISK_FILE) || fs.existsSync(LEGACY_DISK_FILE)) {
     try {
       const diskStore = readSnapshotFromDisk();
       if (diskStore && Array.isArray(diskStore.students) && diskStore.students.length > 0) {

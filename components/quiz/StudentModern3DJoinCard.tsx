@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   Sparkles,
   Zap,
@@ -14,6 +14,7 @@ import {
   School,
   Flame,
   Gamepad2,
+  PauseCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -50,7 +51,6 @@ export default function StudentModern3DJoinCard({
   initialCode = "",
   onJoined,
 }: StudentModern3DJoinCardProps) {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [code, setCode] = useState(initialCode);
@@ -65,6 +65,12 @@ export default function StudentModern3DJoinCard({
     className: string;
     trade: string;
     playerCount: number;
+    status: string;
+  } | null>(null);
+  const [sessionBlockedNotice, setSessionBlockedNotice] = useState<{
+    error: "INVALID_CODE" | "SESSION_NOT_LIVE";
+    status?: string;
+    message: string;
   } | null>(null);
 
   const [isJoining, setIsJoining] = useState(false);
@@ -78,51 +84,61 @@ export default function StudentModern3DJoinCard({
     }
   }, [searchParams, code]);
 
-  // Auto-verify 6-digit room code
+  // Auto-verify 6-digit room code with strict live status check
   useEffect(() => {
     const clean = code.trim().replace(/\D/g, "");
     if (clean.length === 6) {
       let isMounted = true;
       setIsVerifyingCode(true);
       setErrorMsg(null);
+      setSessionBlockedNotice(null);
 
-      fetch(`/api/live-quizzes/sessions?code=${clean}`)
-        .then((res) => res.json())
-        .then((data) => {
+      fetch(`/api/live-quizzes/sessions/join?code=${clean}`)
+        .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
+        .then(({ ok, data }) => {
           if (!isMounted) return;
-          if (data.success && data.session) {
-            setVerifiedSession({
-              id: data.session.id,
-              title: data.session.title || "লাইভ কুইজ",
-              className: data.session.className || "কারিগরি শাখা",
-              trade: data.session.trade || "জেনারেল",
-              playerCount: Object.keys(data.session.players || {}).length,
-            });
-          } else {
-            // Check state fallback
-            fetch(`/api/live-quizzes/sessions/${clean}/state`)
-              .then((r) => r.json())
-              .then((stateData) => {
-                if (!isMounted) return;
-                if (stateData.success && stateData.session) {
-                  setVerifiedSession({
-                    id: stateData.session.id,
-                    title: stateData.session.title || "লাইভ কুইজ",
-                    className: stateData.session.className || "কারিগরি শাখা",
-                    trade: stateData.session.trade || "জেনারেল",
-                    playerCount: stateData.totalPlayers || 0,
-                  });
-                } else {
-                  setVerifiedSession(null);
-                }
-              })
-              .catch(() => {
-                if (isMounted) setVerifiedSession(null);
+          if (ok && data?.success && data.session) {
+            const st = String(data.session.status || "WAITING").toUpperCase();
+            if (st === "PAUSED" || st === "ENDED") {
+              setVerifiedSession(null);
+              setSessionBlockedNotice({
+                error: "SESSION_NOT_LIVE",
+                status: st,
+                message: "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
               });
+            } else {
+              setSessionBlockedNotice(null);
+              setVerifiedSession({
+                id: data.session.id,
+                title: data.session.title || "লাইভ কুইজ",
+                className: data.session.className || "কারিগরি শাখা",
+                trade: data.session.trade || "জেনারেল",
+                playerCount: Number(data.session.playerCount) || 0,
+                status: st,
+              });
+            }
+          } else {
+            setVerifiedSession(null);
+            if (data?.error === "SESSION_NOT_LIVE") {
+              setSessionBlockedNotice({
+                error: "SESSION_NOT_LIVE",
+                status: data.status,
+                message:
+                  data.message ||
+                  "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
+              });
+            } else if (data?.error === "INVALID_CODE") {
+              setSessionBlockedNotice({
+                error: "INVALID_CODE",
+                message: data.message || "❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।",
+              });
+            }
           }
         })
         .catch(() => {
-          if (isMounted) setVerifiedSession(null);
+          if (isMounted) {
+            setVerifiedSession(null);
+          }
         })
         .finally(() => {
           if (isMounted) setIsVerifyingCode(false);
@@ -133,6 +149,7 @@ export default function StudentModern3DJoinCard({
       };
     } else {
       setVerifiedSession(null);
+      setSessionBlockedNotice(null);
     }
   }, [code]);
 
@@ -140,8 +157,8 @@ export default function StudentModern3DJoinCard({
     e.preventDefault();
     const cleanCode = code.trim().replace(/\D/g, "");
 
-    if (cleanCode.length < 4) {
-      setErrorMsg("অনুগ্রহ করে একটি সঠিক রুম কোড (PIN) লিখুন।");
+    if (cleanCode.length !== 6) {
+      setErrorMsg("❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।");
       return;
     }
     if (!name.trim()) {
@@ -151,10 +168,22 @@ export default function StudentModern3DJoinCard({
 
     setIsJoining(true);
     setErrorMsg(null);
+    setSessionBlockedNotice(null);
 
     try {
-      // Unique tab-scoped player ID
-      const localId = `player_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      // Unique tab-scoped player ID (reused seamlessly if stored locally for cross-day resume)
+      let storedId = "";
+      try {
+        const storedRaw =
+          sessionStorage.getItem(`pgtsc_live_player_${cleanCode}`) ||
+          localStorage.getItem(`pgtsc_live_player_${cleanCode}`);
+        if (storedRaw) {
+          storedId = JSON.parse(storedRaw)?.playerId || "";
+        }
+      } catch {}
+
+      const localId =
+        storedId || `player_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
       const res = await fetch("/api/live-quizzes/sessions/join", {
         method: "POST",
@@ -168,13 +197,53 @@ export default function StudentModern3DJoinCard({
         }),
       });
 
-      const data = await res.json();
-      if (!data.success) {
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || (!data.success && !(data.playerId && data.sessionId))) {
+        if (data?.error === "SESSION_NOT_LIVE") {
+          setVerifiedSession(null);
+          setSessionBlockedNotice({
+            error: "SESSION_NOT_LIVE",
+            status: data.status,
+            message:
+              data.message ||
+              "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
+          });
+          return;
+        }
+        if (data?.error === "INVALID_CODE") {
+          setVerifiedSession(null);
+          setSessionBlockedNotice({
+            error: "INVALID_CODE",
+            message: data.message || "❌ ভুল রুম কোড! সঠিক ৬ ডিজিটের কোড দাও।",
+          });
+          return;
+        }
         throw new Error(data.message || data.error || "লবিতে প্রবেশ করতে সমস্যা হয়েছে।");
       }
 
-      const assignedPlayerId = data.participant?.id || data.player?.id || localId;
-      const actualSessionId = data.session?.id || verifiedSession?.id || `sess_${cleanCode}`;
+      if (data?.session?.status === "PAUSED" || data?.session?.status === "ENDED") {
+        setVerifiedSession(null);
+        setSessionBlockedNotice({
+          error: "SESSION_NOT_LIVE",
+          status: data.session.status,
+          message: "⏸️ কুইজটি এখন লাইভ হচ্ছে না। শিক্ষক পুনরায় লাইভ শুরু করলে পরবর্তীতে যুক্ত হও।",
+        });
+        return;
+      }
+
+      const assignedPlayerId = data.playerId || data.player?.id || data.participant?.id || localId;
+      const actualSessionId = data.sessionId || data.session?.id || verifiedSession?.id || `sess_${cleanCode}`;
+      const resolvedCode = String(data.code || data.session?.code || cleanCode);
+
+      const canonicalPlayer = {
+        sessionId: actualSessionId,
+        code: resolvedCode,
+        playerId: assignedPlayerId,
+        name: name.trim(),
+        roll: roll.trim() || "—",
+        avatar: selectedAvatar,
+      };
 
       const identity: StudentAuthIdentity = {
         playerId: assignedPlayerId,
@@ -182,15 +251,17 @@ export default function StudentModern3DJoinCard({
         roll: roll.trim() || "—",
         avatar: selectedAvatar,
         sessionId: actualSessionId,
-        roomCode: cleanCode,
+        roomCode: resolvedCode,
       };
 
-      // Store in sessionStorage (per-tab) and localStorage fallback (keyed by roomCode)
+      // Save to BOTH sessionStorage & localStorage under canonical key `pgtsc_live_player_${code}`
+      const canonicalKey = `pgtsc_live_player_${resolvedCode}`;
       try {
+        sessionStorage.setItem(canonicalKey, JSON.stringify(canonicalPlayer));
+        localStorage.setItem(canonicalKey, JSON.stringify(canonicalPlayer));
         sessionStorage.setItem("live_quiz_player", JSON.stringify(identity));
-        sessionStorage.setItem(`live_quiz_player_${cleanCode}`, JSON.stringify(identity));
-        sessionStorage.setItem(`pgtsc_player_${cleanCode}`, JSON.stringify(identity));
-        localStorage.setItem(`live_quiz_player_${cleanCode}`, JSON.stringify(identity));
+        sessionStorage.setItem(`live_quiz_player_${resolvedCode}`, JSON.stringify(identity));
+        localStorage.setItem(`live_quiz_player_${resolvedCode}`, JSON.stringify(identity));
         localStorage.setItem("pgtsc_live_quiz_player", JSON.stringify(identity));
       } catch {
         // quota safety
@@ -204,7 +275,14 @@ export default function StudentModern3DJoinCard({
       if (onJoined) {
         onJoined(identity);
       } else {
-        router.push(`/quiz/live?sessionId=${actualSessionId}&code=${cleanCode}`);
+        const targetUrl =
+          "/quiz/live?code=" +
+          encodeURIComponent(resolvedCode) +
+          "&sessionId=" +
+          encodeURIComponent(actualSessionId) +
+          "&playerId=" +
+          encodeURIComponent(assignedPlayerId);
+        window.location.href = targetUrl;
       }
     } catch (err: any) {
       setErrorMsg(err.message || "কানেকশনে সমস্যা দেখা দিয়েছে। পুনরায় চেষ্টা করুন।");
@@ -234,6 +312,33 @@ export default function StudentModern3DJoinCard({
             রুম কোড ও তোমার তথ্য দিয়ে সরাসরি রিয়েল-টাইম কুইজে অংশগ্রহণ করো।
           </p>
         </div>
+
+        {/* Mentimeter-Style Session Not Live / Invalid Code Notice */}
+        {sessionBlockedNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`p-4 rounded-2xl border-2 text-xs sm:text-sm flex items-start gap-3 shadow-xl ${
+              sessionBlockedNotice.error === "SESSION_NOT_LIVE"
+                ? "bg-amber-500/15 border-amber-400/60 text-amber-200 shadow-[0_0_25px_rgba(245,158,11,0.2)]"
+                : "bg-rose-500/15 border-rose-500/50 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.2)]"
+            }`}
+          >
+            {sessionBlockedNotice.error === "SESSION_NOT_LIVE" ? (
+              <PauseCircle className="w-6 h-6 shrink-0 text-amber-400 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-6 h-6 shrink-0 text-rose-400 mt-0.5" />
+            )}
+            <div className="space-y-1">
+              <p className="font-black leading-snug">{sessionBlockedNotice.message}</p>
+              {sessionBlockedNotice.error === "SESSION_NOT_LIVE" && (
+                <p className="text-[11px] text-amber-300/80 font-medium">
+                  শিক্ষক স্লাইড লাইভ চালু করলে আবার ৬ ডিজিটের কোড দিয়ে প্রবেশ করতে পারবে।
+                </p>
+              )}
+            </div>
+          </motion.div>
+        )}
 
         {/* Error Alert */}
         {errorMsg && (
