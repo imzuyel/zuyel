@@ -32,7 +32,7 @@ export default function BtebAnnualLedgerPage() {
 
       {/* Main Content Area */}
       <div className="flex-1 min-h-dvh flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
-        <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} onNavigate={() => {}} />
+        <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} onNavigate={() => { }} />
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 sm:p-6 lg:p-8 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-800">
           {/* Breadcrumb & Quick Action Bar */}
@@ -59,7 +59,7 @@ export default function BtebAnnualLedgerPage() {
                 className="px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold flex items-center gap-1.5 hover:bg-indigo-100 transition-colors"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>প্রিন্ট হাব</span>
+                <span>প্রিন্ট </span>
               </Link>
             </div>
           </div>
